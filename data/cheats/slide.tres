@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="CheatDef" format=3]
+
+[ext_resource type="Script" path="res://src/server/cheats/cheat_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"slide"
+display_name = "Deslizar"
+kind = 1
+description = "Mueve una pieza propia varias casillas en línea."
+base_time = 1.0
+time_per_square = 0.35
+max_distance = 4
+evidence = 0.5
+offset_amount = 0.12

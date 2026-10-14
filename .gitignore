@@ -2,7 +2,6 @@
 .godot/
 /android/
 *.translation
-export_presets.cfg
 export_credentials.cfg
 .import/
 
@@ -14,3 +13,6 @@ export_credentials.cfg
 Thumbs.db
 .vscode/
 *.tmp
+
+# Exportaciones
+/build/

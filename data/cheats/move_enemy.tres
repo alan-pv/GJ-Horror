@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="CheatDef" format=3]
+
+[ext_resource type="Script" path="res://src/server/cheats/cheat_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"move_enemy"
+display_name = "Mover pieza enemiga"
+kind = 3
+description = "Deja una pieza enemiga donde puedas capturarla o sin defensa."
+base_time = 1.2
+time_per_square = 0.4
+max_distance = 3
+evidence = 0.5
+offset_amount = 0.12

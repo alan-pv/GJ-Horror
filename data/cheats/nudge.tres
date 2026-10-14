@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="CheatDef" format=3]
+
+[ext_resource type="Script" path="res://src/server/cheats/cheat_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"nudge"
+display_name = "Empujoncito"
+kind = 0
+description = "Avanza una pieza propia una casilla."
+base_time = 0.8
+time_per_square = 0.0
+max_distance = 1
+evidence = 0.2
+offset_amount = 0.18

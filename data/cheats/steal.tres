@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="CheatDef" format=3]
+
+[ext_resource type="Script" path="res://src/server/cheats/cheat_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"steal"
+display_name = "Robar"
+kind = 2
+description = "Quita una pieza enemiga y la esconde en la mano."
+base_time = 1.6
+time_per_square = 0.0
+max_distance = 0
+evidence = 0.9
+offset_amount = 0.0
