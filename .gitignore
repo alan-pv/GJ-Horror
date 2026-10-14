@@ -17,6 +17,7 @@ Thumbs.db
 # Exportaciones
 /build/
 /.maia2_cache/
+/.maia3_cache/
 
 # Worktrees de los subagentes
 /.claude/worktrees/
