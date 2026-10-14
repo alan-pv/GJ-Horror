@@ -17,6 +17,14 @@ var head: Node3D
 var hand_rig: HandRig
 var bot: BotController
 
+var _body: Node3D
+var _look_yaw: float = 0.0
+var _look_pitch: float = 0.0
+## Sacudida de eventos (toser, tirar una pieza): cabeza (cabeceo, rad) y torso (inclinación, rad).
+var _head_kick: float = 0.0
+var _body_kick: float = 0.0
+var _event_tween: Tween
+
 
 ## Posición global de los ojos (la usa el bot como cámara virtual).
 func eye_position() -> Vector3:
@@ -28,6 +36,7 @@ func build(sleeve: Color, skin: Color, arm_side: float = -1.0) -> void:
 	name = "Rival"
 	var parts := build_figure(skin, sleeve, true)
 	add_child(parts.root)
+	_body = parts.root
 	head = parts.head
 	hand_rig = HandRig.new()
 	hand_rig.name = "ManoRival"
@@ -43,8 +52,60 @@ func bind_bot(p_bot: BotController) -> void:
 
 
 func _on_looked(yaw: float, pitch: float) -> void:
+	_look_yaw = yaw
+	_look_pitch = pitch
+	_apply_head()
+
+
+func _apply_head() -> void:
 	# Misma convención que la cámara: sin girar mira hacia -Z.
-	head.global_basis = Basis.from_euler(Vector3(pitch, yaw, 0.0))
+	head.global_basis = Basis.from_euler(Vector3(_look_pitch + _head_kick, _look_yaw, 0.0))
+	_body.rotation.x = _body_kick
+
+
+func _process(_delta: float) -> void:
+	# Mientras dura una sacudida se reaplica cada fotograma (el bot solo avisa al girar).
+	if _event_tween != null and _event_tween.is_valid():
+		_apply_head()
+
+
+## Tos: dos espasmos, cabeza y torso se doblan hacia adelante.
+func play_cough() -> void:
+	_start_event_tween()
+	_event_tween.tween_method(_cough_step, 0.0, 1.0, 0.9)
+	_event_tween.tween_callback(_end_event)
+
+
+func _cough_step(t: float) -> void:
+	var spasm := maxf(sin(t * TAU * 2.0), 0.0) * (1.0 - t * 0.4)
+	_head_kick = -spasm * 0.45
+	_body_kick = -spasm * 0.13
+
+
+## Se le escapa una pieza: mira hacia abajo, hacia el suelo, un momento.
+func play_drop_piece() -> void:
+	_start_event_tween()
+	_event_tween.tween_method(_dip_step, 0.0, 1.0, 0.25).set_ease(Tween.EASE_OUT)
+	_event_tween.tween_interval(0.7)
+	_event_tween.tween_method(_dip_step, 1.0, 0.0, 0.5)
+	_event_tween.tween_callback(_end_event)
+
+
+func _dip_step(k: float) -> void:
+	_head_kick = -k * 0.8
+	_body_kick = -k * 0.18
+
+
+func _start_event_tween() -> void:
+	if _event_tween != null and _event_tween.is_valid():
+		_event_tween.kill()
+	_event_tween = create_tween()
+
+
+func _end_event() -> void:
+	_head_kick = 0.0
+	_body_kick = 0.0
+	_apply_head()
 
 
 ## Figura sentada reutilizable (también para las mesas decorativas).

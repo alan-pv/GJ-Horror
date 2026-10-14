@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="EventDef" format=3]
+
+[ext_resource type="Script" path="res://src/server/events/event_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"acusacion_ajena"
+display_name = "Acusación ajena"
+kind = 0
+origin_mode = 0
+duration = 3.5
+weight = 1.2
+cooldown = 35.0
+sound = &"shout"
+intensity = 0.7
+min_tension = 0.0

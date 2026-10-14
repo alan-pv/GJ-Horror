@@ -31,6 +31,7 @@ signal table_eliminated(table_index: int, position: Vector3)
 ## después de armar la partida y antes de que arranque. Para agregar un módulo
 ## basta con añadir su ruta aquí; no hace falta tocar el resto de este archivo.
 const MODULES: Array[String] = [
+	"res://src/client/events/event_module.gd",
 ]
 
 const CHEAT_IDS := ["nudge", "slide", "steal", "move_enemy"]

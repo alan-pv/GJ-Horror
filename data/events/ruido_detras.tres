@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="EventDef" format=3]
+
+[ext_resource type="Script" path="res://src/server/events/event_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"ruido_detras"
+display_name = "Ruido detrás"
+kind = 0
+origin_mode = 1
+duration = 2.0
+weight = 1.4
+cooldown = 25.0
+sound = &"slam"
+intensity = 1.0
+min_tension = 0.0

@@ -12,6 +12,8 @@ const TEST_FILES := [
 	"res://tests/test_bots.gd",
 	"res://tests/test_bot_cheats.gd",
 	"res://tests/test_maia_encoding.gd",
+	"res://tests/test_tension_director.gd",
+	"res://tests/test_rival_events.gd",
 ]
 
 

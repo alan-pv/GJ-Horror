@@ -16,6 +16,11 @@ signal cheat_finished(color: int, cheat_id: StringName, from: int, to: int)
 signal accusation_started(accuser: int)
 signal accusation_resolved(accuser: int, correct: bool, warnings: int)
 signal game_over(winner: int, reason: String)
+## Un jugador hizo toser o tiró una pieza a su personaje (lo anima el cliente).
+signal rival_event(color: int, event_id: StringName)
+
+## Eventos que un jugador puede provocar sobre sí mismo.
+const RIVAL_EVENT_IDS: Array[StringName] = [&"cough", &"drop_piece"]
 
 const REASON_CHECKMATE := "jaque mate"
 const REASON_TIMEOUT := "tiempo agotado"
@@ -51,6 +56,9 @@ var _position_counts: Dictionary = {}
 var _warned: Dictionary = {}
 var _cheats_by_id: Dictionary = {}
 var _rng := RandomNumberGenerator.new()
+## Cuándo (tiempo de servidor) puede repetir cada color cada evento: "color:id" -> segundos.
+var _rival_event_ready: Dictionary = {}
+var _arbiter_near: bool = false
 
 
 func _init(p_config: MatchConfig, white: PlayerSession, black: PlayerSession, start_fen: String = BoardState.START_FEN, seed_value: int = -1) -> void:
@@ -168,7 +176,7 @@ func start_cheat(color: int, cheat_id: StringName, from: int, to: int = -1) -> D
 	var entry := {
 		"color": color, "cheat_id": cheat_id, "from": from, "to": to,
 		"start": time, "end": time + v.duration, "ply": ply,
-		"seen": _looking[ChessPiece.opposite(color)], "status": "active",
+		"seen": _looking[ChessPiece.opposite(color)] or _arbiter_near, "status": "active",
 	}
 	cheat_log.append(entry)
 	_active_cheat[color] = entry
@@ -186,6 +194,38 @@ func abort_cheat(color: int) -> bool:
 	_active_cheat[color] = null
 	cheat_aborted.emit(color, entry.cheat_id)
 	return true
+
+
+## Un evento de distracción sobre el personaje de `color` (toser, tirar una pieza).
+## Tiene tiempo de espera por color y evento. Devuelve {ok, reason}.
+func trigger_rival_event(color: int, event_id: StringName) -> Dictionary:
+	var err := _can_act(color)
+	if err == "" and not RIVAL_EVENT_IDS.has(event_id):
+		err = "evento desconocido"
+	if err == "" and event_id == &"drop_piece" and is_hand_busy(color):
+		err = "tu mano está ocupada"
+	var key := "%d:%s" % [color, event_id]
+	if err == "" and time < _rival_event_ready.get(key, 0.0):
+		err = "todavía no puedes repetirlo"
+	if err != "":
+		return {"ok": false, "reason": err}
+	_rival_event_ready[key] = time + config.rival_event_cooldown
+	rival_event.emit(color, event_id)
+	return {"ok": true, "reason": ""}
+
+
+## Segundos que faltan para que `color` pueda repetir `event_id`.
+func rival_event_wait(color: int, event_id: StringName) -> float:
+	return maxf(_rival_event_ready.get("%d:%s" % [color, event_id], 0.0) - time, 0.0)
+
+
+## El árbitro está cerca de la mesa: mientras dure, toda trampa en curso se ve.
+func set_arbiter_near(near: bool) -> void:
+	_arbiter_near = near
+
+
+func is_arbiter_near() -> bool:
+	return _arbiter_near
 
 
 ## Llama al árbitro. Cubre solo lo ocurrido desde la última jugada del acusador.
@@ -226,7 +266,7 @@ func tick(delta: float) -> void:
 		var entry: Variant = _active_cheat[color]
 		if entry == null:
 			continue
-		if _looking[ChessPiece.opposite(color)]:
+		if _looking[ChessPiece.opposite(color)] or _arbiter_near:
 			entry.seen = true
 		if time >= entry.end and not accusation_pending():
 			_finish_cheat(color, entry)

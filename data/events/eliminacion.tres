@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="EventDef" format=3]
+
+[ext_resource type="Script" path="res://src/server/events/event_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = &"eliminacion"
+display_name = "Eliminación en otra mesa"
+kind = 0
+origin_mode = 0
+duration = 9.0
+weight = 0.6
+cooldown = 70.0
+sound = &"struggle"
+intensity = 0.8
+min_tension = 0.3

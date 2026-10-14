@@ -24,3 +24,5 @@ extends Resource
 @export var board_center: Vector3 = Vector3.ZERO
 ## Las trampas disponibles en esta partida.
 @export var cheats: Array[CheatDef] = []
+## Segundos de espera para repetir un evento propio (toser, tirar una pieza), por jugador.
+@export var rival_event_cooldown: float = 20.0
