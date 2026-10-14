@@ -59,6 +59,10 @@ var _rng := RandomNumberGenerator.new()
 ## Cuándo (tiempo de servidor) puede repetir cada color cada evento: "color:id" -> segundos.
 var _rival_event_ready: Dictionary = {}
 var _arbiter_near: bool = false
+## Jugadas legales de la posición actual (caché; se invalida al cambiar el tablero).
+var _legal_cache: Array[ChessMove] = []
+var _legal_key: String = ""
+var _legal_valid: bool = false
 
 
 func _init(p_config: MatchConfig, white: PlayerSession, black: PlayerSession, start_fen: String = BoardState.START_FEN, seed_value: int = -1) -> void:
@@ -96,6 +100,22 @@ func active_cheat(color: int) -> Variant:
 	return _active_cheat[color]
 
 
+## Jugadas legales de la posición actual. Se calculan una vez por posición y se
+## reutilizan en `submit_move`, el fin de partida y quienes las consulten.
+func legal_moves() -> Array[ChessMove]:
+	var key := board.position_key()
+	if not _legal_valid or key != _legal_key:
+		_legal_cache = ChessRules.legal_moves(board)
+		_legal_key = key
+		_legal_valid = true
+	return _legal_cache
+
+
+## Descarta la caché de jugadas legales (el tablero cambió).
+func _invalidate_legal() -> void:
+	_legal_valid = false
+
+
 func accusation_pending() -> bool:
 	return not _pending_accusation.is_empty()
 
@@ -128,7 +148,7 @@ func submit_move(color: int, uci: String) -> Dictionary:
 		err = "tu mano está ocupada"
 	if err != "":
 		return {"ok": false, "reason": err, "warning": ""}
-	var move := ChessRules.find_legal(board, ChessMove.from_uci(uci))
+	var move := _find_legal(ChessMove.from_uci(uci))
 	if move == null:
 		return {"ok": false, "reason": "jugada ilegal", "warning": ""}
 
@@ -143,6 +163,7 @@ func submit_move(color: int, uci: String) -> Dictionary:
 				return {"ok": false, "reason": "advertencia", "warning": text}
 
 	var info := ChessRules.apply_move(board, move)
+	_invalidate_legal()
 	ply += 1
 	_last_move_time[color] = time
 	move_log.append({"color": color, "uci": move.uci(), "time": time})
@@ -282,6 +303,7 @@ func _finish_cheat(color: int, entry: Dictionary) -> void:
 		cheat_aborted.emit(color, entry.cheat_id)
 		return
 	CheatRules.apply(board, color, def, entry.from, entry.to, _rng)
+	_invalidate_legal()
 	entry.status = "done"
 	_record_position()
 	cheat_finished.emit(color, entry.cheat_id, entry.from, entry.to)
@@ -316,11 +338,24 @@ func _record_position() -> void:
 	_position_counts[key] = _position_counts.get(key, 0) + 1
 
 
+## Busca la jugada legal equivalente a `m` (misma lógica que `ChessRules.find_legal`).
+func _find_legal(m: ChessMove) -> ChessMove:
+	if m == null:
+		return null
+	for lm in legal_moves():
+		if lm.from == m.from and lm.to == m.to:
+			if lm.promotion == m.promotion:
+				return lm
+			if m.promotion == 0 and lm.promotion == ChessPiece.QUEEN:
+				return lm
+	return null
+
+
 func _check_board_end() -> void:
 	if is_over():
 		return
 	var side := board.side_to_move
-	if ChessRules.legal_moves(board).is_empty():
+	if legal_moves().is_empty():
 		if ChessRules.in_check(board, side):
 			_end(ChessPiece.opposite(side), REASON_CHECKMATE)
 		else:
@@ -343,8 +378,11 @@ func _end(p_winner: int, reason: String) -> void:
 	winner = p_winner
 	end_reason = reason
 	clock.stop()
+	# Las trampas en curso se cancelan avisando, para que la vista suelte la mano.
 	for c in 2:
-		if _active_cheat[c] != null:
-			_active_cheat[c].status = "aborted"
+		var entry: Variant = _active_cheat[c]
+		if entry != null:
+			entry.status = "aborted"
 			_active_cheat[c] = null
+			cheat_aborted.emit(c, entry.cheat_id)
 	game_over.emit(winner, reason)

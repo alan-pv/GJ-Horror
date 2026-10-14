@@ -194,9 +194,13 @@ func set_hint(text: String) -> void:
 	_hint.text = text
 
 
+## Falso en el modo captura (`--screenshot`): el aviso del ratón no sale en las imágenes.
+var show_capture_prompt: bool = true
+
+
 func set_mouse_captured(captured: bool) -> void:
 	_crosshair.visible = captured
-	_capture_prompt.visible = not captured and not _result_panel.visible
+	_capture_prompt.visible = show_capture_prompt and not captured and not _result_panel.visible
 
 
 func show_result(won: bool, reason: String) -> void:

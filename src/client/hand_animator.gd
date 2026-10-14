@@ -114,10 +114,17 @@ func _pump() -> void:
 		return
 	_running = true
 	while not _queue.is_empty():
+		# Si la escena se recargó, se abandona la cola (los nodos ya no existen).
+		if not is_inside_tree() or not is_instance_valid(board):
+			_queue.clear()
+			break
 		var job: Dictionary = _queue.pop_front()
 		var is_cheat: bool = job.kind == "cheat"
 		if not is_cheat:
 			await board.acquire_motion()
+			if not is_inside_tree():
+				_queue.clear()
+				break
 		_current_job = job
 		_job_speed = _rng.randf_range(0.85, 1.25)
 		match job.kind:
@@ -128,11 +135,16 @@ func _pump() -> void:
 			"cheat":
 				await _run_cheat(job)
 		_current_job = {}
+		if not is_inside_tree() or not is_instance_valid(board):
+			_queue.clear()
+			break
 		if not is_cheat:
 			board.release_motion()
 		board.release_sync()
 		job_done.emit(job.kind)
 	_running = false
+	if not is_inside_tree():
+		return
 	_set_phase(&"idle")
 	idle.emit()
 
@@ -395,6 +407,8 @@ func _cheat_restore(node: Node3D, from_sq: int) -> bool:
 func _wait_resolved(job: Dictionary) -> bool:
 	var waited := 0.0
 	while not job.resolved and waited < CHEAT_RESOLVE_TIMEOUT:
+		if not is_inside_tree():
+			return false
 		await get_tree().process_frame
 		waited += get_process_delta_time()
 	return job.resolved and job.applied
@@ -413,6 +427,8 @@ func _cmove(job: Variant, dest: Vector3, duration: float, lift: float = 0.0, pit
 	var t := 0.0
 	var dur := maxf(duration, 0.03)
 	while t < 1.0:
+		if not is_inside_tree():
+			return false
 		if job != null and job.resolved and not job.applied:
 			return false
 		var k := smoothstep(0.0, 1.0, t)
@@ -464,6 +480,8 @@ func _move_to(dest: Vector3, duration: float, lift: float = 0.0, pitch: float = 
 	var delta := dest - start
 	var c1 := start + Vector3.UP * lift + delta * 0.25
 	var c2 := dest + Vector3.UP * lift - delta * 0.25
+	if not is_inside_tree():
+		return
 	var tw := create_tween()
 	tw.tween_method(func(t: float) -> void:
 		rig.set_grip(start.bezier_interpolate(c1, c2, dest, t), lerpf(p0, p1, t)), 0.0, 1.0, maxf(duration, 0.02)) \
@@ -472,6 +490,8 @@ func _move_to(dest: Vector3, duration: float, lift: float = 0.0, pitch: float = 
 
 
 func _pause(seconds: float) -> void:
+	if not is_inside_tree():
+		return
 	await get_tree().create_timer(seconds).timeout
 
 

@@ -28,7 +28,10 @@ extends Node3D
 ## Se emite cuando la partida ya está armada y arrancó. Los módulos se enganchan aquí.
 signal match_started(server: MatchServer)
 ## Se emite cuando se elimina a alguien en otra mesa del salón (lo usa el director de tensión).
-signal table_eliminated(table_index: int, position: Vector3)
+## `seat` = asiento del eliminado (0 = blancas, 1 = negras).
+signal table_eliminated(table_index: int, position: Vector3, seat: int)
+## Cambió cuántos jugadores siguen en el torneo (lo usa el director de tensión).
+signal players_remaining_changed(remaining: int, total: int)
 
 ## Módulos de gameplay. Cada uno es un script cuyo `new()` da un Node con
 ## `func install(root: GameRoot) -> void`. Se instancian como hijos de la raíz
@@ -123,6 +126,7 @@ func _ready() -> void:
 	hud = Hud.new()
 	hud.name = "Interfaz"
 	add_child(hud)
+	hud.show_capture_prompt = not _args.has("screenshot")
 	hud.set_mouse_captured(false)
 	player.mouse_capture_changed.connect(hud.set_mouse_captured)
 	_connect_signals()
@@ -302,6 +306,8 @@ func _on_game_over(winner: int, reason: String) -> void:
 		_ending = true
 	# Un instante para que se vea el último movimiento.
 	await get_tree().create_timer(1.2).timeout
+	if not is_inside_tree():
+		return
 	if eliminated:
 		_human_eliminated(reason)
 		return
@@ -375,12 +381,27 @@ func _on_background_finished(g: TournamentGame, bg: BackgroundMatch) -> void:
 	var loser_color := ChessPiece.opposite(bg.server.winner)
 	_log("Mesa %d: gana %s a %s (%s)" % [g.table, manager.player_name(g.winner_id()), manager.player_name(g.loser_id()), g.reason])
 	if g.table >= 0:
-		hall.remove_occupant(g.table, loser_color)
-		table_eliminated.emit(g.table, hall.table_position(g.table))
+		# Si hay quien escuche (módulo de eventos), los guardias se llevan al perdedor;
+		# si no, la figura se levanta y se va sola.
+		if table_eliminated.get_connections().is_empty():
+			hall.remove_occupant(g.table, loser_color)
+		else:
+			table_eliminated.emit(g.table, hall.table_position(g.table), loser_color)
 	_refresh_tournament_hud()
 
 
+## Jugadores que siguen vivos ahora: los de la ronda menos los perdedores ya conocidos.
+func players_left() -> int:
+	var n := manager.remaining_count()
+	if not manager.is_final:
+		for g in manager.games:
+			if g.done:
+				n -= 1
+	return maxi(n, 1)
+
+
 func _refresh_tournament_hud() -> void:
+	players_remaining_changed.emit(players_left(), manager.player_count)
 	if hud == null:
 		return
 	hud.set_tournament_info(manager.round_label(), manager.remaining_count())
@@ -405,6 +426,8 @@ func _human_eliminated(reason: String) -> void:
 	hud.show_screen("Eliminado", reason.substr(0, 1).to_upper() + reason.substr(1) + "\n\nEntrando a un torneo nuevo...",
 			"\nR para empezar ya", Color(0.75, 0.12, 0.1))
 	await get_tree().create_timer(5.0 if not _args.has("autoplay") else 3.0).timeout
+	if not is_inside_tree():
+		return
 	_restart_tournament()
 
 
@@ -423,6 +446,8 @@ func _finish_round_flow() -> void:
 	_ending = true
 	hud.set_status("")
 	await get_tree().create_timer(1.5).timeout
+	if not is_inside_tree():
+		return
 	var res := manager.finish_round()
 	_refresh_tournament_hud()
 	var human_id := manager.human_id
@@ -435,11 +460,15 @@ func _finish_round_flow() -> void:
 			hud.show_screen("¡Campeón!", "Ganaste el torneo de %d jugadores\n%s" % [manager.player_count, detail],
 					"\nR para jugar otro torneo", Color(0.95, 0.8, 0.3))
 			await get_tree().create_timer(12.0 if not _args.has("autoplay") else 4.0).timeout
+			if not is_inside_tree():
+				return
 		else:
 			_log("Perdió la final: campeón %s" % manager.player_name(manager.champion_id))
 			hud.show_screen("Eliminado", "%s ganó la final\n%s\n\nEntrando a un torneo nuevo..." % [manager.player_name(manager.champion_id), detail],
 					"\nR para empezar ya", Color(0.75, 0.12, 0.1))
 			await get_tree().create_timer(5.0 if not _args.has("autoplay") else 3.0).timeout
+			if not is_inside_tree():
+				return
 		_restart_tournament()
 		return
 	manager.start_round()
@@ -447,6 +476,8 @@ func _finish_round_flow() -> void:
 	_darken_for_next_round()
 	hud.show_screen(manager.round_label(), _next_round_text(res), "", Color(0.93, 0.85, 0.6))
 	await get_tree().create_timer(4.0).timeout
+	if not is_inside_tree():
+		return
 	_reload()
 
 
@@ -568,6 +599,8 @@ func _update_screenshot() -> void:
 
 func _take_screenshot() -> void:
 	await RenderingServer.frame_post_draw
+	if not is_inside_tree():
+		return
 	var path := str(_args["screenshot"])
 	var img := get_viewport().get_texture().get_image()
 	if img == null:

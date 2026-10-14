@@ -84,7 +84,7 @@ func _think_time(color: int) -> float:
 
 
 func _play(color: int) -> void:
-	var uci := choose_move(server.board, elo[color], _rng)
+	var uci := choose_move(server.board, elo[color], _rng, server.legal_moves())
 	_thinking_color = -1
 	if uci == "":
 		return
@@ -96,8 +96,8 @@ func _play(color: int) -> void:
 ## Política de 1 jugada: valor de la captura y de la coronación, castigo por dejar
 ## la pieza en una casilla atacada y un poco de centro y desarrollo; se muestrea
 ## con una temperatura que baja con el Elo. Devuelve la jugada en UCI.
-static func choose_move(board: BoardState, elo_value: int, rng: RandomNumberGenerator) -> String:
-	var moves := ChessRules.legal_moves(board)
+static func choose_move(board: BoardState, elo_value: int, rng: RandomNumberGenerator, legal: Array[ChessMove] = []) -> String:
+	var moves: Array[ChessMove] = legal if not legal.is_empty() else ChessRules.legal_moves(board)
 	if moves.is_empty():
 		return ""
 	var us := board.side_to_move

@@ -249,17 +249,31 @@ func _table_near(origin: Vector3) -> Node3D:
 	return best
 
 
-## Asiento ocupado de esa mesa: {pos (mundo), seated (figura sentada o null)}.
-func _seat_at(origin: Vector3) -> Dictionary:
+## Asiento de esa mesa: {pos (mundo), seated (figura sentada o null)}. `seat` = 0/1
+## elige ese asiento (p. ej. el del perdedor); -1 toma el primero visible.
+func _seat_at(origin: Vector3, seat: int = -1) -> Dictionary:
 	var table := _table_near(origin)
 	if table == null:
 		return {"pos": Vector3(origin.x, 0.0, origin.z), "seated": null}
+	var figs: Array[Node3D] = []
 	for c in table.get_children():
 		if c is Node3D and c.get_node_or_null("Cabeza") != null:
-			var p := (c as Node3D).global_position
-			# Se levanta un poco hacia atrás de la silla, no dentro de la mesa.
-			var away := Vector3(p.x - table.global_position.x, 0.0, p.z - table.global_position.z).normalized()
-			return {"pos": Vector3(p.x, 0.0, p.z) + away * 0.05, "seated": c}
+			figs.append(c)
+	var chosen: Node3D = null
+	if seat >= 0 and seat < figs.size():
+		chosen = figs[seat]
+	else:
+		for f in figs:
+			if f.visible:
+				chosen = f
+				break
+		if chosen == null and not figs.is_empty():
+			chosen = figs[0]
+	if chosen != null:
+		var p := chosen.global_position
+		# Se levanta un poco hacia atrás de la silla, no dentro de la mesa.
+		var away := Vector3(p.x - table.global_position.x, 0.0, p.z - table.global_position.z).normalized()
+		return {"pos": Vector3(p.x, 0.0, p.z) + away * 0.05, "seated": chosen}
 	return {"pos": table.to_global(Vector3(0.0, 0.0, 0.8)), "seated": null}
 
 
@@ -300,8 +314,10 @@ func _shake_arm(u: float, arm: Node3D, body: Node3D) -> void:
 # --- Eliminación en otra mesa -----------------------------------------------------------
 
 ## Dos guardias llegan, sujetan a la figura de la mesa y se la llevan a rastras hacia la oscuridad.
-func drag_away(origin: Vector3, duration: float) -> void:
-	var seat := _seat_at(origin)
+## Es la salida de los eliminados del torneo (la figura no camina sola). `seat_index`: asiento
+## del eliminado (-1 = el primero visible).
+func drag_away(origin: Vector3, duration: float, seat_index: int = -1) -> void:
+	var seat := _seat_at(origin, seat_index)
 	var seated: Node3D = seat.seated
 	var v_pos: Vector3 = seat.pos
 	if seated != null:

@@ -154,3 +154,33 @@ func test_cheat_resets_fifty_move_rule() -> void:
 	m.start_cheat(W, &"slide", _sq("a1"), _sq("a3"))
 	m.tick(2.0)
 	check_eq(m.board.halfmove_clock, 0, "50 jugadas reiniciadas")
+
+
+func test_game_end_emits_cheat_aborted() -> void:
+	var m := _make()
+	var aborted: Array = []
+	m.cheat_aborted.connect(func(color: int, id: StringName) -> void: aborted.append([color, id]))
+	m.start_cheat(B, &"steal", _sq("b1"))
+	m.clock.remaining[W] = 0.05
+	m.tick(0.1)
+	check(m.is_over(), "se acabó el tiempo")
+	check_eq(aborted.size(), 1, "una trampa cancelada con aviso")
+	check_eq(aborted[0], [B, &"steal"], "color e id de la trampa")
+	check(not m.is_hand_busy(B), "mano libre")
+	check_eq(m.cheat_log[0].status, "aborted", "queda abortada en el registro")
+
+
+func test_legal_cache_follows_board() -> void:
+	var m := _make()
+	var before := m.legal_moves()
+	check_eq(before.size(), 20, "20 jugadas iniciales")
+	check(m.legal_moves() == before, "misma lista reutilizada si nada cambió")
+	m.submit_move(W, "e2e4")
+	m.submit_move(B, "e7e5")
+	var n := m.legal_moves().size()
+	# Las blancas roban el peón e5: el peón e4 gana el avance y la caché debe notarlo.
+	check(m.start_cheat(W, &"steal", _sq("e5")).ok, "robo empieza")
+	m.tick(2.1)
+	check_eq(m.board.piece_at(_sq("e5")), ChessPiece.NONE, "peón robado")
+	check_eq(m.legal_moves().size(), ChessRules.legal_moves(m.board).size(), "caché igual al cálculo directo")
+	check(m.legal_moves().size() != n, "la lista cambió tras la trampa")

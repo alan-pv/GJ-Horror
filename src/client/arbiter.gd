@@ -58,17 +58,21 @@ func pass_behind(target: Vector3, seconds: float) -> void:
 	out = Vector3(0.0, 0.0, 1.0) if out.length() < 0.2 else out.normalized()
 	var side := Vector3(-out.z, 0.0, out.x)
 	var mid := Vector3(target.x, 0.0, target.z) + out * 0.9
-	var a := mid - side * 1.3
-	var b := mid + side * 1.3
+	# Entra por el lado de su sitio (-x) y sale por el contrario, sin cruzar la mesa.
+	var a := mid + side * 1.3
+	var b := mid - side * 1.3
 	await _walk_to(a, maxf(position.distance_to(a) / (WALK_SPEED * 1.3), 0.5), gen)
-	if gen != _gen:
+	if gen != _gen or not is_inside_tree():
 		return
 	await _walk_to(b, maxf(seconds, 0.5), gen)
-	if gen != _gen:
+	if gen != _gen or not is_inside_tree():
 		return
-	await _walk_to(HOME, position.distance_to(HOME) / (WALK_SPEED * 1.3), gen)
-	if gen != _gen:
-		return
+	# Vuelve rodeando la mesa por el lado de salida (sin atravesar al rival).
+	var around := [Vector3(b.x + 0.7, 0.0, 0.0), Vector3(b.x + 0.7, 0.0, -3.2), HOME]
+	for p: Vector3 in around:
+		await _walk_to(p, position.distance_to(p) / (WALK_SPEED * 1.3), gen)
+		if gen != _gen or not is_inside_tree():
+			return
 	_face_toward(Vector3.ZERO, true)
 	state = State.IDLE
 
@@ -83,6 +87,8 @@ func is_near(point: Vector3, radius: float) -> bool:
 # --- Acusaciones ---------------------------------------------------------------------
 
 func _on_accusation_started(_accuser: int) -> void:
+	if not is_inside_tree():
+		return
 	_gen += 1
 	var gen := _gen
 	state = State.WALKING
@@ -90,7 +96,7 @@ func _on_accusation_started(_accuser: int) -> void:
 	var delay := root.config.arbiter_delay
 	var seconds := maxf(delay - 0.4, 0.8)
 	await _walk_to(TABLE_SPOT, seconds, gen)
-	if gen != _gen:
+	if gen != _gen or not is_inside_tree():
 		return
 	state = State.AT_TABLE
 	await _look_at_board(gen)
@@ -112,14 +118,14 @@ func _on_accusation_resolved(accuser: int, correct: bool, warnings: int) -> void
 			warnings, root.config.false_accusations_to_eliminate, _color_name(accuser)]
 	root.hud.show_subtitle(text, 4.0)
 	await _gesture(correct, accused, gen)
-	if gen != _gen:
+	if gen != _gen or not is_inside_tree():
 		return
 	await get_tree().create_timer(1.2).timeout
-	if gen != _gen:
+	if gen != _gen or not is_inside_tree():
 		return
 	state = State.WALKING
 	await _walk_to(HOME, position.distance_to(HOME) / WALK_SPEED, gen)
-	if gen != _gen:
+	if gen != _gen or not is_inside_tree():
 		return
 	_face_toward(Vector3.ZERO, true)
 	state = State.IDLE
@@ -141,8 +147,10 @@ func _walk_to(dest: Vector3, seconds: float, gen: int) -> void:
 	var t := 0.0
 	var dur := maxf(seconds, 0.05)
 	while t < 1.0:
+		if not is_inside_tree():
+			return
 		await get_tree().process_frame
-		if gen != _gen:
+		if gen != _gen or not is_inside_tree():
 			return
 		var dt := get_process_delta_time()
 		t = minf(t + dt / dur, 1.0)
@@ -184,7 +192,7 @@ func _look_at_board(gen: int) -> void:
 	tw.tween_property(self, "rotation:y", atan2(-(0.0 - position.x), -(0.0 - position.z)), 0.4)
 	tw.tween_property(_head, "rotation:x", deg_to_rad(-32.0), 0.5)
 	await tw.finished
-	if gen != _gen:
+	if gen != _gen or not is_inside_tree():
 		return
 
 
@@ -210,7 +218,7 @@ func _gesture(correct: bool, accused: int, gen: int) -> void:
 	tw.tween_property(arm, "rotation:x", 0.0, 0.4)
 	tw.tween_property(_head, "rotation:y", 0.0, 0.1)
 	await tw.finished
-	if gen != _gen:
+	if gen != _gen or not is_inside_tree():
 		return
 
 

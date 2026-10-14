@@ -170,7 +170,7 @@ func select_square(sq: int) -> void:
 
 
 func _select(sq: int) -> void:
-	_legal = ChessRules.legal_moves(server.board)
+	_legal = server.legal_moves()
 	var targets: Array = []
 	var seen := {}
 	for m in _legal:

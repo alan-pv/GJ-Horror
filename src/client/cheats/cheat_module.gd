@@ -33,7 +33,6 @@ func install(p_root: GameRoot) -> void:
 	server.cheat_started.connect(_on_cheat_started)
 	server.cheat_finished.connect(_on_cheat_finished)
 	server.cheat_aborted.connect(_on_cheat_aborted)
-	server.game_over.connect(_on_game_over)
 	for a in root.animators:
 		a.job_done.connect(_on_job_done)
 
@@ -76,12 +75,6 @@ func _on_cheat_finished(color: int, _cheat_id: StringName, _from: int, to: int) 
 
 func _on_cheat_aborted(color: int, _cheat_id: StringName) -> void:
 	root.animators[color].resolve_cheat(false)
-
-
-func _on_game_over(_winner: int, _reason: String) -> void:
-	# El servidor cancela en silencio las trampas activas al terminar.
-	for a in root.animators:
-		a.resolve_cheat(false)
 
 
 ## Al terminar el gesto la vista se reconcilia con el tablero físico del servidor
