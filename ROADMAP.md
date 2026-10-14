@@ -52,6 +52,8 @@ Plan por hitos del prototipo (un humano contra bots, exportado a web) y del lanz
 
 ## Hito 5 — Web y pulido
 
+- [ ] Bots con **Maia-3 5M** (más humano: 55,4 % vs 52,0 %; 11 MB; Elo continuo), 100 % local: onnxruntime-web incluido en el build, sin CDN.
+- [ ] Licencia AGPL-3.0 (requisito de Maia-3) y **repo público el día que se publique el juego** en itch.io.
 - [ ] Exportación web real (plantillas de Godot 4.6) y prueba de Maia-2 en navegador.
 - [ ] Rendimiento: ayuda para principiantes por debajo de 0,1 s, IK lejano con menos frecuencia, medir mesas visibles en una máquina modesta.
 - [ ] Audio ambiente (relojes, piezas, murmullos que disminuyen al vaciarse el salón).
@@ -76,3 +78,4 @@ Plan por hitos del prototipo (un humano contra bots, exportado a web) y del lanz
 | ¿Más tiempo para blancas? | No (3:00 / 3:00) |
 | Jugadores por torneo | 16 (configurable con `--players`) |
 | Título del juego | Pendiente |
+| Motor de los bots | Maia-3 5M (AGPL); Maia-2 (MIT) queda en el historial como plan B |
