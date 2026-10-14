@@ -1,24 +1,30 @@
 class_name MaiaEncoding
 extends RefCounted
-## Port exacto a GDScript de la codificación de entrada de Maia-2
-## (maia2/utils.py: board_to_tensor, map_to_category, mirror_move).
+## Port exacto a GDScript de la codificación de entrada de Maia-3
+## (maia3/dataset.py: tokenize_board, get_historical_tokens; maia3/utils.py: mirror_move).
 ##
-## Maia-2 siempre ve el tablero DESDE EL PUNTO DE VISTA DE BLANCAS: si juegan
-## negras se espeja el tablero (filas invertidas y colores intercambiados), y
-## las jugadas del vocabulario también están espejadas. Este archivo hace la
-## ida (tablero -> tensor, jugadas legales -> índices) y la vuelta (índice -> UCI real).
+## Maia-3 ve cada posición DESDE EL PUNTO DE VISTA DE QUIEN MUEVE: si juegan
+## negras se espeja el tablero (filas invertidas y colores intercambiados), y las
+## jugadas del vocabulario también están espejadas. El modelo recibe además las
+## 8 últimas posiciones (la actual y 7 previas), cada una espejada según SU propio
+## turno. Este archivo hace la ida (posiciones -> tensor, jugadas legales -> índices)
+## y la vuelta (índice -> UCI real). El Elo entra como número continuo (0..5000).
 
-const MOVES_PATH := "res://data/maia2/moves.json"
-const CANALES := 18
-const ELO_MIN := 1100
-const ELO_MAX := 2000
-const ELO_PASO := 100
+const MOVES_PATH := "res://data/maia3/moves.json"
+## Posiciones que ve el modelo (la actual + 7 previas).
+const HISTORIA := 8
+## Canales por casilla y posición: 6 piezas de quien mueve + 6 del rival.
+const CANALES := 12
+## Valores por casilla: HISTORIA * CANALES.
+const DIM_TOKEN := HISTORIA * CANALES
+const ELO_MAX := 5000.0
 
 static var _moves: PackedStringArray = PackedStringArray()
 static var _move_index: Dictionary = {}
 
 
-## Vocabulario de Maia-2: índice -> UCI (perspectiva de blancas). Se carga una vez.
+## Vocabulario de Maia-3: índice -> UCI (perspectiva de blancas, 4352 jugadas
+## incluyendo coronaciones). Se carga una vez.
 static func moves() -> PackedStringArray:
 	if _moves.is_empty():
 		_cargar_vocabulario()
@@ -53,13 +59,9 @@ static func _cargar_vocabulario() -> void:
 	_moves = lista
 
 
-## Categoría de Elo (0..10): <1100 -> 0; 1100-1199 -> 1; ...; 1900-1999 -> 9; >=2000 -> 10.
-static func elo_category(elo: int) -> int:
-	if elo < ELO_MIN:
-		return 0
-	if elo >= ELO_MAX:
-		return (ELO_MAX - ELO_MIN) / ELO_PASO + 1
-	return 1 + (elo - ELO_MIN) / ELO_PASO
+## Elo acotado al rango que entiende el modelo. Es continuo: no hay categorías.
+static func elo_value(elo: float) -> float:
+	return clampf(elo, 0.0, ELO_MAX)
 
 
 ## Casilla espejada verticalmente (a1 <-> a8).
@@ -74,37 +76,30 @@ static func mirror_uci(uci: String) -> String:
 	return uci[0] + r1 + uci[2] + r2 + uci.substr(4)
 
 
-## Tensor [18][8][8] aplanado (canal, fila, columna). Canales: 0-5 peones, caballos,
-## alfiles, torres, dama y rey de quien mueve; 6-11 los del rival; 12 turno (siempre 1
-## tras espejar); 13-16 enroques (propio K, Q; rival K, Q); 17 captura al paso.
-static func encode_board(board: BoardState) -> PackedFloat32Array:
+## Tensor [64][96] aplanado (casilla, canal) con las últimas HISTORIA posiciones.
+## `boards` va de la más antigua a la actual (la última); si hay menos de 8 se rellena
+## por delante con la más antigua disponible, como hace maia3 al empezar la partida.
+## Índice = casilla * 96 + posición * 12 + canal, con la posición 0 la más antigua.
+## Canales: 0-5 peón, caballo, alfil, torre, dama y rey de quien mueve en ESA posición;
+## 6-11 los del rival. No hay canales de turno, enroque ni captura al paso.
+static func encode_history(boards: Array) -> PackedFloat32Array:
 	var t := PackedFloat32Array()
-	t.resize(CANALES * 64)
-	var negras := board.side_to_move == ChessPiece.BLACK
-	for sq in 64:
-		var p := board.squares[sq]
-		if p == 0:
-			continue
-		var color := ChessPiece.color_of(p)
-		var dst := mirror_square(sq) if negras else sq
-		# Tras espejar, "propio" (quien mueve) siempre ocupa los canales 0-5.
-		var propio := (color == board.side_to_move)
-		var canal := (ChessPiece.type_of(p) - 1) + (0 if propio else 6)
-		t[canal * 64 + dst] = 1.0
-	for i in 64:
-		t[12 * 64 + i] = 1.0
-	var k_propio := BoardState.CASTLE_BK if negras else BoardState.CASTLE_WK
-	var q_propio := BoardState.CASTLE_BQ if negras else BoardState.CASTLE_WQ
-	var k_rival := BoardState.CASTLE_WK if negras else BoardState.CASTLE_BK
-	var q_rival := BoardState.CASTLE_WQ if negras else BoardState.CASTLE_BQ
-	var derechos := [k_propio, q_propio, k_rival, q_rival]
-	for i in 4:
-		if board.castling & derechos[i] != 0:
-			for s in 64:
-				t[(13 + i) * 64 + s] = 1.0
-	if board.ep_square >= 0:
-		var ep := mirror_square(board.ep_square) if negras else board.ep_square
-		t[17 * 64 + ep] = 1.0
+	t.resize(64 * DIM_TOKEN)
+	var usadas := boards.slice(maxi(0, boards.size() - HISTORIA))
+	if usadas.is_empty():
+		return t
+	var relleno := HISTORIA - usadas.size()
+	for h in HISTORIA:
+		var b: BoardState = usadas[maxi(0, h - relleno)]
+		var negras := b.side_to_move == ChessPiece.BLACK
+		for sq in 64:
+			var p := b.squares[sq]
+			if p == 0:
+				continue
+			var dst := mirror_square(sq) if negras else sq
+			# Tras espejar, "propio" (quien mueve) siempre ocupa los canales 0-5.
+			var canal := (ChessPiece.type_of(p) - 1) + (0 if ChessPiece.color_of(p) == b.side_to_move else 6)
+			t[dst * DIM_TOKEN + h * CANALES + canal] = 1.0
 	return t
 
 

@@ -1,19 +1,24 @@
-/* Puente entre Godot (JavaScriptBridge) y Maia-2 corriendo en onnxruntime-web.
+/* Puente entre Godot (JavaScriptBridge) y Maia-3 5M corriendo en onnxruntime-web.
+ * Todo es local: onnxruntime-web 1.20.1 va incluido en ort/ (sin CDN) y el juego
+ * funciona sin conexion una vez cargado.
  *
  * API (window.MaiaBridge):
- *   init(modelUrl[, ortUrl]) -> Promise   carga onnxruntime-web (backend wasm, 1 hilo:
- *                                          no necesita COOP/COEP) y el modelo .onnx
+ *   init(modelUrl[, ortBase]) -> Promise  carga ort/ort.wasm.min.js (ruta relativa a la pagina,
+ *                                          o usa window.ort si ya existe) y el modelo .onnx.
+ *                                          Backend wasm de 1 hilo: no necesita COOP/COEP.
  *   isReady() -> bool
- *   request(id, jsonString, callback)     jsonString = {board:[18*64 floats], elo_self,
- *                                          elo_oppo (categorias 0..10), legal:[indices]}
- *                                          callback(string JSON) = {id, probs:[...]} con
- *                                          softmax SOLO sobre `legal` (mismo orden), o {id, error}
- * Maia-2 (c) CSSLab, licencia MIT: https://github.com/CSSLab/maia2
+ *   request(id, jsonString, callback)     jsonString = {tokens:[64*96 floats], elo_self, elo_oppo
+ *                                          (Elo continuo), legal:[indices del vocabulario]}
+ *                                          callback(string JSON) = {id, probs:[...]} con softmax
+ *                                          SOLO sobre `legal` (mismo orden), o {id, error}
+ * Maia-3 (c) CSSLab, licencia AGPL-3.0: https://github.com/CSSLab/maia3
+ * onnxruntime-web (c) Microsoft, licencia MIT (ver ort/LICENSE-onnxruntime.txt).
  */
 (function () {
 	"use strict";
-	var ORT_URL = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js";
-	var ORT_BASE = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
+	var ORT_DIR = "ort/";
+	var ORT_SCRIPT = "ort.wasm.min.js";
+	var TOKENS = 64 * 96;
 	var session = null;
 	var initPromise = null;
 	var cola = Promise.resolve();
@@ -28,14 +33,20 @@
 		});
 	}
 
-	function init(modelUrl, ortUrl) {
+	function init(modelUrl, ortBase) {
 		if (initPromise) { return initPromise; }
 		initPromise = Promise.resolve()
-			.then(function () { return window.ort ? null : cargarScript(ortUrl || ORT_URL); })
+			.then(function () {
+				if (window.ort) { return null; } // ya cargado (pruebas en Node)
+				// URL absoluta: el import() del .mjs de wasm no debe depender de la ruta del script.
+				var base = ortBase || new URL(ORT_DIR, document.baseURI).href;
+				return cargarScript(base + ORT_SCRIPT).then(function () {
+					window.ort.env.wasm.wasmPaths = base;
+				});
+			})
 			.then(function () {
 				window.ort.env.wasm.numThreads = 1;
 				window.ort.env.wasm.proxy = false;
-				if (!ortUrl) { window.ort.env.wasm.wasmPaths = ORT_BASE; }
 				return window.ort.InferenceSession.create(modelUrl, {
 					executionProviders: ["wasm"],
 					graphOptimizationLevel: "all"
@@ -55,10 +66,12 @@
 	function ejecutar(id, texto) {
 		var req = JSON.parse(texto);
 		var ort = window.ort;
+		if (!req.tokens || req.tokens.length !== TOKENS) { throw new Error("tokens invalidos"); }
+		if (!req.legal || req.legal.length === 0) { throw new Error("sin jugadas legales"); }
 		var feeds = {
-			board: new ort.Tensor("float32", Float32Array.from(req.board), [1, 18, 8, 8]),
-			elo_self: new ort.Tensor("int64", BigInt64Array.from([BigInt(req.elo_self)]), [1]),
-			elo_oppo: new ort.Tensor("int64", BigInt64Array.from([BigInt(req.elo_oppo)]), [1])
+			tokens: new ort.Tensor("float32", Float32Array.from(req.tokens), [1, 64, 96]),
+			elo_self: new ort.Tensor("float32", Float32Array.of(req.elo_self), [1]),
+			elo_oppo: new ort.Tensor("float32", Float32Array.of(req.elo_oppo), [1])
 		};
 		return session.run(feeds).then(function (out) {
 			var logits = out.logits.data;

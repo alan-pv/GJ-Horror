@@ -1,14 +1,17 @@
 class_name MaiaBrain
 extends ChessBrain
-## Cerebro basado en Maia-2 (blitz), una red que imita jugadas HUMANAS según el
-## Elo de quien juega y de su rival. En la exportación web corre en el navegador
-## con onnxruntime-web (web/maia_bridge.js) vía JavaScriptBridge. Fuera del
-## navegador (editor, escritorio) o si el puente no está listo / tarda
+## Cerebro basado en Maia-3 5M (Chessformer), una red que imita jugadas HUMANAS según
+## el Elo de quien juega y de su rival (continuo, sin categorías). En la exportación web
+## corre en el navegador con onnxruntime-web (web/maia_bridge.js) vía JavaScriptBridge.
+## Fuera del navegador (editor, escritorio) o si el puente no está listo / tarda
 ## demasiado, delega en FallbackBrain.
 ##
-## Maia-2: (c) CSSLab, Universidad de Toronto, licencia MIT.
+## Maia-3 también ve las 7 posiciones anteriores: MaiaHistory las reconstruye con las
+## posiciones físicas que este cerebro ha visto (ver ese archivo).
+##
+## Maia-3: (c) CSSLab, Universidad de Toronto, licencia AGPL-3.0.
 
-const MODEL_URL := "maia2_blitz.onnx"
+const MODEL_URL := "maia3_5m.onnx"
 ## Segundos máximos de espera a una respuesta del navegador antes de usar el respaldo.
 const TIMEOUT := 3.0
 
@@ -16,6 +19,7 @@ const TIMEOUT := 3.0
 signal _respuesta(id: int)
 
 var _fallback := FallbackBrain.new()
+var _historial := MaiaHistory.new()
 var _bridge: JavaScriptObject = null
 ## Hay que conservar la referencia: si se libera, el navegador pierde el callback.
 var _callback: JavaScriptObject = null
@@ -33,7 +37,7 @@ func _init(usar_web: bool = true) -> void:
 
 
 func brain_name() -> String:
-	return "Maia-2 (navegador)" if _web_listo() else "respaldo (GDScript)"
+	return "Maia-3 5M (navegador)" if _web_listo() else "respaldo (GDScript)"
 
 
 func is_ready() -> bool:
@@ -46,13 +50,14 @@ func get_policy(board: BoardState, elo_self: int, elo_oppo: int) -> Dictionary:
 	var mapa := MaiaEncoding.legal_index_map(board)
 	if mapa.is_empty():
 		return {}
+	var posiciones := _historial.observe(board)
 	var indices := mapa.keys()
 	var id := _next_id
 	_next_id += 1
 	var peticion := {
-		"board": Array(MaiaEncoding.encode_board(board)),
-		"elo_self": MaiaEncoding.elo_category(elo_self),
-		"elo_oppo": MaiaEncoding.elo_category(elo_oppo),
+		"tokens": Array(MaiaEncoding.encode_history(posiciones)),
+		"elo_self": MaiaEncoding.elo_value(elo_self),
+		"elo_oppo": MaiaEncoding.elo_value(elo_oppo),
 		"legal": indices,
 	}
 	_pendientes[id] = null

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Exporta el juego a Web (HTML5) en build/web/ y copia el puente de Maia-2 y el modelo.
+# Exporta el juego a Web (HTML5) en build/web/ y copia el puente de Maia-3, el modelo y onnxruntime-web (todo local, sin CDN).
 # Uso: GODOT=/ruta/a/godot tools/build_web.sh
 # Requiere las plantillas de exportacion de Godot 4.6 (preset "Web", sin hilos).
 set -euo pipefail
@@ -30,13 +30,17 @@ MSG
 	exit 2
 fi
 
-for f in web/maia_bridge.js web/maia2_blitz.onnx; do
-	[ -f "$RAIZ/$f" ] || { echo "Falta $f (ver tools/export_maia2_onnx.py)" >&2; exit 1; }
+for f in web/maia_bridge.js web/maia3_5m.onnx web/ort/ort.wasm.min.js web/ort/ort-wasm-simd-threaded.mjs web/ort/ort-wasm-simd-threaded.wasm; do
+	[ -f "$RAIZ/$f" ] || { echo "Falta $f (modelo: tools/export_maia3_onnx.py)" >&2; exit 1; }
 done
 
 mkdir -p "$SALIDA"
 "$GODOT" --headless --path "$RAIZ" --import
 "$GODOT" --headless --path "$RAIZ" --export-release "Web" "$SALIDA/index.html"
 
-cp "$RAIZ/web/maia_bridge.js" "$RAIZ/web/maia2_blitz.onnx" "$SALIDA/"
+cp "$RAIZ/web/maia_bridge.js" "$RAIZ/web/maia3_5m.onnx" "$SALIDA/"
+mkdir -p "$SALIDA/ort"
+cp "$RAIZ"/web/ort/* "$SALIDA/ort/"
+# Los .wasm/.mjs de ort deben servirse con su tipo MIME (python -m http.server y itch.io lo hacen).
+echo "Activos de Maia-3: $(du -ch "$SALIDA/maia3_5m.onnx" "$SALIDA/maia_bridge.js" "$SALIDA"/ort/* | tail -1 | cut -f1)"
 echo "Listo: $SALIDA  (sirve con: python3 -m http.server -d build/web 8000)"
