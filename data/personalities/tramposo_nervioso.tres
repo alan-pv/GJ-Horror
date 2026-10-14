@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="BotPersonality" format=3]
+
+[ext_resource type="Script" path="res://src/bots/bot_personality.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+display_name = "El tramposo nervioso"
+elo = 1100
+temperature = 1.1
+think_time_scale = 0.8
+turn_to_event_chance = 0.8
+idle_glances_per_minute = 6.0
+cheat_chance = 0.35
+detect_chance = 0.5
+false_accuse_chance = 0.01
