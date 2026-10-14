@@ -1,0 +1,16 @@
+# Godot 4
+.godot/
+/android/
+*.translation
+export_presets.cfg
+export_credentials.cfg
+.import/
+
+# Stockfish binarios locales
+/bin/stockfish*
+
+# SO / editores
+.DS_Store
+Thumbs.db
+.vscode/
+*.tmp
