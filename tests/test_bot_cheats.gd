@@ -60,28 +60,74 @@ func test_plan_never_proposes_invalid_fuzz() -> void:
 			check(CheatRules.validate(b, color, plan.def, plan.from, plan.to).ok, "plan inválido en iteración %d" % i)
 
 
-func test_prefers_valuable_steals() -> void:
-	# Blancas roban: hay dama, torres y peones negros por llevarse.
-	var b := BoardState.from_fen("r1bqkb1r/pppp1ppp/2n2n2/4p3/4P3/2N2N2/PPPP1PPP/R1BQKB1R w KQkq - 4 4")
+func test_kind_mix_and_rare_big_steals() -> void:
+	# Posiciones de partidas al azar: mezcla de tipos, robos minoritarios y casi nunca dama/torre.
 	var rng := _rng(9)
-	var gains := 0.0
-	var steals := 0
-	var queens := 0
-	var pawns := 0
-	for i in 300:
-		var plan := CheatPlanner.plan(b, W, _defs(), rng)
-		check(not plan.is_empty(), "debe haber plan")
-		if plan.def.kind == CheatDef.Kind.STEAL:
-			steals += 1
-			var t := ChessPiece.type_of(b.squares[plan.from])
-			if t == ChessPiece.QUEEN:
-				queens += 1
-			elif t == ChessPiece.PAWN:
-				pawns += 1
-		gains += plan.gain
-	check(steals > 100, "los robos dominan: %d" % steals)
-	check(queens > pawns, "más damas que peones robados: %d vs %d" % [queens, pawns])
-	check(gains / 300.0 > 100.0, "ganancia media alta: %f" % (gains / 300.0))
+	var counts := {}
+	var big := 0
+	var total := 0
+	for i in 40:
+		var b := BoardState.start_position()
+		for k in rng.randi_range(0, 30):
+			var moves := ChessRules.legal_moves(b)
+			if moves.is_empty():
+				break
+			ChessRules.apply_move(b, moves[rng.randi() % moves.size()])
+		for color in [W, B]:
+			var plan := CheatPlanner.plan(b, color, _defs(), rng, 0.4)
+			if plan.is_empty():
+				continue
+			total += 1
+			counts[plan.def.kind] = counts.get(plan.def.kind, 0) + 1
+			if plan.def.kind == CheatDef.Kind.STEAL:
+				var t := ChessPiece.type_of(b.squares[plan.from])
+				if t == ChessPiece.QUEEN or t == ChessPiece.ROOK:
+					big += 1
+	check(total > 40, "hay planes: %d" % total)
+	check(counts.size() >= 4, "salen los 4 tipos: %s" % str(counts))
+	check(counts.get(CheatDef.Kind.STEAL, 0) < total * 0.35, "robos <35%%: %s de %d" % [str(counts), total])
+	check(big < total * 0.08, "dama/torre muy raras: %d de %d" % [big, total])
+
+
+func test_score_diminishing_gain_and_risk() -> void:
+	var d_low := CheatPlanner.score(200.0, 1.0, 0.5) - CheatPlanner.score(100.0, 1.0, 0.5)
+	var d_high := CheatPlanner.score(1000.0, 1.0, 0.5) - CheatPlanner.score(900.0, 1.0, 0.5)
+	check(d_low > d_high * 3.0, "la ganancia rinde cada vez menos")
+	check(CheatPlanner.score(900.0, 1.0, 0.5) - CheatPlanner.score(100.0, 1.0, 0.5) < 3.0, "ganancia acotada")
+	check(CheatPlanner.score(300.0, 1.0, 0.9) < CheatPlanner.score(300.0, 1.0, 0.2), "más evidencia, menos puntaje")
+	check(CheatPlanner.score(300.0, 3.0, 0.5) < CheatPlanner.score(300.0, 1.0, 0.5), "más duración, menos puntaje")
+	check(CheatPlanner.score(300.0, 1.0, 0.9, 0.9) > CheatPlanner.score(300.0, 1.0, 0.9, 0.1), "el audaz castiga menos el riesgo")
+	check(CheatPlanner.score(300.0, 1.0, 0.9, 0.5, 9.0) < CheatPlanner.score(300.0, 1.0, 0.9, 0.5, 1.0), "robar piezas grandes se nota")
+
+
+func test_bold_steals_more_than_cautious() -> void:
+	var b := BoardState.from_fen("r1bqkb1r/pppp1ppp/2n2n2/4p3/4P3/2N2N2/PPPP1PPP/R1BQKB1R w KQkq - 4 4")
+	var rng := _rng(13)
+	var bold := 0
+	var careful := 0
+	for i in 200:
+		if CheatPlanner.plan(b, W, _defs(), rng, 1.0).def.kind == CheatDef.Kind.STEAL:
+			bold += 1
+		if CheatPlanner.plan(b, W, _defs(), rng, 0.0).def.kind == CheatDef.Kind.STEAL:
+			careful += 1
+	check(bold > careful, "audaz roba más: %d vs %d" % [bold, careful])
+
+
+func test_blind_accusation_drops_with_warnings() -> void:
+	var p0 := CheatPlanner.blind_accuse_probability(0.02, 0)
+	var p1 := CheatPlanner.blind_accuse_probability(0.02, 1)
+	var p2 := CheatPlanner.blind_accuse_probability(0.02, 2)
+	check_eq(p0, 0.02, "sin advertencias, la base")
+	check(p1 < p0 * 0.5, "con 1 advertencia baja mucho")
+	check_eq(p2, 0.0, "con 2 no acusa a ciegas")
+
+
+func test_event_cooldown_by_personality() -> void:
+	var rng := _rng(3)
+	for i in 50:
+		var bold := CheatPlanner.event_cooldown(1.0, rng)
+		var careful := CheatPlanner.event_cooldown(0.0, rng)
+		check(bold >= 45.0 and careful >= 90.0, "esperas mínimas: %f %f" % [bold, careful])
 
 
 func test_choice_is_stochastic() -> void:

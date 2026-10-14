@@ -27,7 +27,9 @@ extends Resource
 @export_range(0.0, 1.0) var cheat_chance: float = 0.1
 ## Probabilidad de notar una trampa que sí vio.
 @export_range(0.0, 1.0) var detect_chance: float = 0.7
-## Probabilidad por jugada rival de acusar sin razón.
+## Probabilidad por jugada rival de acusar sin razón (baja mucho con cada advertencia propia).
 @export_range(0.0, 0.2) var false_accuse_chance: float = 0.01
 ## Probabilidad de abortar una trampa en curso cuando el rival empieza a mirar.
 @export_range(0.0, 1.0) var abort_chance: float = 0.4
+## Apetito de riesgo: 0 = prudente (solo trampas sutiles), 1 = audaz (se atreve a robar).
+@export_range(0.0, 1.0) var risk_appetite: float = 0.4

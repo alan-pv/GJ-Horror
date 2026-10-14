@@ -60,6 +60,8 @@ func get_policy(board: BoardState, elo_self: int, elo_oppo: int) -> Dictionary:
 	var tree := Engine.get_main_loop() as SceneTree
 	tree.create_timer(TIMEOUT).timeout.connect(_respuesta.emit.bind(id))
 	while _pendientes.get(id) == null:
+		if not is_instance_valid(tree) or tree.root == null:
+			break
 		var quien: int = await _respuesta
 		if quien == id:
 			break

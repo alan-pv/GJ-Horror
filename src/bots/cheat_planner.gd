@@ -7,9 +7,16 @@ extends RefCounted
 
 ## Ganancia mínima (centipeones) para que valga la pena arriesgarse.
 const MIN_GAIN := 15.0
-## Cuánto pesa cada segundo de mano ocupada y cada punto de evidencia (en peones).
-const DURATION_PENALTY := 0.35
-const EVIDENCE_PENALTY := 1.2
+## Cuánto pesa cada segundo de mano ocupada y cada punto de evidencia (en unidades de puntaje).
+const DURATION_PENALTY := 0.5
+const EVIDENCE_PENALTY := 3.0
+## Rendimientos decrecientes: la ganancia (en peones) pasa por log(1 + g) * GAIN_SCALE.
+const GAIN_SCALE := 1.6
+## Castigo extra por lo llamativo de llevarse una pieza grande (por peón de valor).
+const NOTICEABLE_PENALTY := 0.45
+## El apetito de riesgo (0..1) multiplica el castigo de riesgo entre estos extremos.
+const RISK_MULT_CAUTIOUS := 1.6
+const RISK_MULT_BOLD := 0.6
 ## Temperatura del muestreo (mayor = más aleatorio).
 const PICK_TEMPERATURE := 1.2
 ## Máximo de candidatas válidas por tipo de trampa (acota el costo).
@@ -22,7 +29,7 @@ const _DIRS := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)
 
 
 ## Candidatas válidas: [{def, from, to, duration, gain, score}].
-static func candidates(board: BoardState, color: int, defs: Array, rng: RandomNumberGenerator) -> Array[Dictionary]:
+static func candidates(board: BoardState, color: int, defs: Array, rng: RandomNumberGenerator, risk_appetite: float = 0.5) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var base_eval := FallbackBrain.evaluate(board, color)
 	for def: CheatDef in defs:
@@ -36,9 +43,13 @@ static func candidates(board: BoardState, color: int, defs: Array, rng: RandomNu
 			var after := board.clone()
 			CheatRules.apply(after, color, def, pair.x, pair.y, rng)
 			var gain := FallbackBrain.evaluate(after, color) - base_eval
+			# Llevarse una pieza grande a la vista de todos se nota mucho más.
+			var noticeable := 0.0
+			if def.kind == CheatDef.Kind.STEAL:
+				noticeable = ChessPiece.value_of(board.squares[pair.x]) / 100.0
 			out.append({
 				"def": def, "from": pair.x, "to": pair.y, "duration": v.duration,
-				"gain": gain, "score": score(gain, v.duration, def.evidence),
+				"gain": gain, "score": score(gain, v.duration, def.evidence, risk_appetite, noticeable),
 			})
 			found += 1
 			if found >= MAX_PER_DEF:
@@ -46,38 +57,58 @@ static func candidates(board: BoardState, color: int, defs: Array, rng: RandomNu
 	return out
 
 
-## Puntaje en peones: ganancia menos riesgo.
-static func score(gain: float, duration: float, evidence: float) -> float:
-	return gain / 100.0 - DURATION_PENALTY * duration - EVIDENCE_PENALTY * evidence
+## Puntaje: ganancia con rendimientos decrecientes menos riesgo (evidencia,
+## duración y, al robar, el valor de la pieza). Un bot audaz castiga menos el riesgo.
+static func score(gain: float, duration: float, evidence: float, risk_appetite: float = 0.5, noticeable: float = 0.0) -> float:
+	var benefit := GAIN_SCALE * log(1.0 + maxf(gain, 0.0) / 100.0)
+	var risk := EVIDENCE_PENALTY * evidence + DURATION_PENALTY * duration + NOTICEABLE_PENALTY * noticeable
+	return benefit - risk * lerpf(RISK_MULT_CAUTIOUS, RISK_MULT_BOLD, clampf(risk_appetite, 0.0, 1.0))
 
 
-## Elige una candidata con ganancia suficiente, ponderada por puntaje. {} si no hay.
+## Elige una candidata con ganancia suficiente en dos pasos: primero el TIPO de
+## trampa (ponderado por su mejor puntaje, sin que pese cuántas variantes tenga)
+## y luego la candidata dentro del tipo. {} si no hay ninguna útil.
 static func pick(cands: Array, rng: RandomNumberGenerator, temperature: float = PICK_TEMPERATURE) -> Dictionary:
-	var useful: Array = []
+	var by_def: Dictionary = {}
 	var best := -INF
 	for c: Dictionary in cands:
-		if c.gain >= MIN_GAIN:
-			useful.append(c)
-			best = maxf(best, c.score)
-	if useful.is_empty():
+		if c.gain < MIN_GAIN:
+			continue
+		var id: StringName = c.def.id
+		if not by_def.has(id):
+			by_def[id] = {"best": -INF, "list": []}
+		by_def[id].list.append(c)
+		by_def[id].best = maxf(by_def[id].best, c.score)
+		best = maxf(best, c.score)
+	if by_def.is_empty():
 		return {}
+	var groups: Array = by_def.values()
+	var gw: Array[float] = []
+	for g: Dictionary in groups:
+		gw.append(exp((g.best - best) / maxf(temperature, 0.05)))
+	var group: Dictionary = groups[_weighted_index(gw, rng)]
+	var useful: Array = group.list
 	var weights: Array[float] = []
-	var total := 0.0
 	for c: Dictionary in useful:
-		var w := exp((c.score - best) / maxf(temperature, 0.05))
-		weights.append(w)
+		weights.append(exp((c.score - group.best) / maxf(temperature, 0.05)))
+	return useful[_weighted_index(weights, rng)]
+
+
+static func _weighted_index(weights: Array[float], rng: RandomNumberGenerator) -> int:
+	var total := 0.0
+	for w in weights:
 		total += w
 	var r := rng.randf() * total
-	for i in useful.size():
+	for i in weights.size():
 		r -= weights[i]
 		if r <= 0.0:
-			return useful[i]
-	return useful[useful.size() - 1]
+			return i
+	return weights.size() - 1
 
 
 ## Atajo: enumera y elige.
-static func plan(board: BoardState, color: int, defs: Array, rng: RandomNumberGenerator) -> Dictionary:
-	return pick(candidates(board, color, defs, rng), rng)
+static func plan(board: BoardState, color: int, defs: Array, rng: RandomNumberGenerator, risk_appetite: float = 0.5) -> Dictionary:
+	return pick(candidates(board, color, defs, rng, risk_appetite), rng)
 
 
 ## Probabilidad de intentar una trampa en esta evaluación (~cada 0.5 s).
@@ -150,3 +181,17 @@ static func _shuffle(arr: Array, rng: RandomNumberGenerator) -> void:
 		var tmp: Variant = arr[i]
 		arr[i] = arr[j]
 		arr[j] = tmp
+
+
+# --- Acusaciones y eventos ------------------------------------------------------
+
+## Probabilidad por jugada rival de acusar sin haber visto nada. Cada
+## advertencia propia la reduce con fuerza: con 2 casi nunca acusa a ciegas.
+static func blind_accuse_probability(base_chance: float, warnings: int) -> float:
+	return base_chance * pow(0.25, maxf(float(warnings), 0.0)) * (0.0 if warnings >= 2 else 1.0)
+
+
+## Espera (segundos) entre eventos de distracción según el apetito de riesgo.
+static func event_cooldown(risk_appetite: float, rng: RandomNumberGenerator) -> float:
+	var base := lerpf(100.0, 55.0, clampf(risk_appetite, 0.0, 1.0))
+	return base * rng.randf_range(1.0, 1.4)

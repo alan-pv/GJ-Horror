@@ -12,5 +12,6 @@ turn_to_event_chance = 0.3
 idle_glances_per_minute = 1.0
 cheat_chance = 0.08
 detect_chance = 0.9
-false_accuse_chance = 0.02
+false_accuse_chance = 0.012
 abort_chance = 0.5
+risk_appetite = 0.35

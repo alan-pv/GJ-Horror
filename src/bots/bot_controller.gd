@@ -21,8 +21,9 @@ const CHEAT_COOLDOWN_BETWEEN := Vector2(8.0, 16.0)
 ## Margen de tiempo antes de entregar la jugada para empezar una trampa propia.
 const CHEAT_MOVE_MARGIN := 0.4
 ## Segundos que el rival debe llevar mirando para que el bot use un evento.
-const EVENT_WATCH_SECONDS := 7.0
-const EVENT_COOLDOWN := 25.0
+const EVENT_WATCH_SECONDS := 10.0
+## Los eventos son raros: la primera vez no antes de este tiempo (el resto, según la personalidad).
+const EVENT_FIRST_OK := Vector2(40.0, 80.0)
 
 var server: MatchServer
 var color: int
@@ -70,6 +71,7 @@ func setup(p_server: MatchServer, p_color: int, p_personality: BotPersonality, p
 	_set_angles_from_dir(_target_dir)
 	_verbose = "--verbose" in OS.get_cmdline_user_args() or "--autoplay" in OS.get_cmdline_user_args()
 	_rng.randomize()
+	_next_event_ok = _rng.randf_range(EVENT_FIRST_OK.x, EVENT_FIRST_OK.y)
 	server.cheat_finished.connect(_on_cheat_finished)
 	server.move_made.connect(_on_move_made)
 	server.accusation_resolved.connect(_on_accusation_resolved)
@@ -103,7 +105,8 @@ func notice_event(world_pos: Vector3, intensity: float = 1.0) -> void:
 	if _rng.randf() > personality.turn_to_event_chance * intensity:
 		return
 	# Tarda un instante en reaccionar, como una persona.
-	await get_tree().create_timer(_rng.randf_range(0.15, 0.45)).timeout
+	if not await _wait(_rng.randf_range(0.15, 0.45)):
+		return
 	_look_at_point(world_pos, _rng.randf_range(personality.look_away_seconds.x, personality.look_away_seconds.y))
 
 
@@ -157,11 +160,18 @@ func _play_turn() -> void:
 	var t0 := Time.get_ticks_msec()
 	var policy: Dictionary = await brain.get_policy(board, personality.elo, opponent_elo)
 	var spent := (Time.get_ticks_msec() - t0) / 1000.0
+	if not is_inside_tree():
+		return
 	if think > spent:
-		await get_tree().create_timer(think - spent).timeout
+		if not await _wait(think - spent):
+			return
 	# Una sola mano: si está en plena trampa, espera a que termine en vez de perder la jugada.
 	while server.ply == ply_at_start and not server.is_over() and (server.is_hand_busy(color) or server.accusation_pending()):
+		if not is_inside_tree():
+			return
 		await get_tree().process_frame
+		if not is_inside_tree():
+			return
 	_think_deadline = INF
 	# El tablero pudo cambiar (trampa, acusación, fin) mientras pensaba.
 	if server.ply == ply_at_start and _my_turn() and server.board.position_key() == board.position_key():
@@ -169,6 +179,15 @@ func _play_turn() -> void:
 		if uci != "":
 			server.submit_move(color, uci)
 	_thinking = false
+
+
+## Espera `seconds` de forma segura ante recargas de escena. Devuelve false si el
+## nodo ya no está en el árbol (el llamador debe abandonar la corrutina).
+func _wait(seconds: float) -> bool:
+	if not is_inside_tree():
+		return false
+	await get_tree().create_timer(seconds).timeout
+	return is_inside_tree() and server != null
 
 
 ## Tiempo de pensar: pausas variables según el reloj y la complejidad, no
@@ -236,7 +255,7 @@ func _consider_cheating(opp_looking: bool) -> void:
 		return
 	if _rng.randf() >= p:
 		return
-	var plan := CheatPlanner.plan(server.board, color, server.config.cheats, _rng)
+	var plan := CheatPlanner.plan(server.board, color, server.config.cheats, _rng, personality.risk_appetite)
 	if plan.is_empty():
 		return
 	# En mi turno, no empezar algo que ocupe la mano cuando ya debo entregar la jugada.
@@ -258,9 +277,12 @@ func _maybe_distract_rival() -> void:
 		return
 	# Solo quien tiene ganas de hacer trampa (la probabilidad base sin la condición de mirada).
 	var want := CheatPlanner.attempt_probability(server.board, color, personality, server.clock.remaining[color], false)
-	if _rng.randf() >= minf(want * 6.0, 0.6):
+	if _rng.randf() >= minf(want * 4.0, 0.4):
 		return
-	_next_event_ok = server.time + EVENT_COOLDOWN
+	# Con propósito: solo si tendría una trampa que valga la pena en cuanto el rival aparte la vista.
+	if CheatPlanner.plan(server.board, color, server.config.cheats, _rng, personality.risk_appetite).is_empty():
+		return
+	_next_event_ok = server.time + CheatPlanner.event_cooldown(personality.risk_appetite, _rng)
 	var event_id: StringName = &"cough" if _rng.randf() < 0.6 else &"drop_piece"
 	var r: Variant = server.call("trigger_rival_event", color, event_id)
 	_log("evento %s: %s" % [event_id, str(r)])
@@ -287,9 +309,10 @@ func _watch_for_cheats() -> void:
 	_judged[key] = true
 	var def := server.get_cheat(entry.cheat_id)
 	if _rng.randf() < personality.detect_chance * def.evidence:
-		await get_tree().create_timer(_rng.randf_range(0.3, 1.0)).timeout
-		# Si el rival abortó, ya no hay trampa que probar.
-		if not server.is_over() and not server.is_hand_busy(color) and entry.status != "aborted":
+		if not await _wait(_rng.randf_range(0.3, 1.0)):
+			return
+		# Solo acusa si de verdad la vio y el rival no abortó (ya no habría qué probar).
+		if not server.is_over() and not server.is_hand_busy(color) and entry.status != "aborted" and entry.seen:
 			_log("acusa (trampa en curso %s)" % entry.cheat_id)
 			server.accuse(color)
 
@@ -308,7 +331,8 @@ func _on_cheat_finished(cheater: int, _cheat_id: StringName, _from: int, _to: in
 	var def := server.get_cheat(entry.cheat_id)
 	var p := personality.detect_chance * lerpf(0.5, 1.0, def.evidence)
 	if _rng.randf() < p:
-		await get_tree().create_timer(_rng.randf_range(0.5, 1.5)).timeout
+		if not await _wait(_rng.randf_range(0.5, 1.5)):
+			return
 		if not server.is_over() and not server.is_hand_busy(color):
 			_log("acusa (vio la trampa %s)" % entry.cheat_id)
 			server.accuse(color)
@@ -317,8 +341,11 @@ func _on_cheat_finished(cheater: int, _cheat_id: StringName, _from: int, _to: in
 func _on_move_made(mover: int, _uci: String, _info: Dictionary) -> void:
 	if mover == color or server.is_over():
 		return
-	if _rng.randf() < personality.false_accuse_chance:
-		await get_tree().create_timer(_rng.randf_range(0.8, 2.0)).timeout
+	# Cada advertencia propia lo vuelve más cauto: con 2 casi nunca acusa a ciegas.
+	var warnings: int = server.sessions[color].warnings
+	if _rng.randf() < CheatPlanner.blind_accuse_probability(personality.false_accuse_chance, warnings):
+		if not await _wait(_rng.randf_range(0.8, 2.0)):
+			return
 		if not server.is_over() and not server.is_hand_busy(color):
 			_log("acusa sin motivo")
 			server.accuse(color)
