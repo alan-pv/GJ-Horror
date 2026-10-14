@@ -21,6 +21,18 @@ extends Node3D
 ##   --no-shadows         desactiva las sombras de la lámpara
 ##   --verbose            imprime el desarrollo de la partida
 
+## Se emite cuando la partida ya está armada y arrancó. Los módulos se enganchan aquí.
+signal match_started(server: MatchServer)
+## Se emite cuando se elimina a alguien en otra mesa del salón (lo usa el director de tensión).
+signal table_eliminated(table_index: int, position: Vector3)
+
+## Módulos de gameplay. Cada uno es un script cuyo `new()` da un Node con
+## `func install(root: GameRoot) -> void`. Se instancian como hijos de la raíz
+## después de armar la partida y antes de que arranque. Para agregar un módulo
+## basta con añadir su ruta aquí; no hace falta tocar el resto de este archivo.
+const MODULES: Array[String] = [
+]
+
 const CHEAT_IDS := ["nudge", "slide", "steal", "move_enemy"]
 const PERSONALITY_IDS := ["honesto", "paranoico", "tramposo_nervioso"]
 const RIVAL_SEAT := Vector3(0.0, 0.0, -0.55)
@@ -95,13 +107,30 @@ func _ready() -> void:
 	hud.set_mouse_captured(false)
 	player.mouse_capture_changed.connect(hud.set_mouse_captured)
 	_connect_signals()
+	_install_modules()
 
 	board_view.sync(server.board)
 	server.start()
+	match_started.emit(server)
 	clock_view.set_running(server.clock.running)
 	if _args.has("autoplay"):
 		hud.set_hint("Modo autoplay")
 	_log("Partida: humano = %s, rival = %s (%s)" % [_color_name(human_color), _color_name(rival_color), rival_bot.brain.brain_name()])
+
+
+func _install_modules() -> void:
+	for path in MODULES:
+		if not ResourceLoader.exists(path):
+			push_warning("Módulo no encontrado: " + path)
+			continue
+		var module: Node = load(path).new()
+		add_child(module)
+		module.install(self)
+
+
+## Argumentos de línea de comandos ya interpretados (los módulos pueden leer los suyos).
+func get_args() -> Dictionary:
+	return _args
 
 
 func _parse_args() -> void:

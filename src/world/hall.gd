@@ -48,6 +48,15 @@ func build() -> void:
 		_build_decor_table(Vector3(d[0].x, 0.0, d[0].y), deg_to_rad(d[1]), d[2], i)
 
 
+## Posiciones (centro de la mesa, a ras de suelo) de las mesas decorativas,
+## en el mismo orden que DECOR_TABLES. Índice = número de mesa.
+static func table_positions() -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	for d in DECOR_TABLES:
+		out.append(Vector3(d[0].x, 0.0, d[0].y))
+	return out
+
+
 func _mat(c: Color, rough: float) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = c
