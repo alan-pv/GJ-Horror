@@ -11,37 +11,44 @@ Plan por hitos del prototipo (un humano contra bots, exportado a web) y del lanz
 - [x] Bots: política muestreada, Maia-2 Blitz en el navegador y respaldo en GDScript; personalidades.
 - [x] Cliente 3D: salón, lámpara, tablero, mano con TwoBoneIK3D, cámara en primera persona, reloj, HUD.
 
-## Hito 2 — Trampas y vigilancia (en curso)
-
-Frentes en paralelo:
+## Hito 2 — Trampas y vigilancia ✅
 
 - **2A. Trampas del jugador y árbitro** (`src/client/cheats/`, `hand_animator.gd`, `src/client/arbiter.gd`)
-  - [ ] Elegir trampa (teclas 1-4), pieza y destino; abortar a mitad.
-  - [ ] Animación propia y reconocible de cada trampa, para ambas manos y con la duración que dicta el servidor.
-  - [ ] Pieza robada escondida en la mano/regazo; evidencia visible (pieza descentrada, pieza que falta).
-  - [ ] Árbitro que camina a la mesa al acusar y anuncia el veredicto; `pass_behind()` para el evento disuasivo.
+  - [x] Elegir trampa (teclas 1-4), pieza y destino; abortar a mitad.
+  - [x] Animación propia y reconocible de cada trampa, para ambas manos y con la duración que dicta el servidor.
+  - [x] Pieza robada escondida en la mano/regazo; evidencia visible (pieza descentrada, pieza que falta).
+  - [x] Árbitro que camina a la mesa al acusar y anuncia el veredicto; `pass_behind()` para el evento disuasivo.
 - **2B. Bots tramposos** (`src/bots/`)
-  - [ ] Planificador de trampas: cuándo (el rival no mira, más si va perdiendo) y cuál (la que más ayuda sin dejar posiciones imposibles).
-  - [ ] Abortar si el rival voltea; provocar distracciones del rival antes de una trampa.
+  - [x] Planificador de trampas: cuándo (el rival no mira, más si va perdiendo) y cuál (la que más ayuda sin dejar posiciones imposibles).
+  - [x] Abortar si el rival voltea; provocar distracciones del rival antes de una trampa.
 
-## Hito 3 — Eventos y director de tensión (en curso)
+## Hito 3 — Eventos y director de tensión ✅
 
 - **3. Director y eventos** (`src/server/tension_director.gd`, `src/client/events/`, `data/events/`)
-  - [ ] Director de tensión en el servidor: elige evento, origen y momento; más frecuencia con menos jugadores.
-  - [ ] Globales: apagón, ruido detrás, acusación ajena, eliminación en otra mesa.
-  - [ ] Del rival: tirar una pieza y toser (con tiempo de espera, sospechosos en sí mismos).
-  - [ ] Disuasivo: el árbitro pasa detrás (mientras está cerca, las trampas se ven).
-  - [ ] Sonido espacial con `AudioStreamPlayer3D` (sonidos sintetizados mientras no haya assets).
-  - [ ] Los bots voltean ante los eventos.
+  - [x] Director de tensión en el servidor: elige evento, origen y momento; más frecuencia con menos jugadores.
+  - [x] Globales: apagón, ruido detrás, acusación ajena, eliminación en otra mesa.
+  - [x] Del rival: tirar una pieza y toser (con tiempo de espera, sospechosos en sí mismos).
+  - [x] Disuasivo: el árbitro pasa detrás (mientras está cerca, las trampas se ven).
+  - [x] Sonido espacial con `AudioStreamPlayer3D` (sonidos sintetizados mientras no haya assets).
+  - [x] Los bots voltean ante los eventos.
 
-## Hito 4 — Torneo (en curso)
+## Hito 4 — Torneo ✅
 
 - **4. Torneo y salón vivo** (`src/server/tournament/`, `hall.gd`, flujo de `game_root.gd`)
-  - [ ] Gestor de torneo: rondas sincronizadas, emparejamiento aleatorio, impares (pasa sin jugar), final a dos partidas con colores invertidos y desempate por tiempo sobrante.
-  - [ ] Partidas de fondo bot contra bot simuladas de forma barata en las otras mesas.
-  - [ ] Al eliminar a alguien su lámpara se apaga y su figura sale del salón; el salón se oscurece.
-  - [ ] Advertencias que se arrastran entre partidas; cola automática a un torneo nuevo al ser eliminado.
-  - [ ] Pantallas entre rondas (quedan N jugadores) y de campeón.
+  - [x] Gestor de torneo: rondas sincronizadas, emparejamiento aleatorio, impares (pasa sin jugar), final a dos partidas con colores invertidos y desempate por tiempo sobrante.
+  - [x] Partidas de fondo bot contra bot simuladas de forma barata en las otras mesas.
+  - [x] Al eliminar a alguien su lámpara se apaga y su figura sale del salón; el salón se oscurece.
+  - [x] Advertencias que se arrastran entre partidas; cola automática a un torneo nuevo al ser eliminado.
+  - [x] Pantallas entre rondas (quedan N jugadores) y de campeón.
+
+## Integración de los hitos 2-4 (en curso)
+
+- [ ] Corrutinas seguras al recargar la escena entre partidas (árbitro, manos, bots, eventos).
+- [ ] El servidor avisa `cheat_aborted` al terminar la partida con una trampa en curso.
+- [ ] El torneo informa al director de tensión cuántos quedan; guardias y figuras coherentes al eliminar.
+- [ ] Verificar visualmente al árbitro que pasa detrás (disuasivo).
+- [ ] Caché de jugadas legales en `MatchServer` (picos de las mesas de fondo).
+- [ ] Balance de bots: variedad de trampas (no solo robar), menos eliminaciones por acusaciones falsas, distracciones menos frecuentes.
 
 ## Hito 5 — Web y pulido
 
@@ -67,5 +74,5 @@ Frentes en paralelo:
 | ¿Una acusación correcta borra una advertencia? | No |
 | Ventana de acusación | Desde la última jugada del acusador |
 | ¿Más tiempo para blancas? | No (3:00 / 3:00) |
-| Jugadores por torneo | 16 (por definir en el Hito 4) |
+| Jugadores por torneo | 16 (configurable con `--players`) |
 | Título del juego | Pendiente |
