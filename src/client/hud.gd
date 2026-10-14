@@ -16,6 +16,9 @@ var _result_panel: ColorRect
 var _result_title: Label
 var _result_reason: Label
 var _result_restart: Label
+var _round_info: Label
+var _bracket: Label
+var _status: Label
 var _subtitle_tween: Tween
 var _arbiter_tween: Tween
 
@@ -70,6 +73,33 @@ func _ready() -> void:
 	_capture_prompt.offset_bottom = -160
 	_capture_prompt.text = "Haz clic para tomar el control del ratón"
 	_capture_prompt.visible = false
+	# Torneo: ronda y jugadores restantes arriba a la derecha, cuadro de la ronda debajo.
+	_round_info = _label(22, Color(1.0, 0.82, 0.45))
+	_round_info.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_round_info.anchor_left = 1.0
+	_round_info.anchor_right = 1.0
+	_round_info.offset_left = -420
+	_round_info.offset_right = -20
+	_round_info.offset_top = 12
+	_round_info.offset_bottom = 44
+	_bracket = _label(15, Color(0.78, 0.74, 0.66))
+	_bracket.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_bracket.anchor_left = 1.0
+	_bracket.anchor_right = 1.0
+	_bracket.offset_left = -420
+	_bracket.offset_right = -20
+	_bracket.offset_top = 46
+	_bracket.offset_bottom = 300
+	_bracket.add_theme_constant_override("outline_size", 4)
+	# Estado de espera ("Esperando a las demás mesas...") sin tapar el salón.
+	_status = _label(24, Color(0.93, 0.89, 0.80))
+	_status.anchor_left = 0.1
+	_status.anchor_right = 0.9
+	_status.anchor_top = 0.0
+	_status.anchor_bottom = 0.0
+	_status.offset_top = 70
+	_status.offset_bottom = 130
+	_status.visible = false
 	_build_result_panel()
 	set_warnings(0, 3)
 
@@ -170,8 +200,39 @@ func set_mouse_captured(captured: bool) -> void:
 
 
 func show_result(won: bool, reason: String) -> void:
-	_result_title.text = "Ganaste" if won else "Eliminado"
-	_result_title.add_theme_color_override("font_color", Color(0.85, 0.8, 0.55) if won else Color(0.75, 0.12, 0.1))
-	_result_reason.text = reason.substr(0, 1).to_upper() + reason.substr(1)
+	show_screen("Ganaste" if won else "Eliminado", reason.substr(0, 1).to_upper() + reason.substr(1),
+			"\nR para reiniciar", Color(0.85, 0.8, 0.55) if won else Color(0.75, 0.12, 0.1))
+
+
+## Pantalla completa sobre el salón (entre rondas, eliminado, campeón).
+func show_screen(title: String, body: String, footer: String = "", color: Color = Color(0.85, 0.8, 0.55)) -> void:
+	_result_title.text = title
+	_result_title.add_theme_color_override("font_color", color)
+	_result_reason.text = body
+	_result_restart.text = footer
 	_result_panel.visible = true
 	_capture_prompt.visible = false
+
+
+func hide_screen() -> void:
+	_result_panel.visible = false
+
+
+func is_screen_visible() -> bool:
+	return _result_panel.visible
+
+
+## Ronda y jugadores que quedan (arriba a la derecha).
+func set_tournament_info(title: String, remaining: int) -> void:
+	_round_info.text = "%s · quedan %d" % [title, remaining]
+
+
+## Líneas del cuadro de la ronda en curso (una por partida).
+func set_bracket(lines: Array[String]) -> void:
+	_bracket.text = "\n".join(lines)
+
+
+## Mensaje persistente bajo la barra superior; "" lo oculta.
+func set_status(text: String) -> void:
+	_status.text = text
+	_status.visible = text != ""

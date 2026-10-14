@@ -15,6 +15,10 @@ const SPOT_ANGLE := 31.0
 ## Mesa principal: 1,30 × 0,90 m.
 const TABLE_SIZE := Vector2(1.3, 0.9)
 
+## Energía de las lámparas de las mesas decorativas encendidas.
+const DECOR_ENERGY := 2.2
+const BULB_ON := Color(1.0, 0.9, 0.7)
+const BULB_OFF := Color(0.06, 0.05, 0.045)
 const WOOD := Color(0.13, 0.075, 0.04)
 const STONE := Color(0.07, 0.065, 0.065)
 
@@ -32,6 +36,9 @@ const DECOR_TABLES := [
 ]
 
 var spot: SpotLight3D
+## Estado de cada mesa decorativa (mismo orden que DECOR_TABLES):
+## {root, seats: [figura +Z, figura -Z], seat_pos, light, bulb_mat, cone_mat, cone_strength, active}.
+var _tables: Array[Dictionary] = []
 var _wood_mat: StandardMaterial3D
 var _stone_mat: StandardMaterial3D
 
@@ -55,6 +62,122 @@ static func table_positions() -> Array[Vector3]:
 	for d in DECOR_TABLES:
 		out.append(Vector3(d[0].x, 0.0, d[0].y))
 	return out
+
+
+## Orden de mesas decorativas de más cerca a más lejos de la principal: las
+## primeras en usarse son las cercanas, así el salón se oscurece desde afuera.
+static func decor_order() -> Array[int]:
+	var idx: Array[int] = []
+	for i in DECOR_TABLES.size():
+		idx.append(i)
+	idx.sort_custom(func(a: int, b: int) -> bool:
+		return (DECOR_TABLES[a][0] as Vector2).length() < (DECOR_TABLES[b][0] as Vector2).length())
+	return idx
+
+
+func table_count() -> int:
+	return _tables.size()
+
+
+## Posición del centro de la mesa `index` (mesas decorativas; -1 = la principal).
+func table_position(index: int) -> Vector3:
+	if index < 0 or index >= _tables.size():
+		return Vector3.ZERO
+	return (_tables[index].root as Node3D).position
+
+
+## Luz de la lámpara de la mesa decorativa `index` (-1 = la lámpara principal).
+func table_lamp(index: int) -> SpotLight3D:
+	if index < 0:
+		return spot
+	if index >= _tables.size():
+		return null
+	return _tables[index].light
+
+
+func is_table_active(index: int) -> bool:
+	return index < 0 or (index < _tables.size() and _tables[index].active)
+
+
+## Enciende o apaga la lámpara de una mesa decorativa (con atenuación si `animated`).
+func set_table_active(index: int, on: bool, animated: bool = true) -> void:
+	if index < 0 or index >= _tables.size():
+		return
+	var t: Dictionary = _tables[index]
+	t.active = on
+	var k := 1.0 if on else 0.0
+	var light: SpotLight3D = t.light
+	if t.has("tween") and t.tween != null and (t.tween as Tween).is_valid():
+		(t.tween as Tween).kill()
+	if not animated:
+		light.light_energy = DECOR_ENERGY * k
+		light.visible = on
+		(t.bulb_mat as StandardMaterial3D).emission_energy_multiplier = 3.0 * k
+		(t.bulb_mat as StandardMaterial3D).albedo_color = BULB_ON if on else BULB_OFF
+		(t.cone_mat as ShaderMaterial).set_shader_parameter("strength", t.cone_strength * k)
+		(t.cone as Node3D).visible = on
+		return
+	light.visible = true
+	(t.cone as Node3D).visible = true
+	var tw := create_tween().set_parallel(true)
+	t.tween = tw
+	tw.tween_property(light, "light_energy", DECOR_ENERGY * k, 1.4)
+	tw.tween_property(t.bulb_mat, "emission_energy_multiplier", 3.0 * k, 1.4)
+	tw.tween_property(t.bulb_mat, "albedo_color", BULB_ON if on else BULB_OFF, 1.4)
+	tw.tween_method(func(v: float) -> void: (t.cone_mat as ShaderMaterial).set_shader_parameter("strength", v), (t.cone_mat as ShaderMaterial).get_shader_parameter("strength"), t.cone_strength * k, 1.4)
+	if not on:
+		tw.chain().tween_callback(func() -> void:
+			light.visible = false
+			(t.cone as Node3D).visible = false)
+
+
+## Muestra 0, 1 o 2 figuras sentadas en la mesa `index` (primero el asiento +Z).
+func set_occupants(index: int, count: int) -> void:
+	if index < 0 or index >= _tables.size():
+		return
+	for s in 2:
+		_place_seat(index, s, s < count)
+
+
+func occupant_count(index: int) -> int:
+	if index < 0 or index >= _tables.size():
+		return 0
+	var n := 0
+	for s in 2:
+		if (_tables[index].seats[s] as Node3D).visible:
+			n += 1
+	return n
+
+
+func _place_seat(index: int, seat: int, on: bool) -> void:
+	var fig: Node3D = _tables[index].seats[seat]
+	fig.position = _tables[index].seat_pos[seat]
+	fig.rotation.y = 0.0 if seat == 0 else PI
+	fig.visible = on
+
+
+## La figura del asiento se levanta y se aleja caminando hacia la oscuridad.
+func remove_occupant(index: int, seat: int, animated: bool = true) -> void:
+	if index < 0 or index >= _tables.size():
+		return
+	var fig: Node3D = _tables[index].seats[seat]
+	if not fig.visible:
+		return
+	if not animated:
+		fig.visible = false
+		return
+	var sgn := 1.0 if seat == 0 else -1.0
+	var start: Vector3 = fig.position
+	var away := Vector3(0.0, 0.0, sgn * 3.2)
+	var tw := create_tween()
+	# Se pone de pie y da media vuelta; luego camina alejándose de la mesa.
+	tw.tween_property(fig, "position", start + Vector3(0, 0.12, sgn * 0.35), 0.5)
+	tw.parallel().tween_property(fig, "rotation:y", fig.rotation.y + PI, 0.5)
+	tw.tween_property(fig, "position", start + away, 3.0).set_trans(Tween.TRANS_SINE)
+	tw.tween_callback(func() -> void:
+		fig.visible = false
+		fig.position = start
+		fig.rotation.y = 0.0 if seat == 0 else PI)
 
 
 func _mat(c: Color, rough: float) -> StandardMaterial3D:
@@ -151,7 +274,9 @@ func _build_decor_table(pos: Vector3, yaw: float, occupants: int, index: int) ->
 		var p := Vector3(sin(index * 3.1 + i * 2.3) * 0.15, BoardView.TABLE_TOP + 0.045, cos(index * 1.7 + i * 1.9) * 0.15)
 		_box(t, Vector3(0.025, 0.05, 0.025), p, light_mat if i % 2 == 0 else _stone_mat)
 	var cloths := [Color(0.10, 0.09, 0.13), Color(0.13, 0.07, 0.07), Color(0.07, 0.10, 0.09)]
-	for s in occupants:
+	var seats: Array[Node3D] = []
+	var seat_pos: Array[Vector3] = []
+	for s in 2:
 		var sgn := 1.0 if s == 0 else -1.0
 		var fig := OpponentAvatar.build_figure(Color(0.45, 0.34, 0.28), cloths[(index + s) % 3], false, true)
 		var root: Node3D = fig.root
@@ -160,21 +285,29 @@ func _build_decor_table(pos: Vector3, yaw: float, occupants: int, index: int) ->
 		root.rotation.y = 0.0 if sgn > 0.0 else PI
 		# Inclinación leve de la cabeza para que no sean clones.
 		fig.head.rotation.y = sin(index * 2.1 + s) * 0.5
+		root.visible = s < occupants
 		t.add_child(root)
+		seats.append(root)
+		seat_pos.append(root.position)
 	# Lámpara tenue sin sombras.
 	var lamp := Node3D.new()
+	lamp.name = "LamparaDecor"
 	lamp.position = Vector3(0, LAMP_Y + 0.1, 0)
 	t.add_child(lamp)
-	_lamp_fixture(lamp, 0.16)
+	var bulb_mat := _lamp_fixture(lamp, 0.16)
 	var l := SpotLight3D.new()
 	l.rotation_degrees = Vector3(-90, 0, 0)
 	l.spot_angle = 38.0
 	l.spot_range = 3.4
-	l.light_energy = 2.2
+	l.light_energy = DECOR_ENERGY
 	l.light_color = Color(1.0, 0.78, 0.55)
 	l.shadow_enabled = false
 	lamp.add_child(l)
-	_light_cone(lamp, 38.0, LAMP_Y + 0.1, 0.06)
+	var cone := _light_cone(lamp, 38.0, LAMP_Y + 0.1, 0.06)
+	_tables.append({
+		"root": t, "seats": seats, "seat_pos": seat_pos, "light": l, "bulb_mat": bulb_mat,
+		"cone": cone, "cone_mat": cone.material_override, "cone_strength": 0.06, "active": true, "tween": null,
+	})
 
 
 # --- Lámpara principal --------------------------------------------------------------
@@ -214,7 +347,7 @@ func _build_main_lamp() -> void:
 
 
 ## Pantalla cónica, bombilla y cable hasta el techo.
-func _lamp_fixture(lamp: Node3D, radius: float) -> void:
+func _lamp_fixture(lamp: Node3D, radius: float) -> StandardMaterial3D:
 	var shade := MeshInstance3D.new()
 	var cm := CylinderMesh.new()
 	cm.top_radius = 0.03
@@ -250,10 +383,11 @@ func _lamp_fixture(lamp: Node3D, radius: float) -> void:
 	cable.material_override = _mat(Color(0.02, 0.02, 0.02), 0.9)
 	cable.position = Vector3(0, radius * 0.9 + cable_len * 0.5, 0)
 	lamp.add_child(cable)
+	return bm
 
 
 ## Cono de luz falso: malla aditiva sin iluminación que se desvanece hacia abajo.
-func _light_cone(lamp: Node3D, angle_deg: float, height: float, strength: float) -> void:
+func _light_cone(lamp: Node3D, angle_deg: float, height: float, strength: float) -> MeshInstance3D:
 	var cone := MeshInstance3D.new()
 	var cm := CylinderMesh.new()
 	cm.height = height - 0.05
@@ -284,3 +418,4 @@ void fragment() {
 	cone.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	cone.position = Vector3(0, -cm.height * 0.5, 0)
 	lamp.add_child(cone)
+	return cone
