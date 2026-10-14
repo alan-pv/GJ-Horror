@@ -10,6 +10,7 @@ const TEST_FILES := [
 	"res://tests/test_beginner_helper.gd",
 	"res://tests/test_gaze.gd",
 	"res://tests/test_bots.gd",
+	"res://tests/test_bot_cheats.gd",
 	"res://tests/test_maia_encoding.gd",
 ]
 

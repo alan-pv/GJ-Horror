@@ -29,3 +29,5 @@ extends Resource
 @export_range(0.0, 1.0) var detect_chance: float = 0.7
 ## Probabilidad por jugada rival de acusar sin razón.
 @export_range(0.0, 0.2) var false_accuse_chance: float = 0.01
+## Probabilidad de abortar una trampa en curso cuando el rival empieza a mirar.
+@export_range(0.0, 1.0) var abort_chance: float = 0.4
