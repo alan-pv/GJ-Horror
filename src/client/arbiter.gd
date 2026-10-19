@@ -1,330 +1,651 @@
 class_name Arbiter
 extends Node3D
-## El árbitro: figura de pie y de pocas palabras que espera en la oscuridad,
-## al borde del salón. Al acusar camina hasta la mesa dentro de
-## `config.arbiter_delay`, mira el tablero, anuncia el veredicto con un gesto
-## y vuelve a su sitio. También puede pasar despacio detrás de un punto
-## (`pass_behind`), lo que usa el director de eventos como disuasivo: mientras
-## está cerca (`is_near`) las trampas se ven.
+## El árbitro verdugo: patrulla sin parar los pasillos del salón (entre columnas y
+## filas de mesas y por el perímetro) con pausas mirando una mesa, y a veces pasa por
+## detrás del jugador. Sus pasos son sonido 3D sincronizado con la zancada.
 ##
-## Es puramente visual; el veredicto lo decide el servidor.
-
-enum State { IDLE, WALKING, AT_TABLE, GESTURE, PASSING }
-
-## Dónde espera, en la penumbra, y dónde se planta junto a la mesa.
-const HOME := Vector3(-1.6, 0.0, -4.6)
-const TABLE_SPOT := Vector3(-1.05, 0.0, 0.12)
-const WALK_SPEED := 1.35
-const HIP_HEIGHT := 0.84
-
-var state: State = State.IDLE
-var root: GameRoot
-
-var _gen: int = 0
-var _head: Node3D
-var _body: Node3D
-var _legs: Array[Node3D] = []
-var _arms: Array[Node3D] = []
-var _step: float = 0.0
-var _body_base_y: float = 0.0
-var _lantern: OmniLight3D
-
-
-## Arma la figura y la deja en su sitio de espera. `p_root` puede ser null (pruebas).
-func setup(p_root: GameRoot) -> void:
-	name = "Arbitro"
-	root = p_root
-	_build()
-	position = HOME
-	_face_toward(Vector3.ZERO, true)
-	if root != null:
-		root.server.accusation_started.connect(_on_accusation_started)
-		root.server.accusation_resolved.connect(_on_accusation_resolved)
-
-
-# --- API pública -------------------------------------------------------------------
+## Atiende, por prioridad: la ejecución del propio jugador (primera persona), la
+## acusación del humano (revisa las dos planillas y anuncia el veredicto) y la cola de
+## ejecuciones (la del humano primero; después la más cercana). Mientras espera su turno
+## el condenado reacciona (`Condemned`). Es puramente visual: quién pierde lo decide el
+## servidor y `GameRoot` pide las ejecuciones.
+##
+## Depuración (argumentos tras `--`, ver `ArbiterModule`): --force-execution, --lose-now.
 
 ## Terminó la ejecución de quien estaba en `seat` (0 = blancas, 1 = negras) de la mesa `table`
 ## (índice de `HallLayout`; la del humano es `HallLayout.HUMAN_TABLE`).
 signal executed(table: int, seat: int)
+## Terminó de atender la acusación (veredicto dado y gesto hecho).
+signal accusation_done
+## Terminó la secuencia en primera persona (ya en negro).
+signal player_executed
+
+const SFX := "res://assets/audio/sfx/"
+## Velocidad de patrulla (m/s) y de camino a una ejecución con la cola corta.
+const PATROL_SPEED := 1.0
+const BRISK_SPEED := 1.25
+const MAX_SPEED := 1.9
+## Pasos: sonido 3D con atenuación por distancia (ver `footstep_gain_db`).
+const STEP_UNIT_SIZE := 4.0
+const STEP_MAX_DISTANCE := 28.0
+const STEP_BASE_DB := -2.0
+## En la animación `walk` (1,30 s) los pies tocan el suelo en 0,00 y 0,65 s.
+const WALK_LENGTH := 1.30
+const STEP_PHASES: Array[float] = [0.0, 0.65]
+const NEAR_RADIUS := 2.0
+
+enum Urgency { NONE = 0, QUEUE = 1, ACCUSATION = 2, PLAYER = 3 }
+
+var root: GameRoot
+var figure: ArbiterFigure
+var queue := ExecutionQueue.new()
+
+var _rng := RandomNumberGenerator.new()
+var _cond: Dictionary = {}          # clave de ExecutionQueue -> Condemned
+var _temp_figures: Dictionary = {}
+var _step_players: Array[AudioStreamPlayer3D] = []
+var _step_next: int = 0
+var _prev_anim_pos: float = 0.0
+var _flash: OmniLight3D
+var _sparks: CPUParticles3D
+var _forced_route: Array[Vector3] = []
+var _forced_speed: float = 0.8
+var _acc: Dictionary = {}           # {accuser, deadline, verdict}
+var _player_job: Dictionary = {}
+var _preset: Dictionary = {}        # clave -> Condemned.Mode forzado (depuración)
+var _running: bool = false
+var _fp_audio: Array[AudioStreamPlayer] = []
+var _black: CanvasLayer
 
 
-## Encola la ejecución del perdedor sentado en (`table`, `seat`): el árbitro irá a
-## esa mesa y le disparará. Contrato de la oleada 2 (R8 lo implementa; hoy es un
-## esbozo que avisa en el siguiente fotograma).
+## Arma la figura y empieza a patrullar. `p_root` puede ser null (pruebas).
+func setup(p_root: GameRoot) -> void:
+	name = "Arbitro"
+	root = p_root
+	_rng.randomize()
+	figure = ArbiterFigure.new()
+	add_child(figure)
+	figure.play(&"idle", 0.0)
+	_build_steps()
+	_build_flash()
+	position = Vector3(ArbiterRoutes.aisle_xs()[0], 0.0, ArbiterRoutes.aisle_zs()[1])
+	if root != null:
+		_run.call_deferred()
+
+
+func _log(text: String) -> void:
+	if root != null and (root.get_args().has("verbose") or root.get_args().has("autoplay")):
+		print("[arbitro] ", text)
+
+
+# --- API pública -------------------------------------------------------------------
+
+## Encola la ejecución del perdedor sentado en (`table`, `seat`): el árbitro irá a esa
+## mesa y le disparará. Repetirla no hace nada; el condenado empieza a reaccionar ya.
 func request_execution(table: int, seat: int) -> void:
-	executed.emit.call_deferred(table, seat)
+	if queue.was_done(table, seat):
+		executed.emit.call_deferred(table, seat)
+		return
+	var human_color := root.human_color if root != null else ChessPiece.WHITE
+	var spot := ArbiterRoutes.execution_spot(table, seat, human_color)
+	if queue.push(table, seat, spot, table == HallLayout.HUMAN_TABLE):
+		_condemn(table, seat)
+
+
+## Fuerza la reacción del condenado de (`table`, `seat`) (depuración); antes de pedir su ejecución.
+func preset_mode(table: int, seat: int, mode: Condemned.Mode) -> void:
+	_preset[ExecutionQueue.key(table, seat)] = mode
 
 
 ## ¿Quedan ejecuciones o una acusación por atender? La ronda no termina mientras sea true.
 func has_pending_work() -> bool:
-	return false
+	return queue.busy() or not _acc.is_empty() or not _player_job.is_empty()
 
 
-## Camina despacio por detrás de `target` (p. ej. la silla del jugador): entra
-## por un lado, cruza a lo largo de `seconds` y luego vuelve a su sitio.
-## Se ignora si ya está ocupado con una acusación.
-func pass_behind(target: Vector3, seconds: float) -> void:
-	if state == State.WALKING or state == State.AT_TABLE or state == State.GESTURE:
+## Espera (corrutina) a que se haya ejecutado (`table`, `seat`); tope de 90 s por si algo falla.
+func wait_executed(table: int, seat: int) -> void:
+	var waited := 0.0
+	while not queue.was_done(table, seat) and waited < 90.0 and is_inside_tree():
+		await get_tree().create_timer(0.25).timeout
+		waited += 0.25
+
+
+## ¿Está atendiendo una acusación (desde que empieza hasta el gesto final)?
+func accusation_active() -> bool:
+	return not _acc.is_empty()
+
+
+## Camina despacio por detrás de la silla del jugador (cruza el pasillo de su espalda de
+## un lado al otro en `seconds` s) y sigue patrullando. Lo usa el evento disuasivo
+## `arbitro_pasa`. Se ignora si está ocupado con una ejecución o una acusación.
+func pass_behind(_target: Vector3, seconds: float) -> void:
+	if _urgency() > Urgency.NONE or not _forced_route.is_empty():
 		return
-	_gen += 1
-	var gen := _gen
-	state = State.PASSING
-	# "Detrás" es alejándose de la mesa; el cruce es perpendicular a esa dirección.
-	var out := Vector3(target.x, 0.0, target.z)
-	out = Vector3(0.0, 0.0, 1.0) if out.length() < 0.2 else out.normalized()
-	var side := Vector3(-out.z, 0.0, out.x)
-	var mid := Vector3(target.x, 0.0, target.z) + out * 0.9
-	# Entra por el lado de su sitio (-x) y sale por el contrario, sin cruzar la mesa.
-	var a := mid + side * 1.3
-	var b := mid - side * 1.3
-	await _walk_to(a, maxf(position.distance_to(a) / (WALK_SPEED * 1.3), 0.5), gen)
-	if gen != _gen or not is_inside_tree():
+	if queue.current >= 0 or not _acc.is_empty() or not _player_job.is_empty():
 		return
-	await _walk_to(b, maxf(seconds, 0.5), gen)
-	if gen != _gen or not is_inside_tree():
-		return
-	# Vuelve rodeando la mesa por el lado de salida (sin atravesar al rival).
-	var around := [Vector3(b.x + 0.7, 0.0, 0.0), Vector3(b.x + 0.7, 0.0, -3.2), HOME]
-	for p: Vector3 in around:
-		await _walk_to(p, position.distance_to(p) / (WALK_SPEED * 1.3), gen)
-		if gen != _gen or not is_inside_tree():
-			return
-	_face_toward(Vector3.ZERO, true)
-	state = State.IDLE
+	_forced_route = ArbiterRoutes.behind_player_route(position)
+	var xs := ArbiterRoutes.aisle_xs()
+	var cross := absf(xs[HallLayout.HUMAN_TABLE % HallLayout.COLS + 1] - xs[HallLayout.HUMAN_TABLE % HallLayout.COLS])
+	_forced_speed = clampf(cross / maxf(seconds, 1.0), 0.6, 1.1)
 
 
 ## ¿Está a menos de `radius` metros (en el plano del suelo) de `point`?
 func is_near(point: Vector3, radius: float) -> bool:
 	var here := global_position if is_inside_tree() else position
-	var d := Vector2(here.x - point.x, here.z - point.z)
-	return d.length() <= radius
+	return Vector2(here.x - point.x, here.z - point.z).length() <= radius
 
 
-# --- Acusaciones ---------------------------------------------------------------------
+## La acusación empezó: va a la mesa del humano para revisar las planillas.
+func begin_accusation(accuser: int) -> void:
+	var delay := root.config.arbiter_delay if root != null else 3.0
+	_acc = {"accuser": accuser, "deadline": delay - 0.3, "verdict": null}
 
-func _on_accusation_started(_accuser: int) -> void:
-	if not is_inside_tree():
+
+## El servidor decidió: se anunciará cuando termine de revisar las planillas.
+func resolve_accusation(accuser: int, correct: bool, warnings: int) -> void:
+	if _acc.is_empty():
+		_announce_now(accuser, correct, warnings)
 		return
-	_gen += 1
-	var gen := _gen
-	state = State.WALKING
-	# Llega justo antes de que el servidor resuelva.
-	var delay := root.config.arbiter_delay
-	var seconds := maxf(delay - 0.4, 0.8)
-	await _walk_to(TABLE_SPOT, seconds, gen)
-	if gen != _gen or not is_inside_tree():
+	_acc["verdict"] = {"accuser": accuser, "correct": correct, "warnings": warnings}
+
+
+## Ejecución del jugador en primera persona. Corrutina: vuelve cuando la pantalla quedó negra.
+func execute_player() -> void:
+	if _player_job.is_empty():
+		_player_job = {"state": "walking"}
+	await player_executed
+
+
+## Pérdida de ganancia (dB) de un paso a `distance` metros: modelo de distancia inversa de
+## Godot con `STEP_UNIT_SIZE` y el volumen base, con el tope de 3 dB del motor. Más allá de
+## `STEP_MAX_DISTANCE` no se oye.
+static func footstep_gain_db(distance: float) -> float:
+	if distance >= STEP_MAX_DISTANCE:
+		return -80.0
+	var att := 20.0 * log(STEP_UNIT_SIZE / maxf(distance, 0.001)) / log(10.0) + STEP_BASE_DB
+	return minf(att, 3.0)
+
+
+# --- Bucle principal ---------------------------------------------------------------------
+
+func _urgency() -> int:
+	if not _player_job.is_empty():
+		return Urgency.PLAYER
+	if not _acc.is_empty():
+		return Urgency.ACCUSATION
+	if not queue.is_empty() or not _forced_route.is_empty():
+		return Urgency.QUEUE
+	return Urgency.NONE
+
+
+func _run() -> void:
+	if _running:
 		return
-	state = State.AT_TABLE
-	await _look_at_board(gen)
+	_running = true
+	# Espera a que la partida arranque para no caminar durante el montaje.
+	while is_inside_tree():
+		if not _player_job.is_empty():
+			await _do_player_execution()
+		elif not _acc.is_empty():
+			await _do_accusation()
+		elif not queue.is_empty():
+			await _do_execution(queue.take_next(position))
+		elif not _forced_route.is_empty():
+			var route := _forced_route
+			_forced_route = []
+			await _walk_path(route, _forced_speed, Urgency.QUEUE)
+			if not route.is_empty():
+				_idle()
+		else:
+			await _patrol_step()
+		await get_tree().process_frame
 
 
-func _on_accusation_resolved(accuser: int, correct: bool, warnings: int) -> void:
-	_gen += 1
-	var gen := _gen
-	# Si no llegó a tiempo, se planta igualmente (el servidor ya decidió).
-	if position.distance_to(TABLE_SPOT) > 0.3:
-		position = TABLE_SPOT
-	state = State.GESTURE
-	var accused := ChessPiece.opposite(accuser)
+func _patrol_step() -> void:
+	var target := ArbiterRoutes.patrol_target(_rng, position)
+	var path := ArbiterRoutes.route(position, target)
+	# De vez en cuando rodea por la espalda del jugador.
+	if _rng.randf() < 0.12:
+		path = ArbiterRoutes.behind_player_route(position)
+	var speed := PATROL_SPEED * _rng.randf_range(0.9, 1.1)
+	if not await _walk_path(path, speed, Urgency.NONE):
+		return
+	if _rng.randf() < 0.55:
+		await _pause_looking(_rng.randf_range(1.6, 4.0))
+
+
+## Se detiene y mira el centro de la mesa más cercana.
+func _pause_looking(seconds: float) -> void:
+	_idle()
+	var table := HallLayout.table_position(ArbiterRoutes.nearest_table(position))
+	var t := 0.0
+	while t < seconds and _urgency() == Urgency.NONE and _forced_route.is_empty() and is_inside_tree():
+		await get_tree().process_frame
+		var dt := get_process_delta_time()
+		t += dt
+		_face_toward(table, dt)
+		figure.look_at_point(table + Vector3(0.0, 0.9, 0.0))
+	figure.set_look(0.0, 0.0)
+
+
+func _idle() -> void:
+	figure.play(&"idle", 0.3)
+	_prev_anim_pos = 0.0
+
+
+# --- Ejecuciones --------------------------------------------------------------------------
+
+func _do_execution(e: Dictionary) -> void:
+	if e.is_empty():
+		return
+	var table: int = e.table
+	var seat: int = e.seat
+	var cond := _condemn(table, seat)
+	var human_color := root.human_color if root != null else ChessPiece.WHITE
+	var seat_pos := ArbiterRoutes.seat_position(table, seat, human_color)
+	var sgn := ArbiterRoutes.seat_sign(table, seat, human_color)
+	var victim_spot := seat_pos
+	if cond != null and cond.mode == Condemned.Mode.FLEE:
+		victim_spot = Condemned.flee_spot(seat_pos, sgn)
+	var spot := victim_spot + Vector3(ArbiterRoutes.SIDE_OFFSET, 0.0, 0.0)
+	var path := ArbiterRoutes.route(position, spot)
+	_log("va a ejecutar mesa %d asiento %d (%s, cola %d)" % [table, seat, Condemned.Mode.keys()[cond.mode] if cond != null else "-", queue.size()])
+	var speed := clampf(BRISK_SPEED + 0.12 * float(queue.size()), BRISK_SPEED, MAX_SPEED)
+	var progress := func(remaining: float) -> void:
+		# El condenado que huye arranca cuando ya lo oye venir.
+		if cond != null and remaining < 4.5:
+			cond.begin_flee()
+	if not await _walk_path(path, speed, Urgency.QUEUE, progress):
+		queue.requeue(e)
+		return
+	if cond != null and cond.mode == Condemned.Mode.FLEE:
+		var waited := 0.0
+		while not cond.fled and waited < 6.0 and is_inside_tree():
+			await get_tree().process_frame
+			waited += get_process_delta_time()
+	var head := _victim_head(cond, seat_pos)
+	await _turn_to(head, 0.35)
+	# Amartilla, apunta y se toma un instante antes de disparar.
+	_play_at(SFX + "gun_cock.wav", figure.global_position + Vector3(0.0, 1.3, 0.0), 0.0, 14.0, 40.0)
+	await figure.play_once(&"aim", 0.25)
+	figure.play(&"aim_hold", 0.1)
+	var hold := _rng.randf_range(1.0, 2.5)
+	var t := 0.0
+	while t < hold and is_inside_tree():
+		await get_tree().process_frame
+		var dt := get_process_delta_time()
+		t += dt
+		_face_toward(_victim_head(cond, seat_pos), dt)
+	_fire()
+	if cond != null:
+		var kind := &"slump"
+		if cond.standing:
+			kind = &"standing"
+		elif _rng.randf() < 0.3:
+			kind = &"fall_back"
+		cond.die(kind)
+	await figure.play_once(&"shoot", 0.02)
+	await figure.play_once(&"lower_gun", 0.1)
+	queue.finish()
+	_log("ejecutado mesa %d asiento %d" % [table, seat])
+	executed.emit(table, seat)
+	_idle()
+
+
+## Disparo: animación, estampido 3D, fogonazo y chispas.
+func _fire() -> void:
+	_play_at(SFX + "gunshot.wav", figure.muzzle().global_position, 3.0, 12.0, 70.0)
+	_muzzle_flash()
+
+
+func _muzzle_flash() -> void:
+	_flash.visible = true
+	_flash.light_energy = 7.0
+	_sparks.restart()
+	_sparks.emitting = true
+	var tw := create_tween()
+	tw.tween_interval(0.05)
+	tw.tween_property(_flash, "light_energy", 0.0, 0.07)
+	tw.tween_callback(func() -> void: _flash.visible = false)
+
+
+func _victim_head(cond: Condemned, seat_pos: Vector3) -> Vector3:
+	if cond != null and cond.figure != null and cond.figure.is_inside_tree():
+		return cond.figure.head_global_position()
+	return seat_pos + Vector3(0.0, 1.15, 0.0)
+
+
+## Crea (o reutiliza) al condenado de (`table`, `seat`) y le hace empezar a reaccionar.
+func _condemn(table: int, seat: int) -> Condemned:
+	var k := ExecutionQueue.key(table, seat)
+	if _cond.has(k):
+		return _cond[k]
+	if root == null:
+		return null
+	var fig := _figure_for(table, seat)
+	if fig == null:
+		return null
+	var rich := table / HallLayout.COLS <= 2
+	var c := Condemned.new()
+	_cond[k] = c
+	c.start(fig, _preset.get(k, Condemned.pick_mode(rich, _rng)), rich, ArbiterRoutes.seat_sign(table, seat, root.human_color), self)
+	return c
+
+
+## Figura del condenado: la que entrega `GameRoot.condemn_seat`; si aún no existe, una temporal
+## en la silla (en la mesa del humano oculta al rival de primitivas).
+func _figure_for(table: int, seat: int) -> CharacterFigure:
+	var fig := root.condemn_seat(table, seat)
+	if fig != null:
+		return fig
+	var k := ExecutionQueue.key(table, seat)
+	if _temp_figures.has(k):
+		return _temp_figures[k]
+	var f := CharacterFigure.new()
+	root.add_child(f)
+	f.setup(CharacterFigure.random_look(_rng))
+	var sgn := ArbiterRoutes.seat_sign(table, seat, root.human_color)
+	f.global_position = ArbiterRoutes.seat_position(table, seat, root.human_color)
+	f.rotation.y = PI if sgn > 0.0 else 0.0
+	f.play(&"sit_idle", 0.0)
+	_temp_figures[k] = f
+	if table == HallLayout.HUMAN_TABLE and seat != root.human_color and root.avatar != null:
+		root.avatar.visible = false
+	return f
+
+
+# --- Acusación -------------------------------------------------------------------------------
+
+func _do_accusation() -> void:
+	var t0 := Time.get_ticks_msec()
+	var spot := ArbiterRoutes.HUMAN_SIDE_SPOT
+	var path := ArbiterRoutes.route(position, spot)
+	var left := float(_acc.deadline) - 0.0
+	# Llega a tiempo si puede: acelera hasta MAX_SPEED.
+	var need := ArbiterRoutes.route_length(position, path) / maxf(left, 0.5)
+	var speed := clampf(need, BRISK_SPEED, MAX_SPEED)
+	if not await _walk_path(path, speed, Urgency.ACCUSATION):
+		# Lo interrumpe la ejecución del jugador: la acusación ya no importa.
+		_acc = {}
+		accusation_done.emit()
+		return
+	await _turn_to(Vector3(0.0, 0.0, 0.0), 0.4)
+	# Revisa las dos planillas (la del jugador, en +Z, y la del rival).
+	await figure.play_once(&"inspect_sheets", 0.3)
+	_idle()
+	var waited := 0.0
+	while _acc.get("verdict") == null and waited < 8.0 and is_inside_tree():
+		await get_tree().process_frame
+		waited += get_process_delta_time()
+	var v: Dictionary = _acc.get("verdict") if _acc.get("verdict") != null else {}
+	if not v.is_empty():
+		_announce_now(v.accuser, v.correct, v.warnings)
+		await _verdict_gesture(v.accuser, v.correct)
+	_acc = {}
+	accusation_done.emit()
+	if OS.is_debug_build() and root != null and root.get_args().has("verbose"):
+		print("[arbitro] acusación atendida en %d ms" % (Time.get_ticks_msec() - t0))
+
+
+## Gesto: si hubo trampa, señala al acusado; si no, niega con la cabeza.
+func _verdict_gesture(accuser: int, correct: bool) -> void:
+	if correct:
+		var accused := ChessPiece.opposite(accuser)
+		var sgn := ArbiterRoutes.seat_sign(HallLayout.HUMAN_TABLE, accused, root.human_color)
+		await _turn_to(Vector3(0.0, 1.0, sgn * 0.8), 0.35)
+		await figure.play_once(&"point_accuse", 0.2)
+		await get_tree().create_timer(0.6).timeout
+	else:
+		for yaw in [0.6, -0.6, 0.45, -0.45, 0.0]:
+			figure.set_look(yaw, 0.0)
+			await get_tree().create_timer(0.28).timeout
+	_idle()
+
+
+func _announce_now(accuser: int, correct: bool, warnings: int) -> void:
+	if root == null or root.hud == null:
+		return
+	var by_human := accuser == root.human_color
 	var text := ""
 	if correct:
-		text = "Cheating confirmed. %s is disqualified." % _color_name(accused)
+		text = "Cheating confirmed. The opponent is disqualified." if by_human else "You were caught cheating."
 	else:
-		text = "Nothing irregular here. Warning %d of %d for %s." % [
-			warnings, root.config.false_accusations_to_eliminate, _color_name(accuser)]
-	root.hud.show_subtitle(text, 4.0)
-	await _gesture(correct, accused, gen)
-	if gen != _gen or not is_inside_tree():
-		return
-	await get_tree().create_timer(1.2).timeout
-	if gen != _gen or not is_inside_tree():
-		return
-	state = State.WALKING
-	await _walk_to(HOME, position.distance_to(HOME) / WALK_SPEED, gen)
-	if gen != _gen or not is_inside_tree():
-		return
-	_face_toward(Vector3.ZERO, true)
-	state = State.IDLE
+		if by_human:
+			text = "Nothing irregular. Warning %d of %d." % [warnings, root.config.false_accusations_to_eliminate]
+		else:
+			text = "Nothing irregular. The accusation was false."
+	root.hud.show_arbiter(text, 4.0)
+	root.hud.set_warnings(root.server.sessions[root.human_color].warnings, root.config.false_accusations_to_eliminate)
 
 
-func _color_name(c: int) -> String:
-	return "White" if c == ChessPiece.WHITE else "Black"
+# --- Ejecución del jugador (primera persona) ---------------------------------------------------
 
-
-# --- Movimiento ------------------------------------------------------------------------
-
-## Camina en línea recta a `dest` en `seconds` segundos, con balanceo de pasos.
-func _walk_to(dest: Vector3, seconds: float, gen: int) -> void:
-	var from := position
-	var dir := dest - from
-	dir.y = 0.0
-	if dir.length() > 0.01:
-		_face_toward(position + dir, false)
+func _do_player_execution() -> void:
+	var spot := ArbiterRoutes.HUMAN_SIDE_SPOT
+	var player := root.player
+	_start_fp_audio()
+	var progress := func(remaining: float) -> void:
+		var k := clampf(1.0 - remaining / 9.0, 0.0, 1.0)
+		_fp_audio[0].volume_db = lerpf(-14.0, -3.0, k)
+		_fp_audio[1].volume_db = lerpf(-22.0, -8.0, k)
+		if remaining < 3.5:
+			_turn_player_view(get_process_delta_time(), 0.9)
+	var path := ArbiterRoutes.route(position, spot)
+	await _walk_path(path, 1.05, Urgency.PLAYER + 1, progress)
+	# Apunta a la cara del jugador.
+	var eye := player.global_position
 	var t := 0.0
-	var dur := maxf(seconds, 0.05)
-	while t < 1.0:
-		if not is_inside_tree():
-			return
+	_play_at(SFX + "gun_cock.wav", figure.global_position + Vector3(0.0, 1.3, 0.0), 0.0, 14.0, 40.0)
+	figure.play_once(&"aim", 0.25)
+	while not figure.is_finished() and t < 1.5 and is_inside_tree():
 		await get_tree().process_frame
-		if gen != _gen or not is_inside_tree():
-			return
 		var dt := get_process_delta_time()
-		t = minf(t + dt / dur, 1.0)
-		var prev := position
-		position = from.lerp(dest, t)
-		position.y = 0.0
-		var moved := position.distance_to(prev)
-		_step += moved * 5.2
-		_swing(moved / maxf(dt, 0.001))
-		if dir.length() > 0.01:
-			_face_toward(position + dir, false, dt)
-	_swing(0.0)
+		t += dt
+		_face_toward(eye, dt)
+		_turn_player_view(dt, 1.6)
+	figure.play(&"aim_hold", 0.1)
+	var hold := _rng.randf_range(2.2, 3.2)
+	t = 0.0
+	while t < hold and is_inside_tree():
+		await get_tree().process_frame
+		var dt := get_process_delta_time()
+		t += dt
+		_face_toward(eye, dt)
+		_turn_player_view(dt, 2.2)
+		_fp_audio[0].volume_db = lerpf(-3.0, 2.0, t / hold)
+	# Disparo y corte a negro instantáneo.
+	_play_at(SFX + "gunshot.wav", figure.muzzle().global_position, 6.0, 12.0, 70.0)
+	_muzzle_flash()
+	_cut_to_black()
+	figure.play(&"shoot", 0.0)
+	await get_tree().create_timer(2.2).timeout
+	_player_job = {}
+	player_executed.emit()
 
 
-## Gira hacia un punto (en el plano). `snap` lo hace de golpe; si no, suavizado.
-func _face_toward(point: Vector3, snap: bool, dt: float = 0.0) -> void:
-	var d := point - position
+## Gira suavemente la cámara del jugador hacia el árbitro si no lo mira; `rate` en 1/s.
+func _turn_player_view(dt: float, rate: float) -> void:
+	var player := root.player
+	var head_pos := player.global_position
+	# Mira al cañón (que le apunta a la cara) con la cabeza del árbitro justo encima.
+	var target := figure.muzzle().global_position.lerp(figure.head_global_position(), 0.3) - head_pos
+	var want_yaw := atan2(-target.x, -target.z)
+	var want_pitch := atan2(target.y, Vector2(target.x, target.z).length())
+	var k := clampf(rate * dt, 0.0, 1.0)
+	player.set_look(lerp_angle(player.yaw, want_yaw, k), lerpf(player.pitch, want_pitch, k))
+
+
+func _start_fp_audio() -> void:
+	var specs := [["heartbeat_loop.wav", -14.0], ["panic_breath_loop.wav", -22.0]]
+	for s in specs:
+		var p := AudioStreamPlayer.new()
+		p.bus = &"SFX" if AudioServer.get_bus_index(&"SFX") != -1 else &"Master"
+		p.stream = load(SFX + s[0])
+		p.volume_db = s[1]
+		add_child(p)
+		p.play()
+		_fp_audio.append(p)
+
+
+func _cut_to_black() -> void:
+	for p in _fp_audio:
+		p.stop()
+	_black = CanvasLayer.new()
+	_black.layer = 9
+	var r := ColorRect.new()
+	r.color = Color.BLACK
+	r.set_anchors_preset(Control.PRESET_FULL_RECT)
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_black.add_child(r)
+	root.add_child(_black)
+	var ring := AudioStreamPlayer.new()
+	ring.bus = &"SFX" if AudioServer.get_bus_index(&"SFX") != -1 else &"Master"
+	ring.stream = load(SFX + "ear_ring.wav")
+	ring.volume_db = -3.0
+	root.add_child(ring)
+	ring.play()
+
+
+# --- Movimiento ---------------------------------------------------------------------------------
+
+## Camina por `path` a `speed` m/s. Devuelve false si lo interrumpió algo más urgente que
+## `level`. `on_progress(metros_restantes)` se llama cada fotograma.
+func _walk_path(path: Array[Vector3], speed: float, level: int, on_progress: Callable = Callable()) -> bool:
+	if path.is_empty():
+		return true
+	figure.play(&"walk", 0.25)
+	figure.set_walk_speed(speed)
+	var remaining := ArbiterRoutes.route_length(position, path)
+	for p in path:
+		while true:
+			if not is_inside_tree():
+				return false
+			if _urgency() > level:
+				_idle()
+				return false
+			var to := p - position
+			to.y = 0.0
+			var d := to.length()
+			if d < 0.03:
+				break
+			await get_tree().process_frame
+			if not is_inside_tree():
+				return false
+			var dt := get_process_delta_time()
+			var step := minf(speed * dt, d)
+			position += to / d * step
+			remaining = maxf(remaining - step, 0.0)
+			_face_toward(position + to, dt, 9.0)
+			if on_progress.is_valid():
+				on_progress.call(remaining)
+	return true
+
+
+## Gira hacia un punto del suelo (suavizado con `rate`; sin `dt` de golpe).
+func _face_toward(point: Vector3, dt: float = 0.0, rate: float = 7.0) -> void:
+	var d := point - global_position if is_inside_tree() else point - position
 	d.y = 0.0
 	if d.length() < 0.001:
 		return
-	var yaw := atan2(-d.x, -d.z)
-	rotation.y = yaw if snap or dt <= 0.0 else lerp_angle(rotation.y, yaw, clampf(dt * 8.0, 0.0, 1.0))
+	var yaw := atan2(d.x, d.z)
+	rotation.y = yaw if dt <= 0.0 else lerp_angle(rotation.y, yaw, clampf(dt * rate, 0.0, 1.0))
 
 
-## Balanceo de piernas y brazos según la velocidad real (m/s).
-func _swing(speed: float) -> void:
-	var amp := clampf(speed / WALK_SPEED, 0.0, 1.4) * 0.45
-	var s := sin(_step) * amp
-	_legs[0].rotation.x = s
-	_legs[1].rotation.x = -s
-	_arms[0].rotation.x = -s * 0.5
-	_arms[1].rotation.x = s * 0.5
-	_body.position.y = _body_base_y + absf(sin(_step)) * 0.012 * clampf(speed / WALK_SPEED, 0.0, 1.0)
+## Se queda quieto y gira hasta mirar `point` en `seconds` s.
+func _turn_to(point: Vector3, seconds: float) -> void:
+	_idle()
+	var t := 0.0
+	while t < seconds and is_inside_tree():
+		await get_tree().process_frame
+		var dt := get_process_delta_time()
+		t += dt
+		_face_toward(point, dt, 10.0)
 
 
-func _look_at_board(gen: int) -> void:
-	# Se planta frente a la mesa y baja la cabeza hacia el tablero.
-	var tw := create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE)
-	tw.tween_property(self, "rotation:y", atan2(-(0.0 - position.x), -(0.0 - position.z)), 0.4)
-	tw.tween_property(_head, "rotation:x", deg_to_rad(-32.0), 0.5)
-	await tw.finished
-	if gen != _gen or not is_inside_tree():
+# --- Pasos, sonido y fogonazo -----------------------------------------------------------------
+
+func _process(_delta: float) -> void:
+	if figure == null:
 		return
-
-
-## Gesto del veredicto: si hubo trampa señala al acusado; si no, extiende la palma y niega.
-func _gesture(correct: bool, accused: int, gen: int) -> void:
-	var arm := _arms[1]
-	var tw := create_tween().set_trans(Tween.TRANS_SINE)
-	tw.tween_property(_head, "rotation:x", 0.0, 0.3)
-	if correct:
-		# Brazo estirado hacia el rival (o el jugador) y sacudida seca.
-		var toward_rival := accused != root.human_color
-		var yaw := atan2(-(0.0 - position.x), -((-0.55 if toward_rival else 0.55) - position.z))
-		tw.tween_property(self, "rotation:y", yaw, 0.35)
-		tw.tween_property(arm, "rotation:x", deg_to_rad(-95.0), 0.4)
-		tw.tween_property(arm, "rotation:x", deg_to_rad(-80.0), 0.15)
-		tw.tween_property(arm, "rotation:x", deg_to_rad(-95.0), 0.15)
-	else:
-		tw.tween_property(arm, "rotation:x", deg_to_rad(-70.0), 0.35)
-		tw.tween_property(_head, "rotation:y", deg_to_rad(18.0), 0.2)
-		tw.tween_property(_head, "rotation:y", deg_to_rad(-18.0), 0.3)
-		tw.tween_property(_head, "rotation:y", 0.0, 0.2)
-	tw.tween_interval(0.5)
-	tw.tween_property(arm, "rotation:x", 0.0, 0.4)
-	tw.tween_property(_head, "rotation:y", 0.0, 0.1)
-	await tw.finished
-	if gen != _gen or not is_inside_tree():
+	if figure.current() != &"walk":
+		_prev_anim_pos = 0.0
 		return
+	var pos := figure.animation_player().current_animation_position
+	var stepped := pos < _prev_anim_pos  # dio la vuelta al ciclo: apoyo del pie en 0
+	for ph in STEP_PHASES:
+		if ph > 0.0 and _prev_anim_pos < ph and pos >= ph:
+			stepped = true
+	if stepped:
+		_footstep()
+	_prev_anim_pos = pos
 
 
-# --- Construcción ----------------------------------------------------------------------
+func _footstep() -> void:
+	var p := _step_players[_step_next]
+	_step_next = (_step_next + 1) % _step_players.size()
+	p.stream = load(SFX + "footstep_%d.wav" % _rng.randi_range(1, 6))
+	p.pitch_scale = _rng.randf_range(0.93, 1.07)
+	p.volume_db = STEP_BASE_DB + _rng.randf_range(-1.5, 0.5)
+	p.play()
 
-func _build() -> void:
-	var cloth := Color(0.045, 0.045, 0.055)
-	var skin := Color(0.66, 0.60, 0.55)
-	var parts := OpponentAvatar.build_figure(skin, cloth, false)
-	_body = parts.root
-	_head = parts.head
-	# La figura base está sentada: se quitan los muslos y se sube al asiento.
-	var thighs: Array[Node] = []
-	for i in _body.get_child_count():
-		var c := _body.get_child(i)
-		if c is MeshInstance3D and abs(c.rotation.x - deg_to_rad(90.0)) < 0.01:
-			thighs.append(c)
-	for t in thighs:
-		_body.remove_child(t)
-		t.queue_free()
-	_body_base_y = HIP_HEIGHT - 0.45 + 0.02
-	_body.position = Vector3(0, _body_base_y, 0)
-	_body.get_child(0).position = Vector3(0.0, 0.70, 0.0)
-	add_child(_body)
 
-	var cloth_mat := StandardMaterial3D.new()
-	cloth_mat.albedo_color = cloth
-	cloth_mat.roughness = 0.9
-	# Piernas con pivote en la cadera, brazos en el hombro.
-	for s in [-1.0, 1.0]:
-		var leg := Node3D.new()
-		leg.position = Vector3(s * 0.09, HIP_HEIGHT, 0.0)
-		add_child(leg)
-		var lm := MeshInstance3D.new()
-		var cm := CapsuleMesh.new()
-		cm.radius = 0.075
-		cm.height = 0.88
-		lm.mesh = cm
-		lm.material_override = cloth_mat
-		lm.position = Vector3(0, -0.40, 0)
-		leg.add_child(lm)
-		_legs.append(leg)
-	for s in [-1.0, 1.0]:
-		var arm := Node3D.new()
-		arm.position = Vector3(s * 0.23, 1.42, 0.0)
-		add_child(arm)
-		var am := MeshInstance3D.new()
-		var acm := CapsuleMesh.new()
-		acm.radius = 0.045
-		acm.height = 0.62
-		am.mesh = acm
-		am.material_override = cloth_mat
-		am.position = Vector3(0, -0.27, 0)
-		arm.add_child(am)
-		var hand := MeshInstance3D.new()
-		var hm := SphereMesh.new()
-		hm.radius = 0.04
-		hm.height = 0.08
-		hand.mesh = hm
-		var skin_mat := StandardMaterial3D.new()
-		skin_mat.albedo_color = skin
-		hand.material_override = skin_mat
-		hand.position = Vector3(0, -0.6, 0)
-		arm.add_child(hand)
-		_arms.append(arm)
-	# Gorra de árbitro: copa y visera.
-	var hat_mat := StandardMaterial3D.new()
-	hat_mat.albedo_color = Color(0.02, 0.02, 0.025)
-	var crown := MeshInstance3D.new()
-	var crm := CylinderMesh.new()
-	crm.top_radius = 0.095
-	crm.bottom_radius = 0.108
-	crm.height = 0.085
-	crown.mesh = crm
-	crown.material_override = hat_mat
-	crown.position = Vector3(0, 0.1, 0.0)
-	_head.add_child(crown)
-	var brim := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = Vector3(0.17, 0.012, 0.075)
-	brim.mesh = bm
-	brim.material_override = hat_mat
-	brim.position = Vector3(0, 0.065, -0.1)
-	_head.add_child(brim)
-	# Un farol tenue lo hace legible al acercarse a la mesa, sin romper la penumbra.
-	_lantern = OmniLight3D.new()
-	_lantern.light_color = Color(0.85, 0.75, 0.6)
-	_lantern.light_energy = 0.45
-	_lantern.omni_range = 2.6
-	_lantern.shadow_enabled = false
-	_lantern.position = Vector3(0, 1.9, -0.3)
-	add_child(_lantern)
+func _build_steps() -> void:
+	for i in 3:
+		var p := AudioStreamPlayer3D.new()
+		p.name = "Paso%d" % i
+		p.bus = &"SFX" if AudioServer.get_bus_index(&"SFX") != -1 else &"Master"
+		p.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
+		p.unit_size = STEP_UNIT_SIZE
+		p.max_distance = STEP_MAX_DISTANCE
+		p.attenuation_filter_cutoff_hz = 4500.0
+		p.attenuation_filter_db = -18.0
+		p.position = Vector3(0.0, 0.05, 0.0)
+		add_child(p)
+		_step_players.append(p)
+
+
+## Reproduce un sonido 3D suelto en el mundo.
+func _play_at(path: String, pos: Vector3, db: float, unit_size: float, max_dist: float) -> void:
+	var p := AudioStreamPlayer3D.new()
+	p.bus = &"SFX" if AudioServer.get_bus_index(&"SFX") != -1 else &"Master"
+	p.stream = load(path)
+	p.volume_db = db
+	p.unit_size = unit_size
+	p.max_distance = max_dist
+	p.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
+	var host: Node = root if root != null else self
+	host.add_child(p)
+	p.global_position = pos
+	p.finished.connect(p.queue_free)
+	p.play()
+
+
+func _build_flash() -> void:
+	var m := figure.muzzle()
+	_flash = OmniLight3D.new()
+	_flash.light_color = Color(1.0, 0.75, 0.4)
+	_flash.omni_range = 5.0
+	_flash.light_energy = 0.0
+	_flash.shadow_enabled = false
+	_flash.visible = false
+	m.add_child(_flash)
+	_sparks = CPUParticles3D.new()
+	_sparks.emitting = false
+	_sparks.one_shot = true
+	_sparks.explosiveness = 1.0
+	_sparks.amount = 14
+	_sparks.lifetime = 0.16
+	_sparks.direction = Vector3(0.0, 0.0, -1.0)
+	_sparks.spread = 28.0
+	_sparks.initial_velocity_min = 2.0
+	_sparks.initial_velocity_max = 5.0
+	_sparks.gravity = Vector3.ZERO
+	var mesh := SphereMesh.new()
+	mesh.radius = 0.012
+	mesh.height = 0.024
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(1.0, 0.8, 0.4)
+	mesh.material = mat
+	_sparks.mesh = mesh
+	m.add_child(_sparks)

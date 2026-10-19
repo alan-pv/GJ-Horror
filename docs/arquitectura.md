@@ -242,12 +242,16 @@ Reglas de validación (`CheatRules.validate`, el mismo código para el servidor,
 - Las advertencias viven en `PlayerSession`, no en la partida: se arrastran entre partidas y se reinician con `reset_for_tournament()` al empezar un torneo nuevo.
 - HUD: contador de advertencias arriba a la izquierda; mensaje del árbitro con el veredicto.
 
-### 4.8 Árbitro (`arbiter.gd`)
+### 4.8 Árbitro verdugo (`arbiter.gd`, `arbiter_module.gd`)
 
-- Figura de pie que espera en la penumbra (`HOME` = (−1,6; 0; −4,6)). Es puramente visual; el veredicto es del servidor.
-- Al empezar una acusación camina a la mesa (`TABLE_SPOT`, velocidad 1,35 m/s) llegando ~0,4 s antes de la resolución, se planta y baja la cabeza hacia el tablero.
-- Al resolver: subtítulo ("Hubo trampa. Las blancas quedan descalificadas." / "No veo nada irregular. Advertencia N de 3 para las ...") y gesto (si hubo trampa señala al acusado con sacudida seca; si no, extiende la palma y niega con la cabeza). Después vuelve a su sitio.
-- `pass_behind(target, seconds)`: pasa despacio por detrás de la silla del jugador (se ignora si está ocupado con una acusación) y vuelve rodeando la mesa. `is_near(point, radius)` lo consulta el `EventModule`.
+- `ArbiterModule` crea el `Arbiter` (`root.arbiter`), avisa `server.set_arbiter_near` mientras está a ≤ 2 m del centro de la mesa del humano y, como respaldo, pide la ejecución de cada `table_eliminated`. Usa `ArbiterFigure`.
+- **Patrulla** (`ArbiterRoutes`, lógica pura): recorre sin parar los pasillos de la cuadrícula (líneas entre columnas/filas y el perímetro) a ~1 m/s (`set_walk_speed` ajusta el paso), con pausas de 1,6-4 s mirando una mesa y a veces cruzando por detrás de la silla del jugador. Las rutas solo usan pasillos (probado: nunca cruzan mesas). `pass_behind` (evento `arbitro_pasa`) desvía la patrulla por la espalda del jugador.
+- **Pasos:** 3 `AudioStreamPlayer3D` en rotación, uno por apoyo de la animación `walk` (en 0,00 y 0,65 s del ciclo), `footstep_1..6` con tono ±7 %. Distancia inversa, `unit_size` 4, `max_distance` 28, base -2 dB: +3 dB (tope) hasta 1,6 m, 0 dB a 4 m, -6 a 8 m, -12 a 16 m, -16 a 25 m; filtro paso bajo 4,5 kHz con -18 dB (`Arbiter.footstep_gain_db`).
+- **Cola** (`ExecutionQueue`): `request_execution(table, seat)` (sin duplicados), primero la mesa del humano y luego la más cercana. Camina a 1,25 m/s (hasta 1,9 si la cola crece), se coloca a 0,85 m al lado del condenado, amartilla, apunta (`aim`, `aim_hold` 1-2,5 s), dispara (estampido 3D, `OmniLight3D` y chispas en `muzzle()`), el condenado cae, `lower_gun`, emite `executed` y sigue. `has_pending_work()` = cola, ejecución, acusación o jugador pendientes.
+- **Condenado** (`Condemned`): mientras espera reacciona; mesas delanteras y laterales (filas 0-2): suplicar, llorar, paralizarse o huir (silla, `stand_flee` + ciclo, el árbitro lo alcanza y dispara de pie); mesas de la fila trasera: llorar o paralizarse. Sonidos 3D en su cabeza. El cuerpo queda hasta el fin de la ronda. Si `condemn_seat` devuelve null, se crea una figura temporal.
+- **Humano gana:** tras el fin de partida el árbitro ejecuta al rival en la mesa del humano (en la final, solo al decidirse la serie). **Humano pierde:** ejecución en primera persona (`execute_player`): latido y respiración, la cámara gira hacia el cañón, disparo, negro instantáneo con `ear_ring` y luego la pantalla "Eliminated".
+- **Acusación:** el árbitro va a la derecha de la mesa del humano, revisa las dos planillas (`inspect_sheets`), anuncia el veredicto (`hud.show_arbiter`) y, si hubo trampa, señala; la ejecución posterior es la de arriba. `GameRoot._on_game_over` espera `accusation_done`.
+- Depuración: `--force-execution=mesa,asiento[,modo]`, `--force-at`, `--lose-now`, `--win-now`, `--arb-start=x,z`.
 
 ### 4.9 Eventos y director de tensión
 
@@ -266,7 +270,7 @@ Reglas de validación (`CheatRules.validate`, el mismo código para el servidor,
 | `apagon` | Global | Centro | 4,5 | 1,0 | 60 | 0,9 | 0 | `bulb_pop` | Todas las luces, emisivos, conos y ambiente parpadean, se apagan y vuelven (`blackout`). |
 | `ruido_detras` | Global | Detrás | 2,0 | 1,4 | 25 | 1,0 | 0 | `slam` | Una banqueta cae y rueda a las espaldas del jugador. |
 | `acusacion_ajena` | Global | Mesa | 3,5 | 1,2 | 35 | 0,7 | 0 | `shout` | Alguien de otra mesa se levanta, señala al jugador y grita; subtítulo "¡Trampa!". |
-| `eliminacion` | Global | Mesa | 9,0 | 0,6 | 70 | 0,8 | 0,3 | `struggle` | Dos guardias sujetan a la figura y se la llevan a rastras. Es también la salida real de los eliminados de las mesas de fondo. |
+| `eliminacion` | Global (peso 0: ya no sale solo; solo `--event=eliminacion`) | Mesa | 9,0 | 0,0 | 70 | 0,8 | 0,3 | `struggle` | Dos guardias sujetan a la figura y se la llevan a rastras. Es también la salida real de los eliminados de las mesas de fondo. |
 | `arbitro_pasa` | Disuasivo | Detrás | 8,0 | 1,0 | 45 | 0,3 | 0 | `steps` | El árbitro pasa detrás del jugador (ver abajo). |
 | `cough` | Rival | Centro | 1,2 | 1,0 | 20 | 0,5 | 0 | `cough` | El personaje tose (cabeza y torso se doblan). |
 | `drop_piece` | Rival | Centro | 1,6 | 1,0 | 25 | 0,6 | 0 | `clack` | Una pieza cae sobre la mesa, rueda y cae al suelo; el personaje mira abajo. |

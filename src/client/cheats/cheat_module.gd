@@ -2,9 +2,9 @@ class_name CheatModule
 extends Node
 ## Módulo de gameplay "trampas y árbitro" (Hito 2A). `GameRoot` lo instancia y
 ## llama a `install`. Conecta las señales de trampas del servidor con las
-## animaciones de AMBAS manos, crea la entrada del jugador (teclas 1-4), el
-## panel de trampas y el árbitro. No decide nada: solo dibuja lo que el
-## servidor confirma.
+## animaciones de AMBAS manos y crea la entrada del jugador (teclas 1-4) y el
+## panel de trampas. (El árbitro lo crea `ArbiterModule`.) No decide nada: solo
+## dibuja lo que el servidor confirma.
 ##
 ## Depuración (argumentos tras `--`):
 ##   --cheat-demo=NOMBRE   guion automático de trampas: steal, slide, nudge,
@@ -17,7 +17,6 @@ var root: GameRoot
 var server: MatchServer
 var input: CheatInput
 var panel: CheatPanel
-var arbiter: Arbiter
 
 var _demo: Array[Dictionary] = []
 var _demo_time: float = 0.0
@@ -35,11 +34,6 @@ func install(p_root: GameRoot) -> void:
 	server.cheat_aborted.connect(_on_cheat_aborted)
 	for a in root.animators:
 		a.job_done.connect(_on_job_done)
-
-	arbiter = Arbiter.new()
-	root.add_child(arbiter)
-	arbiter.setup(root)
-	root.arbiter = arbiter
 
 	if not root.get_args().has("autoplay"):
 		panel = CheatPanel.new()

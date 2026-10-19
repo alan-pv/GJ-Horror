@@ -44,6 +44,7 @@ signal players_remaining_changed(remaining: int, total: int)
 ## basta con añadir su ruta aquí; no hace falta tocar el resto de este archivo.
 const MODULES: Array[String] = [
 	"res://src/client/cheats/cheat_module.gd",
+	"res://src/client/arbiter_module.gd",
 	"res://src/client/events/event_module.gd",
 ]
 
@@ -311,9 +312,15 @@ func _on_beginner_warning(color: int, uci: String, text: String) -> void:
 
 func _on_accusation_started(accuser: int) -> void:
 	hud.show_arbiter("The arbiter is coming to the table...", config.arbiter_delay + 0.5)
+	if arbiter != null:
+		arbiter.begin_accusation(accuser)
 
 
 func _on_accusation_resolved(accuser: int, correct: bool, warnings: int) -> void:
+	# Con árbitro, él anuncia el veredicto al terminar de revisar las planillas.
+	if arbiter != null:
+		arbiter.resolve_accusation(accuser, correct, warnings)
+		return
 	var by_human := accuser == human_color
 	if correct:
 		hud.show_arbiter("Cheating confirmed" if by_human else "You were caught")
@@ -328,24 +335,63 @@ func _on_game_over(winner: int, reason: String) -> void:
 	var times: PackedFloat64Array = [server.clock.remaining[0], server.clock.remaining[1]]
 	manager.report_result(tgame, winner, reason, times)
 	_refresh_tournament_hud()
-	# En la final perder la primera partida no elimina: se decide al cerrar la serie.
-	var eliminated := not won and not manager.is_final
+	# En la final perder (o ganar) la primera partida no elimina a nadie: solo la segunda,
+	# y solo si el desempate ya está decidido.
+	var series := _final_series_for_human()
+	var eliminated := not won and (not manager.is_final or series < 0)
+	var rival_dies := won and (not manager.is_final or series > 0)
 	if eliminated:
 		_ending = true
 	# Un instante para que se vea el último movimiento.
 	await get_tree().create_timer(1.2).timeout
 	if not is_inside_tree():
 		return
+	# Si el árbitro aún está dando el veredicto de una acusación, se espera a que termine.
+	if arbiter != null and arbiter.accusation_active():
+		await arbiter.accusation_done
+		if not is_inside_tree():
+			return
 	if eliminated:
 		_human_eliminated(reason)
 		return
-	_human_settled = true
 	if won:
 		hud.show_subtitle("You won: %s" % reason, 3.0)
 	else:
 		hud.show_subtitle("You lost this game of the final", 3.0)
+	if rival_dies and arbiter != null and tgame != null:
+		# El árbitro viene y ejecuta al rival frente al jugador.
+		arbiter.request_execution(HallLayout.HUMAN_TABLE, rival_color)
+		await arbiter.wait_executed(HallLayout.HUMAN_TABLE, rival_color)
+		if not is_inside_tree():
+			return
+		await get_tree().create_timer(1.5).timeout
+		if not is_inside_tree():
+			return
+	_human_settled = true
 	if not manager.round_complete():
 		hud.set_status("Waiting for the other tables...")
+
+
+## Resultado de la serie de la final para el humano al terminar su segunda partida:
+## 1 = la gana, -1 = la pierde, 0 = aún no se sabe (primera partida o desempate al azar).
+func _final_series_for_human() -> int:
+	if not manager.is_final or manager.final_games.size() != 1 or tgame == null:
+		return 0
+	var games: Array[TournamentGame] = [manager.final_games[0], tgame]
+	var human := manager.human_id
+	var wins := 0
+	var time_human := 0.0
+	var time_rival := 0.0
+	for g in games:
+		if g.winner_id() == human:
+			wins += 1
+		time_human += g.time_left_of(human)
+		time_rival += g.time_left_of(g.opponent_of(human))
+	if wins != 1:
+		return 1 if wins == 2 else -1
+	if is_equal_approx(time_human, time_rival):
+		return 0
+	return 1 if time_human > time_rival else -1
 
 
 # --- Torneo ------------------------------------------------------------------------
@@ -543,6 +589,11 @@ func _human_eliminated(reason: String) -> void:
 	_ending = true
 	_log("Humano eliminado (%s): torneo nuevo" % reason)
 	hud.set_status("")
+	# El árbitro viene a por el jugador: ejecución en primera persona, que acaba en negro.
+	if arbiter != null:
+		await arbiter.execute_player()
+		if not is_inside_tree():
+			return
 	hud.show_screen("Eliminated", reason.substr(0, 1).to_upper() + reason.substr(1) + "\n\nEntering a new tournament...",
 			"\nPress R to start now", Color(0.75, 0.12, 0.1))
 	await get_tree().create_timer(5.0 if not _args.has("autoplay") else 3.0).timeout

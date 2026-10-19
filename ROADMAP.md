@@ -11,13 +11,9 @@ Solo lo **pendiente**. Lo implementado se describe en [`docs/arquitectura.md`](d
   - [ ] Brazo con IK sobre el esqueleto nuevo; el codo nunca atraviesa la mesa.
   - [ ] Secuencia física de cada jugada: mover, pulsar el reloj y anotar en la planilla.
   - [ ] Lanzar `BeginnerHelper.precompute_async` también al empezar la partida y cuando el tablero cambie en el turno del humano (hoy solo tras la jugada del bot).
+  - [ ] Subir `config.arbiter_delay` a ~6-7 s para que el árbitro llegue y revise las planillas.
+  - [ ] Bloquear la entrada del jugador durante su ejecución en primera persona.
   - [ ] Encender `MatchConfig.require_clock_press` (el servidor ya lo soporta) e impedir `press_clock` con la mano ocupada en una trampa.
-- **R8. Árbitro verdugo y eliminaciones**
-  - [ ] Árbitro que patrulla el salón todo el tiempo, con pasos espaciales que se oyen acercarse y alejarse.
-  - [ ] Al perder, el árbitro va a la mesa y dispara a la cabeza; el cuerpo queda en la mesa hasta el fin de la ronda.
-  - [ ] Mesas visibles frente al jugador con eliminaciones variadas (suplicar, llorar, intentar huir, quedarse inmóvil).
-  - [ ] Eliminación del propio jugador en primera persona.
-  - [ ] Revisión de las dos planillas al acusar.
 
 ## Pendiente de la etapa anterior
 
@@ -25,9 +21,7 @@ Solo lo **pendiente**. Lo implementado se describe en [`docs/arquitectura.md`](d
 - [ ] Pasillo entre filas de ~1,16 m entre sillas (`HallLayout.SPACING_Z` = 3,2): subirlo si el árbitro pasa justo.
 
 - [ ] `BotController.opponent_elo` nunca se asigna (Maia siempre ve un rival de 1200).
-- [ ] `tests/run_tests.gd` lista `test_beginner_helper.gd`, que no existe.
 - [ ] El humano no tiene tecla para sus eventos de distracción (toser, tirar una pieza).
-- [ ] Al eliminar a alguien de una mesa de fondo, su lámpara no se apaga hasta el fin de la ronda.
 
 - [ ] **Repo público el día que se publique el juego** en itch.io (AGPL de Maia-3).
 - [ ] Exportación web real (plantillas de Godot) y prueba de Maia-3 en navegador.

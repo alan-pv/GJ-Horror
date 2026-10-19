@@ -14,8 +14,7 @@ extends Node
 ##   --event-side=human fuerza toser/pieza sobre el humano en vez del rival
 ##   --no-events        sin eventos automáticos
 
-const ARBITER_NEAR_RADIUS := 1.5
-## Dónde pasa el árbitro: justo detrás de la silla del jugador (el cruce queda a ~1,35 m del centro de la mesa, dentro del radio de cercanía).
+## Referencia de "detrás del jugador" para el árbitro (él elige el pasillo de su espalda).
 const ARBITER_BEHIND := Vector3(0.0, 0.0, 0.45)
 
 const DEMO_IDS := {
@@ -32,11 +31,10 @@ var _demo_id: StringName = &""
 var _demo_at: float = 1.0
 var _demo_table: int = -1
 var _demo_human: bool = false
-var _arbiter_until: float = -1.0
-var _arbiter_flag: bool = false
 var _time: float = 0.0
 var _enabled: bool = true
-## Asiento del eliminado cuya salida está en curso (-1 = evento aleatorio, sin asiento).
+## Asiento del eliminado cuya salida está en curso (-1 = evento aleatorio, sin asiento);
+## solo lo usa el evento `eliminacion` forzado por depuración.
 var _drag_seat: int = -1
 
 
@@ -59,7 +57,6 @@ func install(p_root: GameRoot) -> void:
 	stage.setup(root.hall, root.get_node_or_null("Entorno"))
 
 	root.server.rival_event.connect(_on_rival_event)
-	root.table_eliminated.connect(_on_table_eliminated)
 	root.players_remaining_changed.connect(set_players_remaining)
 	set_players_remaining(root.players_left(), root.manager.player_count)
 
@@ -82,12 +79,10 @@ func set_players_remaining(remaining: int, total: int) -> void:
 func _process(delta: float) -> void:
 	var server := root.server
 	if server == null or not server.started or server.is_over():
-		_set_arbiter_near(false)
 		return
 	_time += delta
 	if _enabled and not server.accusation_pending():
 		director.tick(delta)
-	_update_arbiter()
 	if _demo_id != &"" and _time >= _demo_at:
 		var id := _demo_id
 		_demo_id = &""
@@ -140,14 +135,6 @@ func _on_event(id: StringName, origin: Vector3, duration: float) -> void:
 		_notify_bots(notice_pos, intensity)
 
 
-## Decisión de diseño: a quien pierde en otra mesa se lo llevan los guardias
-## (`EventStage.drag_away`); la figura NO se levanta a caminar sola (`Hall.remove_occupant`
-## solo se usa si no hay módulo de eventos), así torneo y eventos no se pisan.
-func _on_table_eliminated(_table_index: int, position: Vector3, seat: int) -> void:
-	_drag_seat = seat
-	director.fire(&"eliminacion", position)
-
-
 func _notify_bots(pos: Vector3, intensity: float) -> void:
 	if root.rival_bot != null:
 		root.rival_bot.notice_event(pos, intensity)
@@ -162,34 +149,7 @@ func _start_arbiter_pass(duration: float) -> bool:
 	if arbiter == null or not arbiter.has_method("pass_behind"):
 		return false
 	arbiter.pass_behind(ARBITER_BEHIND, duration)
-	_arbiter_until = _time + duration
 	return true
-
-
-## Mientras el árbitro esté a menos de ~1,5 m de la mesa, las trampas se ven.
-func _update_arbiter() -> void:
-	if _arbiter_until < 0.0:
-		return
-	var arbiter := root.get_node_or_null("Arbitro")
-	if arbiter == null:
-		_arbiter_until = -1.0
-		_set_arbiter_near(false)
-		return
-	var near: bool = arbiter.has_method("is_near") and bool(arbiter.is_near(Vector3.ZERO, ARBITER_NEAR_RADIUS))
-	_set_arbiter_near(near)
-	# Termina cuando acabó el paso y ya se alejó (al volver a su sitio aún puede estar cerca).
-	if _time > _arbiter_until and not near:
-		_arbiter_until = -1.0
-
-
-func _set_arbiter_near(near: bool) -> void:
-	if near == _arbiter_flag:
-		return
-	_arbiter_flag = near
-	root.server.set_arbiter_near(near)
-	if root.get_args().has("verbose") or root.get_args().has("autoplay"):
-		var arb := root.get_node_or_null("Arbitro") as Node3D
-		print("[evento %.1f] árbitro %s de la mesa (is_arbiter_near=%s, pos=%s)" % [_time, "cerca" if near else "lejos", root.server.is_arbiter_near(), arb.position if arb != null else "?"])
 
 
 # --- Eventos del rival ----------------------------------------------------------------------------
