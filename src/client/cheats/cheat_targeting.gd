@@ -21,14 +21,14 @@ static func targets(b: BoardState, color: int, def: CheatDef, from: int) -> Arra
 ## Motivo por el que una pieza no sirve para esta trampa ("" si tiene objetivos).
 static func why_not(b: BoardState, color: int, def: CheatDef, from: int) -> String:
 	if from < 0 or from > 63:
-		return "casilla inválida"
+		return "invalid square"
 	if b.squares[from] == ChessPiece.NONE:
-		return "no hay pieza"
+		return "no piece there"
 	if not targets(b, color, def, from).is_empty():
 		return ""
 	# El rechazo "de pieza" (rey, propia/enemiga) explica mejor que "sin destinos".
 	var probe := CheatRules.validate(b, color, def, from, from)
-	for r in ["los reyes no se tocan", "solo piezas propias", "solo piezas enemigas"]:
+	for r in [CheatRules.REASON_KING, CheatRules.REASON_OWN_ONLY, CheatRules.REASON_ENEMY_ONLY]:
 		if probe.reason == r:
 			return r
-	return "esa pieza no tiene destinos posibles"
+	return "that piece has no possible destinations"

@@ -3,8 +3,8 @@ extends RefCounted
 ## Una partida de la ronda en curso: quién juega con qué color, en qué mesa y
 ## cómo terminó. Los ids son los de `PlayerSession.id` del torneo.
 
-## Mesa del salón: -1 = mesa principal, 0..8 = mesas decorativas (`Hall.DECOR_TABLES`),
-## -2 = sin mesa visible (más partidas que mesas).
+## Mesa del salón: índice de `HallLayout` (0..15; la del humano es `HallLayout.HUMAN_TABLE`),
+## -2 = sin mesa visible (más partidas que mesas). `TABLE_MAIN` ya no se asigna.
 const TABLE_MAIN := -1
 const TABLE_NONE := -2
 
@@ -40,6 +40,11 @@ func player_of(color: int) -> int:
 
 func opponent_of(id: int) -> int:
 	return black if id == white else white
+
+
+## Asiento (color) del perdedor, o -1 si no hay resultado.
+func loser_seat() -> int:
+	return -1 if winner_color < 0 else ChessPiece.opposite(winner_color)
 
 
 func winner_id() -> int:

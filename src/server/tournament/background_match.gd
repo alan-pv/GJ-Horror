@@ -5,6 +5,12 @@ extends RefCounted
 ## sin nodos ni cerebros: la política es de 1 jugada de profundidad, barata,
 ## y se avanza con `tick()` desde el gestor. Las jugadas se escalonan en el
 ## tiempo (piensa entre 1 y 6 s simuladas) para repartir el costo por fotograma.
+## Reloj 3+2 como la partida del humano.
+##
+## Cada partida tiene un fin previsto (`planned_end`, entre END_MIN y END_MAX
+## segundos de ronda): si no terminó antes por sus propias reglas, al llegar se
+## resuelve con un resultado simulado (abandono o mate) según el Elo. Así las
+## eliminaciones se reparten a lo largo de la ronda en vez de juntarse al final.
 ##
 ## El nivel (Elo) sesga la política: los fuertes capturan mejor, no regalan
 ## piezas y piensan algo más rápido, así que ganan más a menudo.
@@ -13,6 +19,11 @@ signal finished(game: TournamentGame)
 
 const THINK_MIN := 1.0
 const THINK_MAX := 6.0
+## Ventana (segundos de ronda) en que puede caer el fin previsto de una partida.
+const END_MIN := 25.0
+const END_MAX := 200.0
+## Probabilidad de que el fin simulado sea un abandono (si no, un mate).
+const RESIGN_CHANCE := 0.7
 
 var game: TournamentGame
 var server: MatchServer
@@ -22,19 +33,23 @@ var table: int = TournamentGame.TABLE_NONE
 var moves_made: int = 0
 ## Milisegundos acumulados en la política y en el servidor (medición).
 var cost_ms: float = 0.0
+## Segundo de la ronda en que la partida se resuelve a la fuerza si sigue en juego.
+var planned_end: float = 0.0
 
 var _think_left: float = 0.0
 var _thinking_color: int = -1
 var _rng := RandomNumberGenerator.new()
 
 
-func _init(p_game: TournamentGame, white: PlayerSession, black: PlayerSession, white_elo: int, black_elo: int, seed_value: int = -1, seconds: float = 180.0) -> void:
+func _init(p_game: TournamentGame, white: PlayerSession, black: PlayerSession, white_elo: int, black_elo: int, seed_value: int = -1, seconds: float = 180.0, increment: float = 2.0) -> void:
 	game = p_game
 	table = p_game.table
 	elo = [white_elo, black_elo]
 	var cfg := MatchConfig.new()
 	cfg.white_seconds = seconds
 	cfg.black_seconds = seconds
+	cfg.increment_seconds = increment
+	cfg.keep_scoresheet = false
 	cfg.beginner_help = false
 	var cheats: Array[CheatDef] = []
 	cfg.cheats = cheats
@@ -42,6 +57,8 @@ func _init(p_game: TournamentGame, white: PlayerSession, black: PlayerSession, w
 		_rng.seed = seed_value
 	else:
 		_rng.randomize()
+	# Más temprano que tarde: la mayoría cae a mitad de ronda, pocas al límite.
+	planned_end = lerpf(END_MIN, END_MAX, pow(_rng.randf(), 1.15))
 	server = MatchServer.new(cfg, white, black, BoardState.START_FEN, _rng.randi())
 	server.game_over.connect(_on_game_over)
 	server.start()
@@ -59,6 +76,8 @@ func tick(delta: float, can_move: bool = true) -> bool:
 	var moved := false
 	var t0 := Time.get_ticks_usec()
 	server.tick(delta)
+	if not server.is_over() and server.time >= planned_end:
+		_resolve_simulated()
 	if not server.is_over():
 		var side := server.board.side_to_move
 		if _thinking_color != side:
@@ -70,6 +89,15 @@ func tick(delta: float, can_move: bool = true) -> bool:
 			moved = true
 	cost_ms += (Time.get_ticks_usec() - t0) / 1000.0
 	return moved
+
+
+## Cierra la partida con un resultado simulado: gana el favorito del Elo con
+## más frecuencia; el perdedor abandona o recibe mate.
+func _resolve_simulated() -> void:
+	var p_white := 1.0 / (1.0 + pow(10.0, (elo[1] - elo[0]) / 400.0))
+	var win := ChessPiece.WHITE if _rng.randf() < p_white else ChessPiece.BLACK
+	var reason := MatchServer.REASON_RESIGNED if _rng.randf() < RESIGN_CHANCE else MatchServer.REASON_CHECKMATE
+	server.force_end(win, reason)
 
 
 func _think_time(color: int) -> float:

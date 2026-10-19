@@ -26,12 +26,12 @@ func test_pairing_16() -> void:
 		seen[g.black] = true
 	check_eq(seen.size(), 16, "los 16 juegan")
 	# El humano está en la mesa principal; las demás, en mesas distintas.
-	check_eq(m.game_of(0).table, TournamentGame.TABLE_MAIN, "humano en la mesa principal")
+	check_eq(m.game_of(0).table, HallLayout.HUMAN_TABLE, "humano en su mesa fija")
 	var tables := {}
 	for g in games:
 		check(not tables.has(g.table), "mesas distintas")
 		tables[g.table] = true
-	check_eq(m.round_label(), "Ronda 1")
+	check_eq(m.round_label(), "Round 1")
 
 
 func test_colors_are_random() -> void:
@@ -76,10 +76,10 @@ func test_bye_for_human_uses_main_table() -> void:
 		m.start_round()
 		if m.byes.has(0):
 			found = true
-			check_eq(m.bye_tables[0], TournamentGame.TABLE_MAIN, "descanso del humano en la mesa principal")
+			check_eq(m.bye_tables[0], HallLayout.HUMAN_TABLE, "descanso del humano en su mesa")
 			check(m.game_of(0) == null)
 			for g in m.games:
-				check(g.table != TournamentGame.TABLE_MAIN, "ninguna partida en la principal")
+				check(g.table != HallLayout.HUMAN_TABLE, "ninguna partida en la del humano")
 			break
 	check(found, "el humano descansó en alguna semilla")
 
@@ -264,3 +264,69 @@ func test_background_policy_is_legal_and_prefers_free_captures() -> void:
 	for i in 20:
 		var uci := BackgroundMatch.choose_move(start, 1000, rng)
 		check(ChessRules.find_legal(start, ChessMove.from_uci(uci)) != null, "jugada legal " + uci)
+
+
+func test_tournament_32_fixed_tables_nearest_first() -> void:
+	var m := TournamentManager.new(32, 5)
+	check_eq(m.player_count, 32)
+	check_eq(TournamentManager.rounds_for(32), 5)
+	var sizes: Array[int] = []
+	var order := HallLayout.tables_by_distance()
+	order.erase(HallLayout.HUMAN_TABLE)
+	while not m.is_finished():
+		var games := m.start_round()
+		sizes.append(m.alive.size())
+		if not m.is_final:
+			check_eq(m.game_of(0).table, HallLayout.HUMAN_TABLE, "mesa del humano fija")
+			# Las demás partidas ocupan las mesas más cercanas primero.
+			var used := {}
+			for g in games:
+				if not g.involves(0):
+					used[g.table] = true
+			for i in used.size():
+				check(used.has(order[i]), "mesa cercana %d ocupada (ronda %d)" % [order[i], m.round_no])
+		_lowest_wins(m)
+		m.finish_round()
+	check_eq(sizes, [32, 16, 8, 4, 2, 2] as Array[int], "32, 16, 8, 4, final de 2 partidas")
+	check_eq(m.round_no, 5, "5 rondas con la final")
+
+
+func test_background_ends_are_spread_over_the_round() -> void:
+	var m := TournamentManager.new(32, 17)
+	var games := m.start_round()
+	var ends: Array[float] = []
+	var sum := 0.0
+	for g in games:
+		if g.involves(0):
+			continue
+		var bg := BackgroundMatch.new(g, m.sessions[g.white], m.sessions[g.black], m.elo[g.white], m.elo[g.black], g.white * 31 + 7)
+		ends.append(bg.planned_end)
+		sum += bg.planned_end
+	check_eq(ends.size(), 15)
+	var mean := sum / ends.size()
+	var sq := 0.0
+	var late := 0
+	for e in ends:
+		sq += (e - mean) * (e - mean)
+		check(e >= BackgroundMatch.END_MIN and e <= BackgroundMatch.END_MAX, "dentro de la ventana")
+		if e > BackgroundMatch.END_MAX - 10.0:
+			late += 1
+	var sd := sqrt(sq / ends.size())
+	check(sd > 30.0, "dispersión de los fines: %.1f" % sd)
+	check(late < ends.size(), "no todas en los últimos 10 s")
+
+
+func test_background_resolves_at_planned_end() -> void:
+	var m := TournamentManager.new(4, 21)
+	var g := m.start_round()[0]
+	var bg := BackgroundMatch.new(g, m.sessions[g.white], m.sessions[g.black], m.elo[g.white], m.elo[g.black], 9)
+	var guard := 0
+	while not bg.is_over() and guard < 3000:
+		bg.tick(0.5)
+		guard += 1
+	check(bg.is_over(), "termina")
+	check(bg.server.time <= bg.planned_end + 1.0, "no más tarde de lo previsto")
+	g.winner_color = bg.server.winner
+	check_eq(g.loser_seat(), ChessPiece.opposite(bg.server.winner), "asiento del perdedor")
+	check_eq(bg.server.config.increment_seconds, 2.0, "reloj 3+2")
+	check(bg.server.scoresheet(0).is_empty(), "las mesas de fondo no llevan planilla")

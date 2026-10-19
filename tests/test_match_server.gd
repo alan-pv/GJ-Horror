@@ -17,7 +17,7 @@ func test_turns_and_clock() -> void:
 	check(not m.submit_move(ChessPiece.BLACK, "e7e5").ok, "negras no mueven primero")
 	m.tick(2.0)
 	check(m.submit_move(ChessPiece.WHITE, "e2e4").ok, "e4")
-	check_eq(m.clock.remaining[0], 178.0, "reloj blancas")
+	check_eq(m.clock.remaining[0], 180.0, "reloj blancas (2 s de partida +2 de incremento)")
 	check_eq(m.clock.running, ChessPiece.BLACK, "corre el reloj negro")
 	check(not m.submit_move(ChessPiece.BLACK, "e7e4").ok, "ilegal rechazada")
 

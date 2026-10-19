@@ -12,9 +12,10 @@ extends RefCounted
 enum Phase { IDLE, PLAYING, ROUND_DONE, FINISHED }
 
 const BOT_NAMES := [
-	"Aurelio", "Beatriz", "Cosme", "Dalia", "Ernesto", "Fausta", "Gaspar", "Hilda",
-	"Ignacio", "Jimena", "Lázaro", "Mireya", "Nicanor", "Ofelia", "Pascual", "Remedios",
-	"Sebastián", "Tadeo", "Ulises", "Valeria", "Wenceslao", "Ximena", "Yago", "Zoraida",
+	"Arthur", "Beatrice", "Cosmo", "Dahlia", "Ernest", "Fiona", "Gideon", "Hilda",
+	"Ignatius", "Juniper", "Lazarus", "Mirabel", "Nigel", "Ophelia", "Percival", "Rosalind",
+	"Sebastian", "Thaddeus", "Ulysses", "Valerie", "Wendell", "Xanthe", "Yorick", "Zelda",
+	"Barnaby", "Cordelia", "Desmond", "Eloise", "Fletcher", "Griselda", "Horace", "Imogen",
 ]
 
 var rng := RandomNumberGenerator.new()
@@ -42,13 +43,11 @@ var final_games: Array[TournamentGame] = []
 var is_final: bool = false
 ## Registro de eliminados: {id, round, table, reason}.
 var eliminated_log: Array[Dictionary] = []
-## Mesas decorativas disponibles, en orden de prioridad (la vista lo ajusta).
-var table_slots: Array[int] = [0, 1, 2, 3, 4, 5, 6, 7, 8]
 ## Cuántos jugadores había al empezar cada ronda.
 var round_sizes: Array[int] = []
 
 
-func _init(p_player_count: int = 16, seed_value: int = -1, human_name: String = "Tú") -> void:
+func _init(p_player_count: int = 32, seed_value: int = -1, human_name: String = "You") -> void:
 	player_count = maxi(p_player_count, 2)
 	if seed_value >= 0:
 		rng.seed = seed_value
@@ -168,15 +167,16 @@ func _start_final_game() -> void:
 		games.append(TournamentGame.new(first.black, first.white, 2))
 
 
-## Mesa principal para la partida (o descanso) del humano; el resto, a las
-## mesas decorativas en orden de prioridad.
+## Mesas fijas del salón (`HallLayout`): el humano siempre en `HUMAN_TABLE`; las
+## demás partidas y descansos, en las mesas más cercanas a él primero.
 func _assign_tables() -> void:
-	var slots := table_slots.duplicate()
+	var slots: Array[int] = HallLayout.tables_by_distance()
+	slots.erase(HallLayout.HUMAN_TABLE)
 	var human_game := game_of(human_id)
 	if human_game != null:
-		human_game.table = TournamentGame.TABLE_MAIN
+		human_game.table = HallLayout.HUMAN_TABLE
 	elif byes.has(human_id):
-		bye_tables[human_id] = TournamentGame.TABLE_MAIN
+		bye_tables[human_id] = HallLayout.HUMAN_TABLE
 	for g in games:
 		if g == human_game:
 			continue
@@ -242,7 +242,7 @@ func finish_round() -> Dictionary:
 			return result
 		var champ := _final_winner()
 		var loser: int = alive[0] if alive[1] == champ else alive[1]
-		_eliminate(loser, games[0].table, "perdió la final")
+		_eliminate(loser, games[0].table, "lost the final")
 		result.eliminated.append({"id": loser, "table": games[0].table})
 		champion_id = champ
 		result.champion = champ
@@ -307,7 +307,7 @@ func win_chance(a: int, b: int) -> float:
 func simulate_result(game: TournamentGame) -> void:
 	var wc := ChessPiece.WHITE if rng.randf() < win_chance(game.white, game.black) else ChessPiece.BLACK
 	var times: PackedFloat64Array = [rng.randf_range(0.0, 120.0), rng.randf_range(0.0, 120.0)]
-	report_result(game, wc, "simulada", times)
+	report_result(game, wc, "simulated", times)
 
 
 ## Simula todas las partidas pendientes de la ronda. Si `human_wins`, el
@@ -316,7 +316,7 @@ func simulate_round(human_wins: bool = false) -> void:
 	for g in pending_games():
 		if human_wins and g.involves(human_id):
 			var t: PackedFloat64Array = [60.0, 60.0]
-			report_result(g, g.color_of(human_id), "simulada", t)
+			report_result(g, g.color_of(human_id), "simulated", t)
 		else:
 			simulate_result(g)
 
@@ -334,7 +334,7 @@ static func rounds_for(n: int) -> int:
 func round_label() -> String:
 	if is_final:
 		var no := games[0].game_no if not games.is_empty() else final_games.size() + 1
-		return "Final · partida %d de 2" % no
+		return "Final · game %d of 2" % no
 	if round_no > 0 and round_no <= round_sizes.size() and round_sizes[round_no - 1] <= 4:
-		return "Ronda %d · Semifinales" % round_no
-	return "Ronda %d" % round_no
+		return "Round %d · Semifinals" % round_no
+	return "Round %d" % round_no

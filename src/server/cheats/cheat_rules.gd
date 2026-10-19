@@ -4,18 +4,23 @@ class_name CheatRules
 ## y nunca queda en jaque el bando al que no le toca (posición imposible).
 
 
+const REASON_KING := "kings cannot be touched"
+const REASON_OWN_ONLY := "own pieces only"
+const REASON_ENEMY_ONLY := "enemy pieces only"
+
+
 ## Devuelve {ok, reason, distance, duration}.
 static func validate(b: BoardState, color: int, def: CheatDef, from: int, to: int) -> Dictionary:
 	var res := {"ok": false, "reason": "", "distance": 0, "duration": 0.0}
 	if from < 0 or from > 63:
-		res.reason = "casilla inválida"
+		res.reason = "invalid square"
 		return res
 	var piece := b.squares[from]
 	if piece == ChessPiece.NONE:
-		res.reason = "no hay pieza"
+		res.reason = "no piece there"
 		return res
 	if ChessPiece.type_of(piece) == ChessPiece.KING:
-		res.reason = "los reyes no se tocan"
+		res.reason = REASON_KING
 		return res
 	var own := ChessPiece.color_of(piece) == color
 	var distance := 0
@@ -23,52 +28,52 @@ static func validate(b: BoardState, color: int, def: CheatDef, from: int, to: in
 	match def.kind:
 		CheatDef.Kind.NUDGE:
 			if not own:
-				res.reason = "solo piezas propias"
+				res.reason = REASON_OWN_ONLY
 				return res
 			if to != from + 8 * ChessRules.pawn_dir(color):
-				res.reason = "solo avanza una casilla"
+				res.reason = "it only moves one square"
 				return res
 			distance = 1
 		CheatDef.Kind.SLIDE:
 			if not own:
-				res.reason = "solo piezas propias"
+				res.reason = REASON_OWN_ONLY
 				return res
 			distance = _line_distance(b, from, to)
 			if distance <= 0:
-				res.reason = "debe ser en línea y sin piezas en medio"
+				res.reason = "must be in a line with no pieces in between"
 				return res
 		CheatDef.Kind.STEAL:
 			if own:
-				res.reason = "solo piezas enemigas"
+				res.reason = REASON_ENEMY_ONLY
 				return res
 			to = -1
 		CheatDef.Kind.MOVE_ENEMY:
 			if own:
-				res.reason = "solo piezas enemigas"
+				res.reason = REASON_ENEMY_ONLY
 				return res
 			distance = _king_distance(from, to)
 			if distance <= 0:
-				res.reason = "destino inválido"
+				res.reason = "invalid destination"
 				return res
 
 	if to >= 0:
 		if to > 63 or b.squares[to] != ChessPiece.NONE:
-			res.reason = "el destino debe estar vacío"
+			res.reason = "the destination must be empty"
 			return res
 		if ChessPiece.type_of(piece) == ChessPiece.PAWN and (ChessPiece.rank_of(to) == 0 or ChessPiece.rank_of(to) == 7):
-			res.reason = "un peón no puede quedar en la primera ni en la última fila"
+			res.reason = "a pawn cannot end up on the first or last rank"
 			return res
 	if def.max_distance > 0 and distance > def.max_distance:
-		res.reason = "demasiado lejos"
+		res.reason = "too far"
 		return res
 
 	var after := b.clone()
 	_apply_squares(after, color, from, to)
 	if ChessRules.in_check(after, color):
-		res.reason = "dejaría a tu rey en jaque"
+		res.reason = "it would leave your king in check"
 		return res
 	if ChessRules.in_check(after, ChessPiece.opposite(after.side_to_move)):
-		res.reason = "dejaría en jaque al bando que no mueve"
+		res.reason = "it would put the side not to move in check"
 		return res
 
 	res.ok = true

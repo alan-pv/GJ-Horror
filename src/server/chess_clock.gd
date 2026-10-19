@@ -1,6 +1,7 @@
 class_name ChessClock
 extends RefCounted
-## Reloj de ajedrez sin incremento. El servidor lo avanza con `tick()`.
+## Reloj de ajedrez con incremento Fischer opcional (3+2 por defecto en las
+## partidas del torneo). El servidor lo avanza con `tick()`.
 
 signal flagged(color: int)
 
@@ -9,10 +10,13 @@ var remaining: PackedFloat64Array = [180.0, 180.0]
 var running: int = -1
 var paused: bool = false
 var flag_fallen: int = -1
+## Segundos que gana quien pulsa el reloj.
+var increment: float = 0.0
 
 
-func _init(white_seconds: float = 180.0, black_seconds: float = 180.0) -> void:
+func _init(white_seconds: float = 180.0, black_seconds: float = 180.0, p_increment: float = 0.0) -> void:
 	remaining = [white_seconds, black_seconds]
+	increment = p_increment
 
 
 func start(color: int) -> void:
@@ -23,10 +27,11 @@ func stop() -> void:
 	running = -1
 
 
-## Termina el turno de `color`: su reloj se detiene y arranca el del rival.
+## Termina el turno de `color`: su reloj se detiene (con el incremento) y arranca el del rival.
 func press(color: int) -> void:
 	if flag_fallen >= 0:
 		return
+	remaining[color] += increment
 	running = ChessPiece.opposite(color)
 
 

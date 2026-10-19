@@ -40,10 +40,10 @@ func test_steal_targets() -> void:
 
 func test_why_not_reasons() -> void:
 	var b := BoardState.start_position()
-	check_eq(CheatTargeting.why_not(b, W, _def("steal"), _sq("e8")), "los reyes no se tocan", "rey")
-	check_eq(CheatTargeting.why_not(b, W, _def("steal"), _sq("a2")), "solo piezas enemigas", "propia")
-	check_eq(CheatTargeting.why_not(b, W, _def("nudge"), _sq("a7")), "solo piezas propias", "enemiga")
-	check_eq(CheatTargeting.why_not(b, W, _def("nudge"), _sq("e4")), "no hay pieza", "vacía")
+	check_eq(CheatTargeting.why_not(b, W, _def("steal"), _sq("e8")), CheatRules.REASON_KING, "rey")
+	check_eq(CheatTargeting.why_not(b, W, _def("steal"), _sq("a2")), CheatRules.REASON_ENEMY_ONLY, "propia")
+	check_eq(CheatTargeting.why_not(b, W, _def("nudge"), _sq("a7")), CheatRules.REASON_OWN_ONLY, "enemiga")
+	check_eq(CheatTargeting.why_not(b, W, _def("nudge"), _sq("e4")), "no piece there", "vacía")
 	check_eq(CheatTargeting.why_not(b, W, _def("steal"), _sq("a7")), "", "robable")
 
 
@@ -69,7 +69,7 @@ func test_click_flow_two_step() -> void:
 	s.toggle(0)
 	var r := s.on_square(_sq("e7"), b, W, def)
 	check_eq(r.action, "reject", "pieza enemiga rechazada")
-	check_eq(r.reason, "solo piezas propias", "con motivo")
+	check_eq(r.reason, CheatRules.REASON_OWN_ONLY, "con motivo")
 	r = s.on_square(_sq("e2"), b, W, def)
 	check_eq(r.action, "select", "pieza propia elegida")
 	check_eq(s.phase, CheatArmState.Phase.PIECE, "fase pieza")

@@ -16,7 +16,7 @@ extends Node3D
 ##   --shot-look=yaw,pitch  gira la cámara del jugador (grados) antes de capturar
 ##   --shot-when=rival_carry|player_carry  espera a que esa mano lleve una pieza
 ##   --shot-after=S       con shot-when, segundos extra tras empezar a llevar la pieza
-##   --players=N          jugadores del torneo (16 por defecto)
+##   --players=N          jugadores del torneo (32 por defecto)
 ##   --clock=S            segundos por jugador en cada partida (180 por defecto)
 ##   --start-round=N      salta a la ronda N (el humano gana las anteriores, simuladas)
 ##   --demo-screen=between|champion|eliminated  muestra esa pantalla al arrancar (capturas)
@@ -323,7 +323,7 @@ func _on_game_over(winner: int, reason: String) -> void:
 # --- Torneo ------------------------------------------------------------------------
 
 func _setup_tournament(rng: RandomNumberGenerator) -> void:
-	manager = TournamentSession.ensure(int(_args.get("players", 16)), int(_args.get("seed", -1)), Hall.decor_order())
+	manager = TournamentSession.ensure(int(_args.get("players", 32)), int(_args.get("seed", -1)))
 	if manager.phase == TournamentManager.Phase.FINISHED:
 		manager.new_tournament()
 	elif manager.phase == TournamentManager.Phase.ROUND_DONE:

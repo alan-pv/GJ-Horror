@@ -18,18 +18,24 @@ signal accusation_resolved(accuser: int, correct: bool, warnings: int)
 signal game_over(winner: int, reason: String)
 ## Un jugador hizo toser o tiró una pieza a su personaje (lo anima el cliente).
 signal rival_event(color: int, event_id: StringName)
+## `color` pulsó el reloj: su turno terminó (con `require_clock_press` pasa después de mover).
+signal clock_pressed(color: int)
+## Se anotó una jugada legal en la planilla de `color`. Las trampas nunca se anotan.
+signal sheet_entry(color: int, move_number: int, san: String)
 
 ## Eventos que un jugador puede provocar sobre sí mismo.
 const RIVAL_EVENT_IDS: Array[StringName] = [&"cough", &"drop_piece"]
 
-const REASON_CHECKMATE := "jaque mate"
-const REASON_TIMEOUT := "tiempo agotado"
-const REASON_STALEMATE := "ahogado: las tablas ganan negras"
-const REASON_REPETITION := "triple repetición: las tablas ganan negras"
-const REASON_FIFTY := "regla de 50 jugadas: las tablas ganan negras"
-const REASON_MATERIAL := "material insuficiente: las tablas ganan negras"
-const REASON_CAUGHT := "trampa descubierta"
-const REASON_FALSE_ACCUSATIONS := "tercera acusación falsa"
+const REASON_CHECKMATE := "checkmate"
+const REASON_TIMEOUT := "time ran out"
+const REASON_STALEMATE := "stalemate: draws go to Black"
+const REASON_REPETITION := "threefold repetition: draws go to Black"
+const REASON_FIFTY := "fifty-move rule: draws go to Black"
+const REASON_MATERIAL := "insufficient material: draws go to Black"
+const REASON_CAUGHT := "cheating caught"
+const REASON_FALSE_ACCUSATIONS := "third false accusation"
+## Solo las partidas de fondo simuladas (`force_end`).
+const REASON_RESIGNED := "resignation"
 
 var config: MatchConfig
 var board: BoardState
@@ -47,6 +53,12 @@ var end_reason: String = ""
 var cheat_log: Array[Dictionary] = []
 var move_log: Array[Dictionary] = []
 var ply: int = 0
+
+## Color que movió y aún no pulsó el reloj (-1 = nadie). Solo con `require_clock_press`.
+var pending_press: int = -1
+var _pending_san: String = ""
+var _pending_number: int = 0
+var _sheets: Array[PackedStringArray] = [PackedStringArray(), PackedStringArray()]
 
 var _looking: Array[bool] = [true, true]
 var _last_move_time: PackedFloat64Array = [0.0, 0.0]
@@ -69,7 +81,7 @@ func _init(p_config: MatchConfig, white: PlayerSession, black: PlayerSession, st
 	config = p_config
 	sessions = [white, black]
 	board = BoardState.from_fen(start_fen)
-	clock = ChessClock.new(config.white_seconds, config.black_seconds)
+	clock = ChessClock.new(config.white_seconds, config.black_seconds, config.increment_seconds)
 	clock.flagged.connect(_on_flag)
 	for c in config.cheats:
 		_cheats_by_id[c.id] = c
@@ -116,6 +128,16 @@ func _invalidate_legal() -> void:
 	_legal_valid = false
 
 
+## ¿`color` movió y debe pulsar el reloj para terminar su turno?
+func awaiting_press(color: int) -> bool:
+	return pending_press == color
+
+
+## Jugadas anotadas por `color` en notación algebraica (solo las legales).
+func scoresheet(color: int) -> PackedStringArray:
+	return _sheets[color]
+
+
 func accusation_pending() -> bool:
 	return not _pending_accusation.is_empty()
 
@@ -126,13 +148,13 @@ func get_cheat(id: StringName) -> CheatDef:
 
 func _can_act(color: int) -> String:
 	if not started:
-		return "la partida no ha empezado"
+		return "the game has not started"
 	if is_over():
-		return "la partida terminó"
+		return "the game is over"
 	if accusation_pending():
-		return "el árbitro está en la mesa"
+		return "the arbiter is at the table"
 	if color != ChessPiece.WHITE and color != ChessPiece.BLACK:
-		return "color inválido"
+		return "invalid color"
 	return ""
 
 
@@ -142,15 +164,17 @@ func _can_act(color: int) -> String:
 ## Devuelve {ok, reason, warning}.
 func submit_move(color: int, uci: String) -> Dictionary:
 	var err := _can_act(color)
+	if err == "" and pending_press >= 0 and color == board.side_to_move:
+		err = "opponent has not pressed the clock"
 	if err == "" and color != board.side_to_move:
-		err = "no es tu turno"
+		err = "it is not your turn"
 	if err == "" and is_hand_busy(color):
-		err = "tu mano está ocupada"
+		err = "your hand is busy"
 	if err != "":
 		return {"ok": false, "reason": err, "warning": ""}
 	var move := _find_legal(ChessMove.from_uci(uci))
 	if move == null:
-		return {"ok": false, "reason": "jugada ilegal", "warning": ""}
+		return {"ok": false, "reason": "illegal move", "warning": ""}
 
 	if config.beginner_help and sessions[color].beginner_help:
 		var key := board.position_key() + "|" + move.uci()
@@ -160,19 +184,61 @@ func submit_move(color: int, uci: String) -> Dictionary:
 				# Primer intento: se bloquea. Si insiste con la misma jugada, se permite.
 				_warned[key] = true
 				beginner_warning.emit(color, move.uci(), text)
-				return {"ok": false, "reason": "advertencia", "warning": text}
+				return {"ok": false, "reason": "warning", "warning": text}
 
+	var san := San.of(board, move) if config.keep_scoresheet else ""
+	var number := board.fullmove_number
 	var info := ChessRules.apply_move(board, move)
 	_invalidate_legal()
 	ply += 1
 	_last_move_time[color] = time
 	move_log.append({"color": color, "uci": move.uci(), "time": time})
-	clock.press(color)
 	_record_position()
 	move_made.emit(color, move.uci(), info)
+	if config.require_clock_press:
+		pending_press = color
+		_pending_san = san
+		_pending_number = number
+	else:
+		_press(color, san, number)
 	_check_board_end()
+	# Si la jugada terminó la partida no se espera la pulsación: se anota igual.
+	if is_over() and pending_press == color:
+		_flush_pending_sheet()
 	state_changed.emit()
 	return {"ok": true, "reason": "", "warning": ""}
+
+
+## `color` pulsa el reloj: termina su turno, gana el incremento y se anota su
+## jugada. Solo vale con una pulsación pendiente (`require_clock_press`).
+## Devuelve {ok, reason}.
+func press_clock(color: int) -> Dictionary:
+	var err := _can_act(color)
+	if err == "" and pending_press != color:
+		err = "no clock press pending"
+	if err != "":
+		return {"ok": false, "reason": err}
+	var san := _pending_san
+	var number := _pending_number
+	pending_press = -1
+	_press(color, san, number)
+	state_changed.emit()
+	return {"ok": true, "reason": ""}
+
+
+func _press(color: int, san: String, number: int) -> void:
+	clock.press(color)
+	if san != "":
+		_sheets[color].append(san)
+		sheet_entry.emit(color, number, san)
+	clock_pressed.emit(color)
+
+
+func _flush_pending_sheet() -> void:
+	if pending_press >= 0 and _pending_san != "":
+		_sheets[pending_press].append(_pending_san)
+		sheet_entry.emit(pending_press, _pending_number, _pending_san)
+	pending_press = -1
 
 
 ## El cliente manda la orientación de su cámara; el servidor decide si mira el tablero.
@@ -185,10 +251,10 @@ func set_gaze(color: int, eye: Vector3, forward: Vector3) -> void:
 func start_cheat(color: int, cheat_id: StringName, from: int, to: int = -1) -> Dictionary:
 	var err := _can_act(color)
 	if err == "" and is_hand_busy(color):
-		err = "tu mano está ocupada"
+		err = "your hand is busy"
 	var def := get_cheat(cheat_id)
 	if err == "" and def == null:
-		err = "trampa no disponible"
+		err = "cheat not available"
 	if err != "":
 		return {"ok": false, "reason": err, "duration": 0.0}
 	var v := CheatRules.validate(board, color, def, from, to)
@@ -222,12 +288,12 @@ func abort_cheat(color: int) -> bool:
 func trigger_rival_event(color: int, event_id: StringName) -> Dictionary:
 	var err := _can_act(color)
 	if err == "" and not RIVAL_EVENT_IDS.has(event_id):
-		err = "evento desconocido"
+		err = "unknown event"
 	if err == "" and event_id == &"drop_piece" and is_hand_busy(color):
-		err = "tu mano está ocupada"
+		err = "your hand is busy"
 	var key := "%d:%s" % [color, event_id]
 	if err == "" and time < _rival_event_ready.get(key, 0.0):
-		err = "todavía no puedes repetirlo"
+		err = "you cannot repeat it yet"
 	if err != "":
 		return {"ok": false, "reason": err}
 	_rival_event_ready[key] = time + config.rival_event_cooldown
@@ -253,7 +319,7 @@ func is_arbiter_near() -> bool:
 func accuse(color: int) -> Dictionary:
 	var err := _can_act(color)
 	if err == "" and is_hand_busy(color):
-		err = "tu mano está ocupada"
+		err = "your hand is busy"
 	if err != "":
 		return {"ok": false, "reason": err}
 	var accused := ChessPiece.opposite(color)
@@ -370,6 +436,12 @@ func _check_board_end() -> void:
 
 func _on_flag(color: int) -> void:
 	_end(ChessPiece.opposite(color), REASON_TIMEOUT)
+
+
+## Termina la partida por decisión externa (las mesas de fondo simuladas:
+## abandono o mate "narrado" sin llegar a jugarlo).
+func force_end(p_winner: int, reason: String) -> void:
+	_end(p_winner, reason)
 
 
 func _end(p_winner: int, reason: String) -> void:

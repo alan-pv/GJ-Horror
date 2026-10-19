@@ -6,7 +6,7 @@ Regla de mantenimiento: si una mecánica cambia, se corrige aquí en el mismo co
 
 ## 1. Resumen y reglas de arquitectura
 
-Juego de Godot 4.6+ (GDScript) para un humano contra bots: torneo de ajedrez por eliminación (16 jugadores por defecto) en un salón oscuro, con trampas físicas, acusaciones, un árbitro y eventos de distracción. Se exporta a web.
+Juego de Godot 4.6+ (GDScript) para un humano contra bots: torneo de ajedrez por eliminación (32 jugadores por defecto) en un salón oscuro, con trampas físicas, acusaciones, un árbitro y eventos de distracción. Se exporta a web.
 
 | Regla | Cómo se cumple |
 | --- | --- |
@@ -173,9 +173,11 @@ Detalles en la sección 4.12.
 
 ### 4.2 Reloj (`chess_clock.gd`)
 
-- 180 s por jugador, sin incremento (`white_seconds` / `black_seconds`).
-- `press(color)` pasa el turno al rival; `tick` descuenta solo del color que corre. Se detiene si `paused` (acusación pendiente) o al terminar.
+- 3+2: 180 s por jugador (`white_seconds` / `black_seconds`) y 2 s de incremento (`increment_seconds`) que gana quien pulsa.
+- `press(color)` suma el incremento y pasa el turno al rival; `tick` descuenta solo del color que corre. Se detiene si `paused` (acusación pendiente) o al terminar.
 - Al agotarse emite `flagged` y el servidor da la victoria al rival.
+- **Pulsar el reloj** (`MatchConfig.require_clock_press`, hoy `false` hasta que las manos lo cableen): `submit_move` aplica la jugada pero no pulsa; `pending_press` / `awaiting_press(color)` marcan que falta pulsar, el reloj de quien movió sigue corriendo y el rival no puede mover ("opponent has not pressed the clock"). `press_clock(color)` pulsa y emite `clock_pressed`. Si la jugada termina la partida no se espera la pulsación; si cae la bandera antes de pulsar, pierde por tiempo. Con `false`, se pulsa dentro de `submit_move`.
+- **Planillas:** cada color anota en SAN (`San.of`, calculada antes de aplicar; desambiguación, enroque, coronación, `+`/`#`) solo sus jugadas legales, al pulsar. `scoresheet(color)` y la señal `sheet_entry(color, move_number, san)`. Las trampas nunca se anotan. Las partidas de fondo no llevan planilla (`keep_scoresheet = false`). La acusación sigue usando la ventana desde la última jugada; las planillas son para la revisión visual del árbitro.
 - Vista (`ClockView`): dos pantallas `Label3D` inclinadas 38° hacia cada jugador, dos botones que se hunden 8 mm; el lado que corre se ve encendido. La mano pulsa el botón al final de cada jugada.
 
 ### 4.3 Tablero físico y desplazamientos finos (`board_state.gd`, `board_view.gd`)
@@ -336,13 +338,13 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (1, 3) s, `
 
 ### 4.13 Torneo (`tournament_manager.gd`, `background_match.gd`, `game_root.gd`)
 
-- **Jugadores:** `player_count` (16 por defecto, `--players=N`, mínimo 2). El humano es el id 0 ("Tú", Elo 1300); los bots toman nombres de una lista de 24 mezclada (con sufijo numérico si hay más) y Elo aleatorio 900-1700.
+- **Jugadores:** `player_count` (32 por defecto, `--players=N`, mínimo 2). El humano es el id 0 ("You", Elo 1300); los bots toman nombres en inglés de una lista de 32 mezclada (con sufijo numérico si hay más) y Elo aleatorio 900-1700.
 - **Rondas sincronizadas:** `start_round()` baraja a los vivos y los empareja; los colores de cada partida son aleatorios (50 %). La siguiente ronda empieza cuando termina la última partida (`report_result` pasa a `ROUND_DONE`).
 - **Impares:** si sobra uno, descansa (`byes`; pasa sin jugar) el que menos veces haya descansado. Si es el humano, se queda en la mesa principal sin rival ("Pasas a la siguiente ronda sin jugar").
 - **Eliminación:** `finish_round()` elimina a los perdedores (`eliminated_log` con ronda, mesa y motivo).
 - **Final:** cuando quedan 2, se juega a dos partidas; la segunda con colores invertidos. Gana quien tenga más victorias; con 1-1, quien sume más tiempo sobrante en el reloj; si empatan también, al azar. La primera partida perdida por el humano no lo elimina. Etiquetas: "Ronda N", "Ronda N · Semifinales" (≤ 4 jugadores) y "Final · partida X de 2".
-- **Mesas:** el humano siempre en la mesa principal; el resto de partidas (y descansos) toman las mesas decorativas en orden `Hall.decor_order()` (de más cerca a más lejos). Si hay más partidas que mesas, la partida va a `TABLE_NONE` (sin mesa visible).
-- **Partidas de fondo** (`BackgroundMatch`): un `MatchServer` real (mismas reglas, reloj y finales; sin ayuda ni trampas) por cada partida que no es la del humano. La política es de una jugada de profundidad (`choose_move`: valor de captura/coronación, castigo por dejar la pieza atacada, preferencia por el centro y el desarrollo, muestreo con temperatura de 220 a 45 según el Elo). Piensa entre 1 y 6 s simulados (más rápido a más Elo; ×0,4 con menos de 30 s de reloj). `GameRoot` avanza todas con `tick` y permite como máximo `BG_MOVES_PER_FRAME` = 1 jugada por fotograma, rotando el orden.
+- **Mesas** (`HallLayout`): 16 mesas fijas en cuadrícula 4x4 (separación 3,0 m en X y 3,2 m en Z, todas con la misma orientación). Índice = fila*4 + col, fila 0 la más lejana en -Z. El humano juega siempre en la mesa 9 (fila 2, col 1), en `Vector3.ZERO`; el resto de partidas (y descansos) toman las mesas más cercanas a ella (`tables_by_distance()`). `TournamentGame.loser_seat()` da el asiento del perdedor.
+- **Partidas de fondo** (`BackgroundMatch`): un `MatchServer` real (mismas reglas, reloj y finales; sin ayuda ni trampas) por cada partida que no es la del humano. La política es de una jugada de profundidad (`choose_move`: valor de captura/coronación, castigo por dejar la pieza atacada, preferencia por el centro y el desarrollo, muestreo con temperatura de 220 a 45 según el Elo). Reloj 3+2. Cada una tiene un fin previsto `planned_end = lerp(25, 200, u^1.15)` s de ronda: si sigue en juego al llegar, `force_end` la cierra con un resultado simulado por Elo (70 % abandono, `REASON_RESIGNED`; 30 % mate narrado), así las eliminaciones se reparten por la ronda. Piensa entre 1 y 6 s simulados (más rápido a más Elo; ×0,4 con menos de 30 s de reloj). `GameRoot` avanza todas con `tick` y permite como máximo `BG_MOVES_PER_FRAME` = 1 jugada por fotograma, rotando el orden.
 - **Salón que se oscurece:** `_populate_hall` enciende (sin animación) solo las lámparas de las mesas usadas esta ronda y pone 2 figuras (1 si es descanso). Al terminar la ronda, `_darken_for_next_round` apaga con atenuación de 1,4 s las lámparas de las mesas que la siguiente ronda no usa y retira sus figuras.
 - **Eliminaciones en otras mesas:** al terminar una partida de fondo con mesa visible, `GameRoot` emite `table_eliminated(mesa, posición, asiento_del_perdedor)`. Si el `EventModule` escucha, dispara el evento `eliminacion` (guardias que se llevan a la figura, ~9 s); si no, la figura se levanta y camina a la oscuridad (`Hall.remove_occupant`).
 - **Advertencias:** viven en la `PlayerSession` del torneo; se arrastran entre partidas y se reinician con `new_tournament()`.
@@ -407,7 +409,7 @@ Se leen como `--clave` o `--clave=valor` en `GameRoot._parse_args`; `get_args()`
 | `--seed=N` | Semilla del azar de la partida, del torneo y del director. |
 | `--speed=X` | `Engine.time_scale`. |
 | `--quit-after=S` | Termina tras S segundos (acumulados entre recargas) e imprime un resumen. |
-| `--players=N` | Jugadores del torneo (16). |
+| `--players=N` | Jugadores del torneo (32). |
 | `--clock=S` | Segundos por jugador (180). |
 | `--start-round=N` | Salta a la ronda N (el humano gana las anteriores, simuladas). |
 | `--fen="..."` | Posición inicial distinta. |

@@ -10,9 +10,8 @@ static var elapsed: float = 0.0
 static var tournaments_started: int = 0
 
 
-static func ensure(player_count: int, seed_value: int, table_slots: Array[int]) -> TournamentManager:
+static func ensure(player_count: int, seed_value: int) -> TournamentManager:
 	if manager == null:
 		manager = TournamentManager.new(player_count, seed_value)
-		manager.table_slots = table_slots
 		tournaments_started += 1
 	return manager

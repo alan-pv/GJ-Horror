@@ -6,13 +6,6 @@ Solo lo **pendiente**. Lo implementado se describe en [`docs/arquitectura.md`](d
 
 ### Oleada 1 — bases independientes
 
-- **R1. Servidor: reloj, planillas y torneo** (`src/server/`)
-  - [ ] Ritmo 3+2: incremento de 2 s al pulsar el reloj.
-  - [ ] El turno pasa al **pulsar el reloj**, no al decidir la jugada: intención `press_clock`; mientras no se pulsa, sigue corriendo el reloj de quien movió y el rival no puede mover.
-  - [ ] Planillas: cada jugador anota sus jugadas legales en notación algebraica (las trampas no se anotan). El árbitro las revisa al acusar (solo visual: la acusación sigue usando la ventana desde la última jugada).
-  - [ ] Torneo de 32 jugadores en 16 mesas fijas en cuadrícula 4x4; la mesa del jugador es interior y no cambia.
-  - [ ] Eliminaciones repartidas a lo largo de la ronda (las partidas de fondo terminan en momentos distintos, no todas al final).
-  - [ ] Textos del juego que salen del servidor en inglés.
 - **R2. Rendimiento del turno** (`src/bots/`, `beginner_helper.gd`, `chess_rules.gd`, `board_state.gd`)
   - [ ] Eliminar el tirón al terminar de elegir la jugada (medir: ayuda para principiantes, cerebro del bot, historial de Maia).
 - **R3. Arte low-poly en Blender** (`art/`, `assets/models/`)
@@ -34,6 +27,7 @@ Solo lo **pendiente**. Lo implementado se describe en [`docs/arquitectura.md`](d
   - [ ] Personajes low-poly en lugar de primitivas (rival, jugador y mesas de fondo).
   - [ ] Brazo con IK sobre el esqueleto nuevo; el codo nunca atraviesa la mesa.
   - [ ] Secuencia física de cada jugada: mover, pulsar el reloj y anotar en la planilla.
+  - [ ] Encender `MatchConfig.require_clock_press` (el servidor ya lo soporta) e impedir `press_clock` con la mano ocupada en una trampa.
 - **R7. Salón en cuadrícula y mesas vivas**
   - [ ] Salón con 16 mesas en cuadrícula 4x4 que rodean al jugador.
   - [ ] Jugadores de fondo animados (piensan, mueven, pulsan el reloj, anotan, miran alrededor), aunque sus partidas no se vean.

@@ -6,6 +6,13 @@ extends Resource
 ## 3:00 por jugador. Para probar el modo Armageddon: blancas 180, negras 150.
 @export var white_seconds: float = 180.0
 @export var black_seconds: float = 180.0
+## Incremento por jugada (reloj 3+2): se suma a quien pulsa el reloj.
+@export var increment_seconds: float = 2.0
+## Si es verdadero, el turno pasa al pulsar el reloj (`press_clock`) y no al
+## mover. Con falso, el reloj se pulsa dentro de `submit_move`.
+@export var require_clock_press: bool = false
+## Lleva las planillas (SAN) de cada jugador. Las mesas de fondo lo apagan.
+@export var keep_scoresheet: bool = true
 ## ¿El reloj se detiene mientras llega el árbitro?
 @export var pause_clock_on_accusation: bool = true
 ## Segundos de suspenso mientras el árbitro camina a la mesa.
