@@ -2,11 +2,8 @@
 
 Solo lo **pendiente**. Lo implementado se describe en [`docs/arquitectura.md`](docs/arquitectura.md) y se borra de aquí en el mismo commit que lo termina (ver `CLAUDE.md`). Cada hito se divide en frentes que implementan subagentes en paralelo.
 
-## Ronda de pulido 1 (2026-10-19)
+## Pendiente
 
-### Oleada 2 — integración (depende de la oleada 1)
-
-## Pendiente de la etapa anterior
 
 - [ ] Las animaciones `sit_idle/sit_think/sit_nervous` dejan las manos sobre el propio tablero (a z = ±0,30 con la silla a 0,80), así que los brazos van siempre por IK en reposo y no se ven sus gestos (mano al mentón, nerviosismo). Se necesitaría acercar las sillas o reanimar las poses en Blender.
 - [ ] Las partidas de fondo empiezan desde la posición inicial; podrían arrancar de un medio juego (`Hall.mid_game_fen`) para que los tableros se vean avanzados.
