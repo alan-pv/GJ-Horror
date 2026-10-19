@@ -47,6 +47,11 @@ Solo lo **pendiente**. Lo implementado se describe en [`docs/arquitectura.md`](d
 
 ## Pendiente de la etapa anterior
 
+- [ ] `BotController.opponent_elo` nunca se asigna (Maia siempre ve un rival de 1200).
+- [ ] `tests/run_tests.gd` lista `test_beginner_helper.gd`, que no existe.
+- [ ] El humano no tiene tecla para sus eventos de distracción (toser, tirar una pieza).
+- [ ] Al eliminar a alguien de una mesa de fondo, su lámpara no se apaga hasta el fin de la ronda.
+
 - [ ] **Repo público el día que se publique el juego** en itch.io (AGPL de Maia-3).
 - [ ] Exportación web real (plantillas de Godot) y prueba de Maia-3 en navegador.
 - [ ] Rendimiento: IK lejano con menos frecuencia, medir 16 mesas visibles en una máquina modesta.
