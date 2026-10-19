@@ -86,6 +86,8 @@ var _verbose: bool = false
 var _elapsed: float = 0.0
 var _moves_seen: int = 0
 var _anims_done: int = 0
+## El árbitro del salón (lo crea un módulo; null en pruebas sin módulos).
+var arbiter: Arbiter = null
 var _shot_done: bool = false
 var _shot_armed_at: float = -1.0
 
@@ -403,6 +405,19 @@ func _on_background_finished(g: TournamentGame, bg: BackgroundMatch) -> void:
 		else:
 			table_eliminated.emit(g.table, hall.table_position(g.table), loser_color)
 	_refresh_tournament_hud()
+
+
+## Figura sentada en (`table`, `seat`); `seat` = color (0 blancas, 1 negras). En la
+## mesa del humano devuelve la del rival o el cuerpo del propio jugador. Null si no hay.
+## Contrato de la oleada 2 (R7 lo implementa).
+func figure_at(_table: int, _seat: int) -> CharacterFigure:
+	return null
+
+
+## Quita la figura de (`table`, `seat`) de su animación ambiental y la entrega a
+## quien la va a ejecutar (el árbitro la controla desde ahí). Contrato de la oleada 2 (R7).
+func condemn_seat(table: int, seat: int) -> CharacterFigure:
+	return figure_at(table, seat)
 
 
 ## Jugadores que siguen vivos ahora: los de la ronda menos los perdedores ya conocidos.

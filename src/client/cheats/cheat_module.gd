@@ -39,6 +39,7 @@ func install(p_root: GameRoot) -> void:
 	arbiter = Arbiter.new()
 	root.add_child(arbiter)
 	arbiter.setup(root)
+	root.arbiter = arbiter
 
 	if not root.get_args().has("autoplay"):
 		panel = CheatPanel.new()

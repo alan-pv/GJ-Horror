@@ -44,6 +44,23 @@ func setup(p_root: GameRoot) -> void:
 
 # --- API pública -------------------------------------------------------------------
 
+## Terminó la ejecución de quien estaba en `seat` (0 = blancas, 1 = negras) de la mesa `table`
+## (índice de `HallLayout`; la del humano es `HallLayout.HUMAN_TABLE`).
+signal executed(table: int, seat: int)
+
+
+## Encola la ejecución del perdedor sentado en (`table`, `seat`): el árbitro irá a
+## esa mesa y le disparará. Contrato de la oleada 2 (R8 lo implementa; hoy es un
+## esbozo que avisa en el siguiente fotograma).
+func request_execution(table: int, seat: int) -> void:
+	executed.emit.call_deferred(table, seat)
+
+
+## ¿Quedan ejecuciones o una acusación por atender? La ronda no termina mientras sea true.
+func has_pending_work() -> bool:
+	return false
+
+
 ## Camina despacio por detrás de `target` (p. ej. la silla del jugador): entra
 ## por un lado, cruza a lo largo de `seconds` y luego vuelve a su sitio.
 ## Se ignora si ya está ocupado con una acusación.
