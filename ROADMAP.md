@@ -13,6 +13,8 @@ Es lo que el jugador ve todo el tiempo: debe ser lo más pulido del juego.
 - [ ] Orientación de la muñeca controlada (hoy el IK no la controla): la palma mira a la pieza al acercarse.
 - [ ] Pulsar el reloj, tomar la pluma y escribir con la mano nueva; temblor por estrés en los dedos.
 - [ ] Capturas de cerca de cada fase (alcanzar, agarrar, trasladar, soltar) antes de entregar.
+- [ ] Gestos de trampa continuos: hoy los tramos de `_cmove` paran entre sí (los gestos normales ya son una sola curva).
+- [ ] Si la trampa interrumpe la anotación del humano hay ~0,25 s de retraso por dejar la pluma; el rival (que escribe con la otra mano) podría empezarla a la vez.
 
 ### Frente B — Poses de espera naturales
 - [ ] Mientras espera el turno rival: brazos cruzados sobre la mesa, una mano en la mesa y la otra en la cabeza o el mentón, codos apoyados; varias poses que alternan con transiciones suaves (rival, jugador y mesas de fondo).
@@ -21,6 +23,7 @@ Es lo que el jugador ve todo el tiempo: debe ser lo más pulido del juego.
 
 ### Frente C — Animaciones con el modelo actual
 - [ ] Inventario de lo que aún usa visuales del modelo anterior (tos, pieza caída, acusación ajena que se levanta y señala, guardias de la eliminación, banqueta, figura temporal del condenado, etc.).
+- [ ] Maniquíes sin rasgos: la nariz y las orejas son geometría de `Skin` en `player.glb` y quedan como relieve; hace falta una variante sin rasgos (o separar esa geometría) en Blender.
 - [ ] Rehacer cada una con `CharacterFigure` (animaciones nuevas en Blender si hace falta: toser, levantarse y señalar, ser arrastrado). No tienen que ser 1:1 con las antiguas, solo coherentes con la acción.
 
 ### Frente D — El rival voltea ante distracciones (espera la elección del usuario)
