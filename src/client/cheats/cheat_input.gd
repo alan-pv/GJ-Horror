@@ -74,7 +74,7 @@ func _can_act() -> bool:
 
 func _animator_busy() -> bool:
 	var a: HandAnimator = root.animators[color]
-	return a != null and a.is_busy()
+	return a != null and a.is_busy_for_action()
 
 
 func _unhandled_input(event: InputEvent) -> void:

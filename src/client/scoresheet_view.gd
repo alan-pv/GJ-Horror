@@ -102,14 +102,9 @@ func reveal_next(color: int, seconds: float = 0.5) -> String:
 	if (s.pending as Array).is_empty():
 		return ""
 	var entry: Dictionary = (s.pending as Array).pop_front()
-	var n: int = s.written
-	var page_size := ROWS * COLUMNS
-	if n > 0 and n % page_size == 0:
-		for l in s.labels:
-			(l as Label3D).text = ""
-	var label: Label3D = s.labels[n % page_size]
+	var label := _slot_label(color)
 	var text := "%d. %s" % [entry.number, entry.san]
-	s.written = n + 1
+	s.written = int(s.written) + 1
 	if seconds > 0.0 and is_inside_tree():
 		label.text = ""
 		var tw := create_tween()
@@ -117,6 +112,34 @@ func reveal_next(color: int, seconds: float = 0.5) -> String:
 		await tw.finished
 	label.text = text
 	return text
+
+
+## Etiqueta donde se escribirá la siguiente jugada; si empieza una página nueva, borra la anterior.
+func _slot_label(color: int) -> Label3D:
+	var s: Dictionary = _sheets[color]
+	var n: int = s.written
+	var page_size := ROWS * COLUMNS
+	if n > 0 and n % page_size == 0:
+		for l in s.labels:
+			(l as Label3D).text = ""
+	return s.labels[n % page_size]
+
+
+## Escritura a mano interrumpible: muestra la fracción `k` (0..1) de la jugada pendiente sin
+## sacarla de la cola. Si la mano se interrumpe, `clear_partial` borra lo escrito a medias y la
+## entrada sigue pendiente (se reescribe entera al retomar); si termina, `reveal_next(color, 0.0)` la fija.
+func show_partial(color: int, k: float) -> void:
+	var s: Dictionary = _sheets[color]
+	if (s.pending as Array).is_empty():
+		return
+	var entry: Dictionary = (s.pending as Array)[0]
+	var text := "%d. %s" % [entry.number, entry.san]
+	_slot_label(color).text = text.substr(0, int(ceil(clampf(k, 0.0, 1.0) * text.length())))
+
+
+## Borra el texto a medias de la jugada pendiente (la entrada no se pierde).
+func clear_partial(color: int) -> void:
+	_slot_label(color).text = ""
 
 
 # --- Geometría para la mano ---------------------------------------------------------

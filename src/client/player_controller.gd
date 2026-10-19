@@ -9,7 +9,8 @@ extends Node3D
 ##
 ## Clic en pieza propia → resalta los destinos legales → clic en destino →
 ## `submit_move` (la coronación es siempre a dama). Solo se puede jugar si es
-## tu turno, miras el tablero y tu mano está libre.
+## tu turno, miras el tablero y tu mano está libre (anotar en la planilla no cuenta: la
+## mano suelta la pluma y atiende la jugada).
 
 signal mouse_capture_changed(captured: bool)
 
@@ -201,7 +202,7 @@ func _my_turn() -> bool:
 
 
 func _can_play() -> bool:
-	return not input_locked and _my_turn() and (animator == null or not animator.is_busy())
+	return not input_locked and _my_turn() and (animator == null or not animator.is_busy_for_action())
 
 
 ## Casilla bajo el centro de la pantalla (o -1).
