@@ -383,7 +383,7 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (1, 3) s, `
 - `art/` guarda los `.blend` editables y los scripts que los generan (Blender 5.2 sin interfaz); Godot no lo importa (`art/.gdignore`). Los `.glb` exportados viven en `assets/models/`.
 - Utilería (`art/props/`, `build_props.py`): mesa, silla, tablero, lámpara (Empty `LightAnchor`), reloj de dos caras (`Button_A/B`, `Face_A/B`, agujas `Hand_*`), planilla, pluma, pistola (Empty `Muzzle`), piezas (un `.glb` por tipo, material `Piece`), columna, puerta, panel y estandarte. Orientaciones y orígenes en `art/README.md`.
 - Personajes (`art/characters/`, `build_player.py` / `build_arbiter.py`, malla común en `body.py`): esqueleto de 23 huesos (`Hips, Spine, Chest, Neck, Head` y `Shoulder, UpperArm, Forearm, Hand, Fingers, Thumb, Thigh, Shin, Foot` con `.L`/`.R`), A-pose con codos y rodillas pre-doblados, ~1600 triángulos, materiales `Skin, Shirt, Jacket, Pants, Shoes, Hair, Eyes` (el árbitro además `Gloves, Mask, Tie, Metal, Grip`), peinados `Hair_Short/Long/Bald`. Miran a +Z en Godot; origen bajo el centro del asiento.
-  - Jugador (`player.glb`): `sit_idle, sit_think, sit_nervous, sit_write, sit_beg, sit_cry, sit_frozen, stand_flee_loop` (cíclicas) y `sit_look_left/right, sit_move_piece, sit_press_clock, stand_flee, death_slump_table, death_fall_back, death_standing`.
+  - Jugador (`player.glb`): `sit_idle, sit_think, sit_nervous, sit_write, sit_beg, sit_cry, sit_frozen, stand_flee_cycle` (cíclicas) y `sit_look_left/right, sit_move_piece, sit_press_clock, stand_flee, death_slump_table, death_fall_back, death_standing`.
   - Árbitro (`arbiter.glb`): figura alta con máscara pálida y pistola hija de `Hand.R` (Empty `Muzzle`); `idle, walk` (0,744 m/s, paso 0,483 m), `aim_hold` (cíclicas) y `inspect_sheets, aim, shoot, lower_gun, point_accuse`.
   - `tools/check_characters.gd` comprueba huesos, materiales y animaciones.
 - Si se edita un `.blend` a mano se reexporta con `tools/export_models.sh` (no se regenera). `tools/check_props.gd` comprueba nodos y medidas.
@@ -404,6 +404,16 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (1, 3) s, `
 - `BeginnerHelper.check_move` poda las respuestas (2-16 ms síncrono). `precompute_async(board)` analiza en trozos de 3 ms por frame y guarda la mejor puntuación por `position_key`; `BotController` lo lanza tras su jugada, así el clic del humano cuesta 1-2 ms.
 - `FallbackBrain.get_policy` es una corrutina que cede el frame cada 3 ms (`get_policy_sync` para pruebas); sin hilos, para que funcione igual en web.
 - Benchmarks: `tools/bench_turn.gd` y `tools/bench_background.gd` (`--script`).
+
+### 4.18 Figuras de personajes (`src/client/character/`)
+
+- `FigureBase` (común), `CharacterFigure` (player.glb) y `ArbiterFigure` (arbiter.glb). El modelo se arma en `_init`.
+- `setup(look)` recolorea por material (duplicados por instancia) y deja un solo peinado; `CharacterFigure.random_look(rng)` da paletas de época.
+- `play(anim, blend, speed)`, `play_once(anim)` (corrutina; la pose final queda sostenida), `current()`, señal `anim_finished`. Las cíclicas (`LOOPS`) se marcan al cargar porque el `.glb` no trae el flag.
+- Mirada aditiva (`FigureLookModifier`, un `SkeletonModifier3D`): `set_look(yaw, pitch)` en radianes, yaw positivo hacia la izquierda de la figura, límites ±80°/±35°, suavizada; `look_at_point(pos)`.
+- IK de brazo: `enable_arm_ik(&"L"|&"R", on) -> Marker3D` crea un `TwoBoneIK3D` UpperArm→Forearm→Hand después de la animación y la mirada; `set_arm_ik_influence`, `arm_target`, `arm_pole`. Polo por defecto a la altura del hombro y hacia fuera (`POLE_RIGHT`), para que el codo quede sobre el canto de la mesa. Alcance exacto hasta ~0,55 m del hombro; la orientación de la mano no la controla el IK.
+- `bone_global()`, `eye_global_position()`, `head_global_position()` leen un caché con la pose ya modificada (no usar `get_bone_global_pose()`, que devuelve la pose sin modificar). `attach(node, bone)`; `set_hidden_for_first_person(on)` encoge la cabeza.
+- `ArbiterFigure`: `WALK_SPEED = 0.744`, `set_walk_speed(mps)`, `muzzle()`, `pistol()`, `set_gun_visible(on)`.
 
 ## 5. Configuración
 

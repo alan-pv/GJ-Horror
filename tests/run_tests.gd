@@ -18,6 +18,7 @@ const TEST_FILES := [
 	"res://tests/test_tournament.gd",
 	"res://tests/test_clock_sheet.gd",
 	"res://tests/test_hall_layout.gd",
+	"res://tests/test_character_figure.gd",
 ]
 
 

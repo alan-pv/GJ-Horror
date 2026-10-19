@@ -380,7 +380,7 @@ def _(t, u):
 FLEE_T, FLEE_D = 1.0, 0.30
 
 
-@anim("stand_flee_loop", FLEE_T, True, 0.05)
+@anim("stand_flee_cycle", FLEE_T, True, 0.05)
 def _(t, u):
     hz = ANK_Z + math.sqrt((LEG_LEN * .93) ** 2 - (FLEE_D / 2) ** 2)
     sp = stand_spec(0.0, hz)
