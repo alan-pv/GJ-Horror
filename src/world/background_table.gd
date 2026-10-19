@@ -28,6 +28,12 @@ const HIDDEN_STEP := 0.5
 ## Retardo entre la jugada del servidor y el cambio visible en el tablero (mitad del gesto).
 const BOARD_DELAY := 0.9
 const BOARD_PITCH := -0.5
+## Mezclas (s) entre poses: las ambientales y el paso a la jugada son lentas porque las poses
+## (recostado pensando / erguido moviendo) son muy distintas.
+const AMBIENT_BLEND := 0.8
+const MOVE_BLEND := 0.7
+const PRESS_BLEND := 0.4
+const WRITE_BLEND := 0.6
 
 const POSES_TURN := {&"sit_think": 6.0, &"sit_idle": 2.0}
 const POSES_WAIT := {&"sit_idle": 5.0, &"sit_think": 2.0, &"sit_write": 0.6}
@@ -74,7 +80,7 @@ func setup(p_hall: Hall, index: int, p_bg: BackgroundMatch, present: Array, seed
 		f.name = "Jugador%d" % color
 		f.position = Hall.seat_local(color)
 		f.rotation.y = PI if color == ChessPiece.WHITE else 0.0
-		f.setup(CharacterFigure.random_look(_rng))
+		f.setup(CharacterFigure.bot_look(_rng))
 		add_child(f)
 		f.play(&"sit_idle", 0.0)
 		var ap := f.animation_player()
@@ -204,6 +210,8 @@ func _pick_pose(color: int) -> void:
 	var s := _seats[color]
 	var f := figures[color]
 	var weights: Dictionary
+	if f.is_blending() and not s.flinch:
+		return  # reintenta en el próximo ciclo (0,1 s): sin cambios de pose sobre otra mezcla
 	var low := bg != null and not bg.server.is_over() and bg.server.clock.remaining[color] < 25.0
 	if s.flinch:
 		s.flinch = false
@@ -229,7 +237,7 @@ func _pick_pose(color: int) -> void:
 		if roll <= 0.0:
 			chosen = k
 			break
-	f.play(chosen, 0.6)
+	f.play(chosen, AMBIENT_BLEND)
 	if s.pose_t <= 0.0:
 		s.pose_t = _rng.randf_range(3.0, 9.0)
 
@@ -298,16 +306,16 @@ func _sequence(color: int) -> void:
 	s.stage = &"move"
 	s.calm = false
 	f.set_look(_rng.randf_range(-0.1, 0.1), BOARD_PITCH)
-	await f.play_once(&"sit_move_piece")
+	await f.play_once(&"sit_move_piece", MOVE_BLEND)
 	if not _same_job(color, g, &"move"):
 		return
 	s.stage = &"press"
-	await f.play_once(&"sit_press_clock")
+	await f.play_once(&"sit_press_clock", PRESS_BLEND)
 	if not _same_job(color, g, &"press"):
 		return
 	s.stage = &"write"
 	s.until = _clock + _rng.randf_range(1.2, 3.0)
-	f.play(&"sit_write", 0.3)
+	f.play(&"sit_write", WRITE_BLEND)
 
 
 func _same_job(color: int, gen: int, stage: StringName) -> bool:
@@ -328,7 +336,7 @@ func on_game_over(winner: int) -> void:
 			s.stage = &"relief"
 			s.until = _clock + _rng.randf_range(2.5, 4.0)
 			s.calm = true
-			f.play(&"sit_frozen", 0.8)
+			f.play(&"sit_frozen", 1.0)
 			f.set_look(0.0, BOARD_PITCH)
 			s.look_t = s.until - _clock
 		else:

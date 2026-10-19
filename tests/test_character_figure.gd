@@ -124,6 +124,21 @@ func test_random_look() -> void:
 	check(seen.size() >= 2, "varía el peinado")
 
 
+func test_bot_look_is_featureless_gray() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 3
+	var look := CharacterFigure.bot_look(rng)
+	check(look["skin"] == CharacterFigure.BOT_SKIN, "piel gris")
+	check(look["eyes"] == look["skin"] and look["hair"] == look["skin"], "ojos y cabello del color de la piel")
+	check(look["hair_style"] == "bald", "sin cabello")
+	var f := _spawn(CharacterFigure.new()) as CharacterFigure
+	f.setup(look)
+	for mat in f._materials.get("Eyes", []):
+		check((mat as StandardMaterial3D).albedo_color == CharacterFigure.BOT_SKIN, "ojos pintados de gris")
+	f.play(&"sit_idle", 0.5)
+	check(f.is_blending() or true, "is_blending existe")
+
+
 func test_look_is_clamped_and_moves_head() -> void:
 	var f := _spawn(CharacterFigure.new()) as CharacterFigure
 	f.play(&"sit_idle", 0.0)

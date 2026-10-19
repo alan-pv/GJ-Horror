@@ -246,7 +246,7 @@ func _build_actors(rng: RandomNumberGenerator) -> void:
 	# Cada jugador del torneo conserva su aspecto en todas sus partidas.
 	var look_rng := RandomNumberGenerator.new()
 	look_rng.seed = hash("rival%d" % rival_id)
-	var rival_look := CharacterFigure.random_look(look_rng)
+	var rival_look := CharacterFigure.bot_look(look_rng)
 	look_rng.seed = hash("human%d" % manager.human_id)
 	var human_look := CharacterFigure.random_look(look_rng)
 

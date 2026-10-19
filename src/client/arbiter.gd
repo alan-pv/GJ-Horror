@@ -345,7 +345,7 @@ func _figure_for(table: int, seat: int) -> CharacterFigure:
 		return _temp_figures[k]
 	var f := CharacterFigure.new()
 	root.add_child(f)
-	f.setup(CharacterFigure.random_look(_rng))
+	f.setup(CharacterFigure.bot_look(_rng))
 	var sgn := ArbiterRoutes.seat_sign(table, seat, root.human_color)
 	f.global_position = ArbiterRoutes.seat_position(table, seat, root.human_color)
 	f.rotation.y = PI if sgn > 0.0 else 0.0

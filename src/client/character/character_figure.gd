@@ -30,6 +30,9 @@ const LOOPS: Array[StringName] = [
 ## el codo a 0,63-0,67 y el antebrazo atraviesa el canto de la mesa.
 const POLE_RIGHT := Vector3(-0.80, 1.05, -0.20)
 
+## Gris mate de la piel de los bots (se lee bajo la lámpara cálida y en la penumbra).
+const BOT_SKIN := Color(0.46, 0.46, 0.47)
+
 # lado ("L"/"R") -> { ik: TwoBoneIK3D, target: Marker3D, pole: Marker3D }
 var _arms: Dictionary = {}
 
@@ -73,6 +76,20 @@ static func random_look(rng: RandomNumberGenerator) -> Dictionary:
 		"hair": hairs[rng.randi() % hairs.size()],
 		"hair_style": styles[rng.randi() % styles.size()],
 	}
+
+
+## Aspecto de un bot: maniquí gris sin rasgos. Conserva la ropa de `base` (si viene vacío,
+## la saca de `random_look(rng)`); la piel, el cabello y los ojos son del mismo gris mate y el
+## peinado es "bald". Los ojos son una caja con material `Eyes` dentro de la malla del cuerpo,
+## así que se pintan del color de la piel; la nariz y las orejas son geometría de `Skin` y
+## quedan como relieve sutil. El cuerpo del humano y el árbitro NO usan esto.
+static func bot_look(rng: RandomNumberGenerator, base: Dictionary = {}) -> Dictionary:
+	var look: Dictionary = base.duplicate() if not base.is_empty() else random_look(rng)
+	look["skin"] = BOT_SKIN
+	look["hair"] = BOT_SKIN
+	look["eyes"] = BOT_SKIN
+	look["hair_style"] = "bald"
+	return look
 
 
 # --- Brazos con IK ------------------------------------------------------------------

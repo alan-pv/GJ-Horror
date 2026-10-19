@@ -22,7 +22,7 @@ const MAX_PITCH := deg_to_rad(35.0)
 ## Hueso -> nombre del material que lleva `setup`.
 const LOOK_MATERIALS := {
 	"skin": "Skin", "shirt": "Shirt", "jacket": "Jacket",
-	"pants": "Pants", "shoes": "Shoes", "hair": "Hair",
+	"pants": "Pants", "shoes": "Shoes", "hair": "Hair", "eyes": "Eyes",
 }
 ## Posición aproximada entre los ojos / centro de la cabeza respecto al origen del hueso
 ## Head en reposo, en ejes del esqueleto (el modelo mira a +Z).
@@ -36,6 +36,8 @@ var _look_mod: FigureLookModifier
 var _current: StringName = &""
 var _finished: bool = false
 var _has_pose: bool = false
+## Instante (ms) en que termina la mezcla de la última `play`.
+var _blend_end_ms: int = 0
 var _look_target := Vector2.ZERO  # x = yaw, y = pitch
 var _look_now := Vector2.ZERO
 var _attachments: Dictionary = {}
@@ -96,7 +98,7 @@ func _process(delta: float) -> void:
 # --- Aspecto ----------------------------------------------------------------------
 
 ## Aplica un aspecto. Claves opcionales: `skin`, `shirt`, `jacket`, `pants`, `shoes`,
-## `hair` (Color) y `hair_style` ("short", "long", "bald"). Los materiales son propios de
+## `hair`, `eyes` (Color) y `hair_style` ("short", "long", "bald"). Los materiales son propios de
 ## esta instancia: no tiñe a las demás.
 func setup(look: Dictionary) -> void:
 	for key in LOOK_MATERIALS:
@@ -169,19 +171,26 @@ func play(anim: StringName, blend: float = 0.25, speed: float = 1.0) -> void:
 	_finished = false
 	var pose_held := not _player.is_playing() and _has_pose
 	if pose_held and blend > 0.0:
-		# La animación anterior terminó y su pose sigue sostenida: se mezcla desde ella.
-		_player.play_with_capture(anim, blend)
+		# La animación anterior terminó y su pose sigue sostenida: se vuelve a poner en pausa en
+		# su último fotograma y se mezcla desde ella (`play_with_capture` salta de golpe).
+		var held := _player.assigned_animation
+		if held != &"" and _player.has_animation(held):
+			_player.play(held, 0.0, 0.0)
+			_player.seek(_player.get_animation(held).length, true)
+			_player.pause()
+		_player.play(anim, blend)
 	else:
 		_player.play(anim, blend if _has_pose else 0.0)
 	_player.speed_scale = speed
 	_has_pose = true
+	_blend_end_ms = Time.get_ticks_msec() + int(blend * 1000.0 / maxf(speed, 0.05))
 	_state_changed.emit()
 
 
 ## Reproduce `anim` una vez y espera a que termine (corrutina: `await fig.play_once(...)`).
 ## La pose final queda sostenida (no vuelve a idle). Si otra animación la interrumpe,
 ## la espera termina igual. Las animaciones cíclicas no terminan: se rechazan.
-func play_once(anim: StringName, blend: float = 0.2) -> void:
+func play_once(anim: StringName, blend: float = 0.5) -> void:
 	if not _player.has_animation(anim):
 		push_warning("%s: no existe la animación '%s'" % [get_class(), anim])
 		return
@@ -192,6 +201,11 @@ func play_once(anim: StringName, blend: float = 0.2) -> void:
 	play(anim, blend, 1.0)
 	while _current == anim and not _finished:
 		await _state_changed
+
+
+## True mientras dura la mezcla de la última `play` (para no apilar un cambio de pose sobre otro).
+func is_blending() -> bool:
+	return Time.get_ticks_msec() < _blend_end_ms
 
 
 ## Animación actual (la última pedida; sigue siendo la actual con la pose sostenida

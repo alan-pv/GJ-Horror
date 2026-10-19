@@ -66,17 +66,17 @@ func start(p_figure: CharacterFigure, p_mode: Mode, p_rich: bool, p_sign: float,
 	_loop = _make_player(VOICE_SEATED, -9.0 if rich else -15.0)
 	match mode:
 		Mode.BEG:
-			figure.play(&"sit_beg", 0.4, _rng.randf_range(0.9, 1.15))
+			figure.play(&"sit_beg", 0.7, _rng.randf_range(0.9, 1.15))
 			_set_loop("sob_loop")
 		Mode.CRY, Mode.SOB:
-			figure.play(&"sit_cry", 0.4, _rng.randf_range(0.9, 1.1))
+			figure.play(&"sit_cry", 0.7, _rng.randf_range(0.9, 1.1))
 			_set_loop("sob_loop")
 		Mode.FROZEN:
-			figure.play(&"sit_frozen", 0.5)
+			figure.play(&"sit_frozen", 0.8)
 			_set_loop("panic_breath_loop")
 		Mode.FLEE:
 			# Antes de huir tiembla en la silla.
-			figure.play(&"sit_nervous", 0.4, 1.4)
+			figure.play(&"sit_nervous", 0.6, 1.4)
 			_set_loop("panic_breath_loop")
 	_next_whimper = _rng.randf_range(0.5, 2.5)
 
@@ -131,7 +131,7 @@ func begin_flee() -> void:
 	scrape.pitch_scale = _rng.randf_range(0.95, 1.05)
 	scrape.play()
 	figure.set_look(0.0, 0.0)
-	await figure.play_once(&"stand_flee", 0.15)
+	await figure.play_once(&"stand_flee", 0.35)
 	if dead or not is_inside_tree():
 		return
 	standing = true
