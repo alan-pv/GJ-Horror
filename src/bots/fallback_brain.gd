@@ -49,34 +49,92 @@ const PST_KING := [
 ]
 
 
+## Presupuesto de script por fotograma (microsegundos) al calcular la política: pasado
+## este tiempo la corrutina cede el fotograma y sigue en el siguiente, para que el
+## cálculo del bot no congele la partida en el momento de soltar la jugada.
+const SLICE_USEC := 3000
+
+## Valor de cada pieza en cada casilla, firmado (blancas +, negras -): índice pieza * 64 + casilla.
+static var _pv := PackedFloat64Array()
+
+
 func brain_name() -> String:
 	return "respaldo (GDScript)"
 
 
+## Coroutine: reparte el cálculo entre fotogramas (usa `await`). Para pruebas y
+## herramientas sin bucle de fotogramas, `get_policy_sync` calcula de una vez.
 func get_policy(board: BoardState, elo_self: int, _elo_oppo: int) -> Dictionary:
-	var moves := ChessRules.legal_moves(board)
+	var work := board.clone()
+	var moves := ChessRules.legal_moves_int(work)
 	if moves.is_empty():
 		return {}
-	var us := board.side_to_move
+	var tree := Engine.get_main_loop() as SceneTree
+	var us := work.side_to_move
+	var e0 := evaluate(work, us)
 	var scores := {}
-	for m in moves:
-		var after := board.clone()
-		ChessRules.apply_move(after, m)
-		var replies := ChessRules.legal_moves(after)
-		var score: float
-		if replies.is_empty():
-			if ChessRules.in_check(after, after.side_to_move):
-				score = 100000.0
-			else:
-				score = 50000.0 if us == ChessPiece.BLACK else -5000.0
-		else:
-			score = INF
-			for r in replies:
-				var after_r := after.clone()
-				ChessRules.apply_move(after_r, r)
-				score = minf(score, evaluate(after_r, us))
-		scores[m.uci()] = score
+	var t0 := Time.get_ticks_usec()
+	for mv in moves:
+		scores[_uci(mv)] = _score_move(work, mv, us, e0)
+		if tree != null and Time.get_ticks_usec() - t0 > SLICE_USEC:
+			await tree.process_frame
+			t0 = Time.get_ticks_usec()
 	return softmax(scores, temperature_for_elo(elo_self))
+
+
+## Misma política que `get_policy`, calculada de una vez sin ceder fotogramas.
+func get_policy_sync(board: BoardState, elo_self: int, _elo_oppo: int = 1500) -> Dictionary:
+	var work := board.clone()
+	var moves := ChessRules.legal_moves_int(work)
+	if moves.is_empty():
+		return {}
+	var us := work.side_to_move
+	var e0 := evaluate(work, us)
+	var scores := {}
+	for mv in moves:
+		scores[_uci(mv)] = _score_move(work, mv, us, e0)
+	return softmax(scores, temperature_for_elo(elo_self))
+
+
+static func _uci(mv: int) -> String:
+	return ChessMove.new(mv & 63, (mv >> 6) & 63, (mv >> 12) & 7).uci()
+
+
+## Puntuación a 2 plies de la jugada `mv` (peor respuesta del rival) para `us`.
+## `work` se modifica con hacer/deshacer y queda como estaba; `e0` es su evaluación.
+static func _score_move(work: BoardState, mv: int, us: int, e0: float) -> float:
+	var undo := PackedInt32Array()
+	undo.resize(12)
+	var undo_r := PackedInt32Array()
+	undo_r.resize(12)
+	ChessRules.make_int(work, mv, undo)
+	var e1 := e0 + _delta(work, undo, us)
+	var replies := PackedInt32Array()
+	ChessRules.gen_pseudo_int(work, replies)
+	var score := INF
+	for r in replies:
+		if (work.squares[(r >> 6) & 63] & 7) == ChessPiece.KING:
+			continue
+		ChessRules.make_int(work, r, undo_r)
+		if ChessRules.mover_king_safe(work):
+			score = minf(score, e1 + _delta(work, undo_r, us))
+		ChessRules.unmake_int(work, undo_r)
+	if score == INF:
+		if ChessRules.in_check(work, work.side_to_move):
+			score = 100000.0
+		else:
+			score = 50000.0 if us == ChessPiece.BLACK else -5000.0
+	ChessRules.unmake_int(work, undo)
+	return score
+
+
+## Cambio de evaluación (desde `us`) por las casillas que tocó la última jugada hecha.
+static func _delta(b: BoardState, undo: PackedInt32Array, us: int) -> float:
+	var d := 0.0
+	for i in undo[3]:
+		var sq := undo[4 + 2 * i]
+		d += _pv[b.squares[sq] * 64 + sq] - _pv[undo[5 + 2 * i] * 64 + sq]
+	return d if us == ChessPiece.WHITE else -d
 
 
 static func temperature_for_elo(elo: int) -> float:
@@ -84,20 +142,31 @@ static func temperature_for_elo(elo: int) -> float:
 	return lerpf(220.0, 25.0, t)
 
 
+static func _init_pv() -> void:
+	_pv.resize(16 * 64)
+	for p in 16:
+		var type := p & 7
+		if type == 0 or type > ChessPiece.KING:
+			continue
+		var white := ((p >> 3) & 1) == ChessPiece.WHITE
+		for sq in 64:
+			var idx := sq if white else (7 - sq / 8) * 8 + sq % 8
+			var v := float(ChessPiece.VALUES[type])
+			match type:
+				ChessPiece.PAWN: v += PST_PAWN[idx]
+				ChessPiece.KNIGHT: v += PST_KNIGHT[idx]
+				ChessPiece.BISHOP, ChessPiece.QUEEN: v += PST_CENTER[idx] * 0.5
+				ChessPiece.KING: v += PST_KING[idx]
+			_pv[p * 64 + sq] = v if white else -v
+
+
 ## Evaluación estática desde el punto de vista de `color`.
 static func evaluate(b: BoardState, color: int) -> float:
+	if _pv.is_empty():
+		_init_pv()
 	var total := 0.0
 	for sq in 64:
 		var p := b.squares[sq]
-		if p == ChessPiece.NONE:
-			continue
-		var c := ChessPiece.color_of(p)
-		var idx := sq if c == ChessPiece.WHITE else (7 - ChessPiece.rank_of(sq)) * 8 + ChessPiece.file_of(sq)
-		var v := float(ChessPiece.value_of(p))
-		match ChessPiece.type_of(p):
-			ChessPiece.PAWN: v += PST_PAWN[idx]
-			ChessPiece.KNIGHT: v += PST_KNIGHT[idx]
-			ChessPiece.BISHOP, ChessPiece.QUEEN: v += PST_CENTER[idx] * 0.5
-			ChessPiece.KING: v += PST_KING[idx]
-		total += v if c == color else -v
-	return total
+		if p != 0:
+			total += _pv[p * 64 + sq]
+	return total if color == ChessPiece.WHITE else -total

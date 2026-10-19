@@ -394,6 +394,13 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (1, 3) s, `
 - HUD: "Opponent m:ss" / "You m:ss" arriba al centro, ritmo "3+2", y del torneo solo "Round N / M", rondas restantes y jugadores que quedan.
 - Sonidos (`assets/audio/sfx/`, generados por `tools/gen_sfx.py`, ver su `CREDITS.md`): tic-tac, reloj, piezas, pluma, pasos, disparo, cuerpos, silla, sollozo, respiración, pitido, latido y ambiente. Solo el tic-tac está cableado todavía.
 
+### 4.17 Rendimiento del turno
+
+- `ChessRules` usa tablas precalculadas (caballo, rey, rayos, peón) y make/unmake sobre enteros (`gen_pseudo_int`, `make_int`/`unmake_int`, `legal_moves_int`, `has_legal_move`); `legal_moves` cuesta 0,3-1,0 ms.
+- `BeginnerHelper.check_move` poda las respuestas (2-16 ms síncrono). `precompute_async(board)` analiza en trozos de 3 ms por frame y guarda la mejor puntuación por `position_key`; `BotController` lo lanza tras su jugada, así el clic del humano cuesta 1-2 ms.
+- `FallbackBrain.get_policy` es una corrutina que cede el frame cada 3 ms (`get_policy_sync` para pruebas); sin hilos, para que funcione igual en web.
+- Benchmarks: `tools/bench_turn.gd` y `tools/bench_background.gd` (`--script`).
+
 ## 5. Configuración
 
 ### `MatchConfig` (`src/server/match_config.gd`)

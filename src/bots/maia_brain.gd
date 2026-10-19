@@ -34,6 +34,7 @@ func _init(usar_web: bool = true) -> void:
 	_usar_web = usar_web and OS.has_feature("web")
 	if _usar_web:
 		_iniciar_puente()
+		MaiaEncoding.moves()  # carga el vocabulario ahora y no en la primera petición
 
 
 func brain_name() -> String:

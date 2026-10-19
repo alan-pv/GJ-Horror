@@ -70,7 +70,7 @@ func test_beginner_warning_then_allowed() -> void:
 	m.board.squares[ChessPiece.square_from_name("d2")] = ChessPiece.NONE
 	m.board.squares[ChessPiece.square_from_name("d3")] = ChessPiece.make(ChessPiece.WHITE, ChessPiece.QUEEN)
 	r = m.submit_move(ChessPiece.WHITE, "d3h7")
-	check(not r.ok and r.warning.contains("dama"), "primer intento bloqueado: " + str(r))
+	check(not r.ok and r.warning.contains("queen"), "primer intento bloqueado: " + str(r))
 	r = m.submit_move(ChessPiece.WHITE, "d3h7")
 	check(r.ok, "segundo intento permitido")
 

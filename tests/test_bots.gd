@@ -14,18 +14,18 @@ func test_sample_respects_policy() -> void:
 
 func test_fallback_strong_bot_takes_hanging_queen() -> void:
 	var b := BoardState.from_fen("rnb1kbnr/pppp1ppp/8/4p2q/3P4/5N2/PPP1PPPP/RNBQKB1R w KQkq - 0 3")
-	var policy := FallbackBrain.new().get_policy(b, 2000, 1500)
+	var policy := FallbackBrain.new().get_policy_sync(b, 2000, 1500)
 	check(policy.get("f3h4", 0.0) < 0.5, "Nh4 no captura nada")
 	var b2 := BoardState.from_fen("rnb1kbnr/pppp1ppp/8/4q3/3P4/5N2/PPP1PPPP/RNBQKB1R w KQkq - 0 3")
-	var p2 := FallbackBrain.new().get_policy(b2, 2000, 1500)
+	var p2 := FallbackBrain.new().get_policy_sync(b2, 2000, 1500)
 	var takes: float = p2.get("d4e5", 0.0) + p2.get("f3e5", 0.0)
 	check(takes > 0.8, "un 2000 captura la dama colgada (dxe5 o Nxe5): %f" % takes)
 
 
 func test_fallback_weak_bot_is_more_random() -> void:
 	var b2 := BoardState.from_fen("rnb1kbnr/pppp1ppp/8/4q3/3P4/5N2/PPP1PPPP/RNBQKB1R w KQkq - 0 3")
-	var strong := FallbackBrain.new().get_policy(b2, 2000, 1500)
-	var weak := FallbackBrain.new().get_policy(b2, 700, 1500)
+	var strong := FallbackBrain.new().get_policy_sync(b2, 2000, 1500)
+	var weak := FallbackBrain.new().get_policy_sync(b2, 700, 1500)
 	check(weak["d4e5"] + weak["f3e5"] < strong["d4e5"] + strong["f3e5"], "el débil reparte más la probabilidad")
 
 

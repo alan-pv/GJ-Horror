@@ -60,30 +60,43 @@ func _recortar() -> void:
 ## Posiciones intermedias entre `prev` y `cur` (0 o 1), o null si ninguna secuencia de
 ## una o dos jugadas legales lleva de una a otra.
 static func _puente(prev: BoardState, cur: BoardState) -> Variant:
+	# Se prueba con hacer/deshacer sobre una copia de trabajo (sin clonar por jugada).
+	var work := prev.clone()
+	var undo := PackedInt32Array()
+	undo.resize(12)
+	var undo2 := PackedInt32Array()
+	undo2.resize(12)
 	if cur.side_to_move != prev.side_to_move:
-		for m in ChessRules.legal_moves(prev):
-			var c := prev.clone()
-			ChessRules.apply_move(c, m)
-			if _igual(c, cur):
+		for mv in ChessRules.legal_moves_int(work):
+			ChessRules.make_int(work, mv, undo)
+			var igual := _igual(work, cur)
+			ChessRules.unmake_int(work, undo)
+			if igual:
 				return []
 		return null
-	for m1 in ChessRules.legal_moves(prev):
-		var mid := prev.clone()
-		ChessRules.apply_move(mid, m1)
+	for m1 in ChessRules.legal_moves_int(work):
+		ChessRules.make_int(work, m1, undo)
 		# La jugada del rival solo toca casillas donde `mid` y `cur` difieren.
 		var difs := PackedInt32Array()
 		for sq in 64:
-			if mid.squares[sq] != cur.squares[sq]:
+			if work.squares[sq] != cur.squares[sq]:
 				difs.append(sq)
-		if difs.is_empty() or difs.size() > 4:
-			continue
-		for m2 in ChessRules.legal_moves(mid):
-			if not (difs.has(m2.from) and difs.has(m2.to)):
-				continue
-			var fin := mid.clone()
-			ChessRules.apply_move(fin, m2)
-			if _igual(fin, cur):
-				return [mid]
+		var found := false
+		if not difs.is_empty() and difs.size() <= 4:
+			for m2 in ChessRules.legal_moves_int(work):
+				if not (difs.has(m2 & 63) and difs.has((m2 >> 6) & 63)):
+					continue
+				ChessRules.make_int(work, m2, undo2)
+				found = _igual(work, cur)
+				ChessRules.unmake_int(work, undo2)
+				if found:
+					break
+		ChessRules.unmake_int(work, undo)
+		if found:
+			# La posición intermedia se reconstruye con las reglas completas (capturas, etc.).
+			var mid := prev.clone()
+			ChessRules.apply_move(mid, ChessMove.new(m1 & 63, (m1 >> 6) & 63, (m1 >> 12) & 7))
+			return [mid]
 	return null
 
 

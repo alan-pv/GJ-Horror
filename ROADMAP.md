@@ -6,8 +6,6 @@ Solo lo **pendiente**. Lo implementado se describe en [`docs/arquitectura.md`](d
 
 ### Oleada 1 — bases independientes
 
-- **R2. Rendimiento del turno** (`src/bots/`, `beginner_helper.gd`, `chess_rules.gd`, `board_state.gd`)
-  - [ ] Eliminar el tirón al terminar de elegir la jugada (medir: ayuda para principiantes, cerebro del bot, historial de Maia).
 - **R3. Arte low-poly en Blender** (`art/`, `assets/models/`)
   - [ ] Personaje sentado con esqueleto apto para IK y animaciones: reposo, pensar, escribir, pulsar el reloj, mover pieza, suplicar, llorar, levantarse e intentar huir, muerte por disparo.
   - [ ] Árbitro con pistola: caminar, revisar planillas, apuntar y disparar.
@@ -19,6 +17,7 @@ Solo lo **pendiente**. Lo implementado se describe en [`docs/arquitectura.md`](d
   - [ ] Personajes low-poly en lugar de primitivas (rival, jugador y mesas de fondo).
   - [ ] Brazo con IK sobre el esqueleto nuevo; el codo nunca atraviesa la mesa.
   - [ ] Secuencia física de cada jugada: mover, pulsar el reloj y anotar en la planilla.
+  - [ ] Lanzar `BeginnerHelper.precompute_async` también al empezar la partida y cuando el tablero cambie en el turno del humano (hoy solo tras la jugada del bot).
   - [ ] Encender `MatchConfig.require_clock_press` (el servidor ya lo soporta) e impedir `press_clock` con la mano ocupada en una trampa.
 - **R7. Salón en cuadrícula y mesas vivas**
   - [ ] Salón con 16 mesas en cuadrícula 4x4 que rodean al jugador.
