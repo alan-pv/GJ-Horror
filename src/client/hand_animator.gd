@@ -1,9 +1,14 @@
 class_name HandAnimator
 extends Node
 ## Secuencias de la mano con `await`, una función por fase: alcanzar, agarrar,
-## trasladar, soltar, volver y golpear el reloj. Es PURAMENTE visual: la
-## jugada ya está registrada en el servidor. Una cola por mano ejecuta las
-## jugadas en orden, y el tablero impide que dos manos se muevan a la vez.
+## trasladar, soltar, golpear el reloj, escribir en la planilla y volver. Es PURAMENTE
+## visual: la jugada ya está registrada en el servidor (el turno solo pasa cuando la mano
+## golpea el reloj: señal `clock_hit`). Una cola por mano ejecuta las jugadas en orden, y el
+## tablero impide que dos manos se muevan a la vez.
+##
+## Cada jugada es: MOVER la pieza, PULSAR el reloj, ANOTAR en la planilla (la pluma, ~2 s).
+## La mano mueve el brazo del personaje (`HandRig`, IK); en reposo el brazo queda sobre la mesa,
+## junto al tablero (`rest_grip`), para no tapar las piezas.
 ##
 ## Casos: jugada normal, captura (primero la pieza rival va a la pila),
 ## enroque (rey y luego torre) y coronación (se cambia la pieza al llegar).
@@ -18,6 +23,8 @@ extends Node
 
 signal phase_changed(phase: StringName)
 signal idle
+## La mano golpeó el botón del reloj: quien escucha llama a `MatchServer.press_clock(color)`.
+signal clock_hit(color: int)
 ## Se emite al terminar cada animación de la cola (jugada o titubeo).
 signal job_done(kind: String)
 
@@ -30,10 +37,12 @@ const SPEED := 1.3
 var rig: HandRig
 var board: BoardView
 var clock: ClockView
+## Planillas de la mesa (opcional): si existe, tras pulsar el reloj la mano anota la jugada.
+var sheet: ScoresheetView
 var color: int = ChessPiece.WHITE
 ## Pose de reposo del punto de pinza (mundo).
 var rest_grip: Vector3 = Vector3.ZERO
-var rest_pitch: float = 40.0
+var rest_pitch: float = 25.0
 ## Fase actual: idle, reach, grab, carry, release, press, return, hesitate.
 var phase: StringName = &"idle"
 
@@ -53,6 +62,7 @@ func setup(p_rig: HandRig, p_board: BoardView, p_clock: ClockView, p_color: int,
 	rest_grip = p_rest_grip
 	_rng.randomize()
 	rig.set_grip(rest_grip, rest_pitch)
+	rig.set_active(true, 0.0)
 
 
 func is_busy() -> bool:
@@ -170,8 +180,9 @@ func _run_move(job: Dictionary) -> void:
 		await _pause(0.12)
 		board.replace_piece(move.to, ChessPiece.make(color, move.promotion))
 		await _pause(0.15)
-	# 5) Reloj y vuelta.
+	# 5) Reloj, planilla y vuelta.
 	await _press_clock()
+	await _write_entry()
 	await _return_home()
 
 
@@ -351,8 +362,8 @@ func _cheat_steal(job: Dictionary, total: float) -> bool:
 	var grip_a := node.global_position + Vector3(0, gh, 0)
 	var clear_y := BoardView.BOARD_TOP + KING_HEIGHT + CARRY_CLEARANCE + gh
 	var sgn := 1.0 if color == board.near_color else -1.0
-	var lap := Vector3(0.12, BoardView.TABLE_TOP - 0.10, sgn * 0.52)
-	var edge := Vector3(0.14, BoardView.TABLE_TOP + 0.05, sgn * 0.40)
+	var lap := Vector3(0.12, BoardView.TABLE_TOP - 0.12, sgn * 0.58)
+	var edge := Vector3(0.16, BoardView.TABLE_TOP + 0.06, sgn * 0.44)
 	_set_phase(&"reach")
 	rig.set_pose(HandRig.Pose.OPEN, 0.2)
 	if not await _cmove(job, grip_a + Vector3(0, 0.06, 0), total * 0.28, 0.08, 58.0):
@@ -366,9 +377,9 @@ func _cheat_steal(job: Dictionary, total: float) -> bool:
 	if not await _cmove(job, Vector3(grip_a.x, clear_y, grip_a.z), total * 0.12, 0.0, 58.0):
 		return await _cheat_return_piece(job)
 	# Hacia el borde de la mesa y por debajo, al regazo.
-	if not await _cmove(job, edge, total * 0.22, 0.03, 55.0):
+	if not await _cmove(job, edge, total * 0.22, 0.03, 70.0):
 		return await _cheat_return_piece(job)
-	if not await _cmove(job, lap, total * 0.18, 0.0, 45.0):
+	if not await _cmove(job, lap, total * 0.18, 0.0, 80.0):
 		return await _cheat_return_piece(job)
 	if not await _wait_resolved(job):
 		return await _cheat_return_piece(job)
@@ -459,8 +470,62 @@ func _press_clock() -> void:
 	await _move_to(top + Vector3(0, 0.07, 0), _dur(0.45), 0.06, 70.0)
 	await _move_to(top + Vector3(0, 0.004, 0), _dur(0.16), 0.0, 75.0)
 	clock.press_button(color)
+	clock_hit.emit(color)
 	await _pause(0.12)
 	await _move_to(top + Vector3(0, 0.06, 0), _dur(0.2), 0.0, 70.0)
+
+
+## Anota la jugada en la planilla: toma la pluma, escribe unos 2 s, la deja y la jugada
+## aparece en la hoja. No hace nada si no hay planilla o no hay nada pendiente (trampas).
+func _write_entry() -> void:
+	if sheet == null or not sheet.has_pending(color):
+		return
+	_set_phase(&"write")
+	var pen := sheet.pen(color)
+	var pen_grip := sheet.pen_rest_grip(color)
+	rig.set_pose(HandRig.Pose.OPEN, _dur(0.2))
+	await _move_to(pen_grip + Vector3(0, 0.06, 0), _dur(0.45), 0.05, 55.0)
+	await _move_to(pen_grip + Vector3(0, 0.004, 0), _dur(0.18), 0.0, 60.0)
+	await rig.set_pose(HandRig.Pose.PINCH, _dur(0.12))
+	# La pluma pasa a la mano, inclinada como al escribir (punta abajo, hacia el cuerpo).
+	var start := sheet.write_point(color)
+	var toward_body := rig.shoulder_position() - start
+	toward_body.y = 0.0
+	toward_body = toward_body.normalized()
+	var axis := (toward_body * 0.62 + Vector3.UP * 0.78).normalized()
+	var perp := (Vector3.UP - axis * axis.dot(Vector3.UP)).normalized()
+	var held_basis := Basis(axis, perp, axis.cross(perp))
+	pen.reparent(rig.carry_anchor, true)
+	rig.carried = pen
+	var from_t := pen.transform
+	var to_t := Transform3D(held_basis, -axis * ScoresheetView.PEN_GRIP)
+	var tw := create_tween()
+	tw.tween_method(func(k: float) -> void: pen.transform = from_t.interpolate_with(to_t, k), 0.0, 1.0, _dur(0.25))
+	await tw.finished
+	# Escribe: trazos a lo largo de la línea, con la punta casi tocando el papel.
+	var dir := sheet.line_direction(color)
+	var total := _rng.randf_range(1.7, 2.3) / (SPEED * rig_speed())
+	var strokes := 7
+	var rev_state := {"done": false}
+	var rev := func() -> void:
+		await sheet.reveal_next(color, total)
+		rev_state.done = true
+	rev.call()
+	var off := axis * ScoresheetView.PEN_GRIP
+	await _move_to(start + off + Vector3(0, 0.02, 0), _dur(0.3), 0.02, 62.0)
+	for k in strokes:
+		var x := 0.05 * float(k + 1) / float(strokes)
+		var lift := 0.0035 if k % 2 == 0 else 0.0
+		await _move_to(start + dir * x + off + Vector3(0, lift, _rng.randf_range(-0.003, 0.003)), total / strokes, 0.0, 62.0)
+	while not rev_state.done and is_inside_tree():
+		await get_tree().process_frame
+	# Deja la pluma en su sitio.
+	await _move_to(pen_grip + Vector3(0, 0.03, 0), _dur(0.4), 0.04, 58.0)
+	await _move_to(pen_grip + Vector3(0, 0.004, 0), _dur(0.16), 0.0, 60.0)
+	rig.release_piece()
+	await sheet.rest_pen(color, _dur(0.2))
+	await rig.set_pose(HandRig.Pose.OPEN, _dur(0.12))
+	await _move_to(pen_grip + Vector3(0, 0.07, 0), _dur(0.2), 0.0, 55.0)
 
 
 func _return_home() -> void:
@@ -500,6 +565,11 @@ func _pause(seconds: float) -> void:
 func _dur(base: float) -> float:
 	var backlog := 1.0 + 0.7 * maxi(board.pending_jobs() - 1, 0)
 	return base * _job_speed * lerpf(1.0, 0.6, clampf(rig.stress, 0.0, 1.0)) / (SPEED * backlog)
+
+
+## Factor de velocidad de la jugada actual (variación humana y prisa por estrés).
+func rig_speed() -> float:
+	return _job_speed / lerpf(1.0, 0.6, clampf(rig.stress, 0.0, 1.0))
 
 
 func _set_phase(p: StringName) -> void:

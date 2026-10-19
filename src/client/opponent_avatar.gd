@@ -1,48 +1,69 @@
 class_name OpponentAvatar
 extends Node3D
-## Figura sentada del rival: torso de cápsula y cabeza esférica con ojos y
-## nariz bien visibles, para que el jugador lea hacia dónde mira. La cabeza
-## gira según `look_yaw`/`look_pitch` del `BotController` (la misma cámara
-## virtual con la que el servidor decide si mira el tablero). Es dueña de la
-## mano (`HandRig`) del rival, que usa el brazo izquierdo: así queda del mismo
-## lado que el reloj y que su pila de capturas.
+## El rival: una `SeatedFigure` (modelo de Blender) sentada en su silla, mirando a +Z hacia el
+## jugador. La cabeza sigue la mirada del bot (`BotController.looked`: la misma cámara virtual
+## con la que el servidor decide si mira el tablero), que es lo que el jugador debe leer. En
+## reposo alterna animaciones (`sit_idle`, `sit_think`, `sit_nervous`); los eventos (toser,
+## tirar una pieza) se resuelven con el tronco y la cabeza. Es dueño de la mano (`HandRig`)
+## del rival, que usa el brazo izquierdo: así queda del mismo lado que el reloj y que su pila
+## de capturas.
 ##
-## El nodo se coloca en el suelo bajo el asiento y se gira para mirar a +Z.
+## El nodo se coloca en el suelo bajo el asiento; la figura mira a +Z sin girar.
 
-const SEAT_HEIGHT := 0.45
+## Ojos de la figura sentada, en el espacio local del nodo (medido con `sit_idle`).
+const EYE_LOCAL := Vector3(0.0, 1.146, 0.27)
+## Animaciones de reposo y rango (s) entre cambios.
+const IDLE_ANIMS: Array[StringName] = [&"sit_idle", &"sit_think", &"sit_nervous"]
+const IDLE_CHANGE := Vector2(5.0, 12.0)
+## Altura de los ojos de las siluetas de primitivas (`build_figure`).
 const EYE_HEIGHT := 1.13
-const SHOULDER_HEIGHT := 1.0
 
+var figure: SeatedFigure
+## Marcador pegado al hueso de la cabeza (posición de la cabeza para efectos y sonidos).
 var head: Node3D
 var hand_rig: HandRig
+## Mano derecha (libre): descansa sobre la mesa.
+var idle_rig: HandRig
 var bot: BotController
 
-var _body: Node3D
 var _look_yaw: float = 0.0
 var _look_pitch: float = 0.0
 ## Sacudida de eventos (toser, tirar una pieza): cabeza (cabeceo, rad) y torso (inclinación, rad).
 var _head_kick: float = 0.0
 var _body_kick: float = 0.0
 var _event_tween: Tween
+var _idle_timer: float = 3.0
+var _rng := RandomNumberGenerator.new()
 
 
-## Posición global de los ojos (la usa el bot como cámara virtual).
+## Posición global de los ojos (la usa el bot como cámara virtual). No sigue la animación:
+## es siempre la de la figura sentada derecha, para que la mirada sea estable.
 func eye_position() -> Vector3:
-	return head.global_position
+	return global_transform * EYE_LOCAL
 
 
-## Crea el cuerpo y el brazo. `arm_side`: -1 = brazo izquierdo (local), +1 = derecho.
-func build(sleeve: Color, skin: Color, arm_side: float = -1.0) -> void:
+## Crea la figura y el brazo. `look` es el aspecto (ver `CharacterFigure.random_look`).
+## `arm_side`: `&"L"` = brazo izquierdo de la figura (el del lado del reloj).
+func build(look: Dictionary, arm_side: StringName = &"L") -> void:
 	name = "Rival"
-	var parts := build_figure(skin, sleeve, true)
-	add_child(parts.root)
-	_body = parts.root
-	head = parts.head
+	_rng.randomize()
+	figure = SeatedFigure.new()
+	figure.name = "Figura"
+	add_child(figure)
+	figure.setup(look)
+	figure.play(&"sit_idle", 0.0)
+	head = Marker3D.new()
+	head.name = "Cabeza"
+	figure.attach(head, &"Head")
 	hand_rig = HandRig.new()
 	hand_rig.name = "ManoRival"
-	hand_rig.position = Vector3(arm_side * 0.24, SHOULDER_HEIGHT - 0.04, -0.05)
 	add_child(hand_rig)
-	hand_rig.setup(arm_side, sleeve, skin)
+	hand_rig.setup(figure, arm_side)
+	idle_rig = HandRig.new()
+	idle_rig.name = "ManoLibreRival"
+	add_child(idle_rig)
+	idle_rig.setup(figure, &"R" if arm_side == &"L" else &"L")
+	idle_rig.rest_at(Vector3(-0.34, BoardView.TABLE_TOP + 0.03, -0.40))
 
 
 func bind_bot(p_bot: BotController) -> void:
@@ -51,22 +72,35 @@ func bind_bot(p_bot: BotController) -> void:
 	_on_looked(bot.look_yaw, bot.look_pitch)
 
 
+## El bot mira con la convención de la cámara (yaw 0 = hacia -Z del mundo); la figura mira a
+## +Z y su yaw positivo es hacia su izquierda: hay medio giro de diferencia.
 func _on_looked(yaw: float, pitch: float) -> void:
-	_look_yaw = yaw
+	_look_yaw = wrapf(yaw + PI - rotation.y, -PI, PI)
 	_look_pitch = pitch
 	_apply_head()
 
 
 func _apply_head() -> void:
-	# Misma convención que la cámara: sin girar mira hacia -Z.
-	head.global_basis = Basis.from_euler(Vector3(_look_pitch + _head_kick, _look_yaw, 0.0))
-	_body.rotation.x = _body_kick
+	figure.set_look(_look_yaw, _look_pitch + _head_kick)
+	figure.set_lean_extra(_body_kick)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	# Mientras dura una sacudida se reaplica cada fotograma (el bot solo avisa al girar).
 	if _event_tween != null and _event_tween.is_valid():
 		_apply_head()
+	_idle_timer -= delta
+	if _idle_timer <= 0.0:
+		_idle_timer = _rng.randf_range(IDLE_CHANGE.x, IDLE_CHANGE.y)
+		_next_idle()
+
+
+## Cambia de animación de reposo si la mano no está trabajando ni hay un evento en curso.
+func _next_idle() -> void:
+	if (_event_tween != null and _event_tween.is_valid()):
+		return
+	var options := IDLE_ANIMS.filter(func(a: StringName) -> bool: return a != figure.current())
+	figure.play(options[_rng.randi() % options.size()], 0.6)
 
 
 ## Tos: dos espasmos, cabeza y torso se doblan hacia adelante.
@@ -79,7 +113,7 @@ func play_cough() -> void:
 func _cough_step(t: float) -> void:
 	var spasm := maxf(sin(t * TAU * 2.0), 0.0) * (1.0 - t * 0.4)
 	_head_kick = -spasm * 0.45
-	_body_kick = -spasm * 0.13
+	_body_kick = spasm * 0.16
 
 
 ## Se le escapa una pieza: mira hacia abajo, hacia el suelo, un momento.
@@ -93,7 +127,7 @@ func play_drop_piece() -> void:
 
 func _dip_step(k: float) -> void:
 	_head_kick = -k * 0.8
-	_body_kick = -k * 0.18
+	_body_kick = k * 0.22
 
 
 func _start_event_tween() -> void:

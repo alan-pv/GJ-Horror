@@ -216,6 +216,8 @@ func press_clock(color: int) -> Dictionary:
 	var err := _can_act(color)
 	if err == "" and pending_press != color:
 		err = "no clock press pending"
+	if err == "" and is_hand_busy(color):
+		err = "your hand is busy"
 	if err != "":
 		return {"ok": false, "reason": err}
 	var san := _pending_san

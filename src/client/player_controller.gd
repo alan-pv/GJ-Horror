@@ -1,6 +1,8 @@
 class_name PlayerController
 extends Node3D
-## Jugador humano en primera persona, sentado. Mira con el ratón (capturado;
+## Jugador humano en primera persona, sentado en su silla (+Z, mirando a -Z). Su cuerpo es una
+## `SeatedFigure` (`body`) con la cabeza oculta y la cámara en los ojos; su brazo derecho es el
+## que mueve las piezas (`hand_rig`, por IK). Mira con el ratón (capturado;
 ## en web hay que hacer clic para capturarlo, Esc lo suelta), manda su mirada
 ## al servidor unas 10 veces por segundo y elige casillas con un rayo desde
 ## el centro de la pantalla contra el plano del tablero.
@@ -11,8 +13,10 @@ extends Node3D
 
 signal mouse_capture_changed(captured: bool)
 
-const EYE_POSITION := Vector3(0.0, 1.13, 0.52)
-const SHOULDER_POSITION := Vector3(0.24, 0.96, 0.50)
+## Suelo bajo el centro del asiento (la silla del salón está a 0,80 m; se avanza un poco para llegar al tablero).
+const SEAT := Vector3(0.0, 0.0, 0.72)
+## Ojos del jugador: los de la figura sentada (que está girada 180 grados).
+const EYE_POSITION := Vector3(0.0, OpponentAvatar.EYE_LOCAL.y, SEAT.z - OpponentAvatar.EYE_LOCAL.z)
 const MOUSE_SENSITIVITY := 0.0022
 const YAW_LIMIT := deg_to_rad(120.0)
 const PITCH_MIN := deg_to_rad(-80.0)
@@ -25,8 +29,14 @@ var animator: HandAnimator
 var color: int = ChessPiece.WHITE
 var camera: Camera3D
 var hand_rig: HandRig
+## Mano izquierda (libre): descansa sobre la mesa.
+var idle_rig: HandRig
+## Cuerpo del jugador (la cabeza se oculta: se ve el torso y los brazos).
+var body: SeatedFigure
 ## Si es false no se manda la mirada (modo autoplay, donde la manda un bot).
 var send_gaze: bool = true
+## true si la cámara está fija en un punto de depuración (`--shot-cam`).
+var debug_camera: bool = false
 var yaw: float = 0.0
 var pitch: float = 0.0
 var selected: int = -1
@@ -37,7 +47,7 @@ var _gaze_timer: float = 0.0
 var _headless: bool = false
 
 
-func setup(p_server: MatchServer, p_board: BoardView, p_color: int) -> void:
+func setup(p_server: MatchServer, p_board: BoardView, p_color: int, look: Dictionary = {}) -> void:
 	server = p_server
 	board = p_board
 	color = p_color
@@ -58,12 +68,59 @@ func setup(p_server: MatchServer, p_board: BoardView, p_color: int) -> void:
 	pitch = asin(to_board.normalized().y)
 	_apply_look()
 
+	# Cuerpo: sentado, mirando a -Z, con la cabeza oculta.
+	body = SeatedFigure.new()
+	body.name = "Cuerpo"
+	body.position = SEAT - EYE_POSITION
+	body.rotation.y = PI
+	add_child(body)
+	body.setup(CharacterFigure.random_look(RandomNumberGenerator.new()) if look.is_empty() else look)
+	body.set_hidden_for_first_person(true)
+	body.play(&"sit_idle", 0.0)
+	# Brazo derecho (el del personaje: queda hacia +X del mundo, del lado del reloj).
 	hand_rig = HandRig.new()
 	hand_rig.name = "ManoJugador"
-	# Brazo derecho, ligeramente atrás y debajo de los ojos.
-	hand_rig.position = SHOULDER_POSITION - EYE_POSITION
 	add_child(hand_rig)
-	hand_rig.setup(1.0, Color(0.14, 0.20, 0.34), Color(0.80, 0.62, 0.50))
+	hand_rig.setup(body, &"R")
+	idle_rig = HandRig.new()
+	idle_rig.name = "ManoLibre"
+	add_child(idle_rig)
+	idle_rig.setup(body, &"L")
+	idle_rig.rest_at(Vector3(-0.34, BoardView.TABLE_TOP + 0.03, 0.40))
+	_apply_debug_camera()
+
+
+## Cámara de depuración para capturas: `--shot-cam=side|px,py,pz,tx,ty,tz[,fov]`.
+func _apply_debug_camera() -> void:
+	var spec := ""
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--shot-cam="):
+			spec = a.substr(11)
+	if spec == "":
+		return
+	var pos := Vector3(1.5, 0.95, 0.0)
+	var at := Vector3(0.0, 0.8, 0.0)
+	var fov := 40.0
+	match spec:
+		"side":
+			pass
+		"sidenear":
+			pos = Vector3(1.2, 0.95, 0.35)
+			at = Vector3(0.2, 0.8, 0.35)
+		"sidefar":
+			pos = Vector3(1.2, 0.95, -0.35)
+			at = Vector3(0.2, 0.8, -0.35)
+		_:
+			var v := spec.split(",")
+			if v.size() >= 6:
+				pos = Vector3(float(v[0]), float(v[1]), float(v[2]))
+				at = Vector3(float(v[3]), float(v[4]), float(v[5]))
+				if v.size() >= 7:
+					fov = float(v[6])
+	camera.top_level = true
+	camera.fov = fov
+	camera.look_at_from_position(pos, at)
+	debug_camera = true
 
 
 func is_mouse_captured() -> bool:
@@ -128,6 +185,7 @@ func _process(delta: float) -> void:
 
 func _my_turn() -> bool:
 	return server.started and not server.is_over() and server.board.side_to_move == color \
+			and server.pending_press < 0 \
 			and not server.accusation_pending() and not server.is_hand_busy(color)
 
 

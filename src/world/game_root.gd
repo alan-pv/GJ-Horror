@@ -52,7 +52,8 @@ const MODULES: Array[String] = [
 const BG_MOVES_PER_FRAME := 1
 const CHEAT_IDS := ["nudge", "slide", "steal", "move_enemy"]
 const PERSONALITY_IDS := ["honesto", "paranoico", "tramposo_nervioso"]
-const RIVAL_SEAT := Vector3(0.0, 0.0, -0.55)
+## Suelo bajo el centro del asiento del rival (la silla del salón está a 0,80 m; se avanza para llegar al tablero).
+const RIVAL_SEAT := Vector3(0.0, 0.0, -PlayerController.SEAT.z)
 
 ## Torneo en curso (sobrevive a la recarga de la escena: ver `TournamentSession`).
 var manager: TournamentManager
@@ -68,6 +69,7 @@ var server: MatchServer
 var hall: Hall
 var board_view: BoardView
 var clock_view: ClockView
+var sheet_view: ScoresheetView
 var player: PlayerController
 var avatar: OpponentAvatar
 var hud: Hud
@@ -101,6 +103,8 @@ var _bt_frames: int = 0
 var _fps_sum: float = 0.0
 var _draw_sum: float = 0.0
 var _proc_sum: float = 0.0
+## Pulsación del reloj rechazada por mano ocupada en una trampa (por color).
+var _press_retry: Array[bool] = [false, false]
 
 
 func _ready() -> void:
@@ -129,6 +133,9 @@ func _ready() -> void:
 	clock_view = ClockView.new()
 	add_child(clock_view)
 	clock_view.setup(human_color)
+	sheet_view = ScoresheetView.new()
+	add_child(sheet_view)
+	sheet_view.setup(human_color)
 
 	_build_match(rng)
 	_build_actors(rng)
@@ -168,6 +175,7 @@ func _ready() -> void:
 	board_view.sync(server.board)
 	if tgame != null:
 		server.start()
+		_prefetch_beginner_help()
 	else:
 		# Descanso: la mesa queda sin partida y el rival no está.
 		avatar.visible = false
@@ -217,6 +225,8 @@ func _build_match(rng: RandomNumberGenerator) -> void:
 		if def != null:
 			cheats.append(def)
 	config.cheats = cheats
+	# El turno pasa al pulsar el reloj: la mano lo hace al final de cada jugada.
+	config.require_clock_press = true
 	config.white_seconds = float(_args.get("clock", config.white_seconds))
 	config.black_seconds = config.white_seconds
 	# Las sesiones viven en el torneo: las advertencias se arrastran entre partidas.
@@ -231,28 +241,36 @@ func _build_match(rng: RandomNumberGenerator) -> void:
 
 
 func _build_actors(rng: RandomNumberGenerator) -> void:
+	# Cada jugador del torneo conserva su aspecto en todas sus partidas.
+	var look_rng := RandomNumberGenerator.new()
+	look_rng.seed = hash("rival%d" % rival_id)
+	var rival_look := CharacterFigure.random_look(look_rng)
+	look_rng.seed = hash("human%d" % manager.human_id)
+	var human_look := CharacterFigure.random_look(look_rng)
+
 	player = PlayerController.new()
 	player.name = "Jugador"
 	add_child(player)
-	player.setup(server, board_view, human_color)
+	player.setup(server, board_view, human_color, human_look)
 	player.send_gaze = not _args.has("autoplay")
 
 	avatar = OpponentAvatar.new()
 	avatar.position = RIVAL_SEAT
-	avatar.rotation.y = PI
 	add_child(avatar)
-	avatar.build(Color(0.30, 0.07, 0.08), Color(0.70, 0.55, 0.46), -1.0)
+	avatar.build(rival_look)
 
-	var human_rest := Vector3(0.26, BoardView.BOARD_TOP + 0.10, 0.33)
-	var rival_rest := Vector3(0.26, BoardView.BOARD_TOP + 0.10, -0.33)
+	var human_rest := Vector3(0.34, BoardView.TABLE_TOP + 0.03, 0.40)
+	var rival_rest := Vector3(0.34, BoardView.TABLE_TOP + 0.03, -0.40)
 	var ha := HandAnimator.new()
 	ha.name = "AnimadorJugador"
 	add_child(ha)
 	ha.setup(player.hand_rig, board_view, clock_view, human_color, human_rest)
+	ha.sheet = sheet_view
 	var ra := HandAnimator.new()
 	ra.name = "AnimadorRival"
 	add_child(ra)
 	ra.setup(avatar.hand_rig, board_view, clock_view, rival_color, rival_rest)
+	ra.sheet = sheet_view
 	animators[human_color] = ha
 	animators[rival_color] = ra
 	player.animator = ha
@@ -285,6 +303,12 @@ func _connect_signals() -> void:
 	server.state_changed.connect(func() -> void: board_view.sync(server.board))
 	server.move_made.connect(_on_move_made)
 	server.beginner_warning.connect(_on_beginner_warning)
+	# Secuencia física: la mano pulsa el reloj (pasa el turno) y anota en la planilla.
+	server.sheet_entry.connect(sheet_view.add_entry)
+	server.cheat_finished.connect(func(c: int, _id: StringName, _f: int, _t: int) -> void: _after_cheat(c))
+	server.cheat_aborted.connect(func(c: int, _id: StringName) -> void: _after_cheat(c))
+	for a in animators:
+		a.clock_hit.connect(_on_clock_hit)
 	server.accusation_started.connect(_on_accusation_started)
 	server.accusation_resolved.connect(_on_accusation_resolved)
 	server.game_over.connect(_on_game_over)
@@ -300,6 +324,31 @@ func _on_move_made(color: int, uci: String, info: Dictionary) -> void:
 	_moves_seen += 1
 	_log("Jugada %d: %s mueve %s%s" % [_moves_seen, _color_name(color), uci, " (captura)" if int(info.get("capture_square", -1)) >= 0 else ""])
 	animators[color].enqueue_move(uci, info)
+
+
+## La mano golpeó el botón del reloj: el turno pasa. Si la mano está ocupada en una trampa
+## el servidor lo rechaza y se reintenta al terminar la trampa.
+func _on_clock_hit(color: int) -> void:
+	var res := server.press_clock(color)
+	if not res.ok and server.awaiting_press(color):
+		_press_retry[color] = true
+
+
+## Terminó o se abortó una trampa: reintenta una pulsación pendiente y, si el turno es del
+## humano, analiza su posición en segundo plano (el tablero cambió).
+func _after_cheat(color: int) -> void:
+	if _press_retry[color] and not server.is_hand_busy(color):
+		_press_retry[color] = false
+		server.press_clock(color)
+	_prefetch_beginner_help()
+
+
+## Lanza el análisis de ayuda del humano si le toca mover (sin esperar: corre por trozos).
+func _prefetch_beginner_help() -> void:
+	if server.is_over() or server.board.side_to_move != human_color:
+		return
+	if server.config.beginner_help and server.sessions[human_color].beginner_help:
+		BeginnerHelper.precompute_async(server.board.clone())
 
 
 func _on_beginner_warning(color: int, uci: String, text: String) -> void:

@@ -151,3 +151,35 @@ func test_san() -> void:
 
 func test_san_en_passant() -> void:
 	check_eq(_san("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1", "e5d6"), "exd6")
+
+
+func test_press_clock_rejected_while_hand_busy() -> void:
+	var m := _make(true)
+	check(m.submit_move(W, "e2e4").ok)
+	var r := m.start_cheat(W, &"nudge", _sq("h2"), _sq("h3"))
+	check(r.ok, "trampa con pulsación pendiente: " + str(r))
+	var p := m.press_clock(W)
+	check(not p.ok, "no se pulsa con la mano en una trampa")
+	check_eq(p.reason, "your hand is busy")
+	check(m.awaiting_press(W), "la pulsación sigue pendiente")
+	m.tick(r.duration + 0.5)
+	check(not m.is_hand_busy(W), "trampa terminada")
+	check(m.press_clock(W).ok, "ahora sí")
+	check_eq(m.clock.running, B)
+
+
+func test_scoresheet_view_writes_entries() -> void:
+	var v := ScoresheetView.new()
+	v.setup(W)
+	check(not v.has_pending(W))
+	v.add_entry(W, 1, "e4")
+	v.add_entry(W, 2, "Nf3")
+	check(v.has_pending(W))
+	v.reveal_next(W, 0.0)
+	check_eq(v.line_text(W, 0), "1. e4")
+	check_eq(v.written_count(W), 1)
+	v.reveal_next(W, 0.0)
+	check_eq(v.line_text(W, 1), "2. Nf3")
+	check(not v.has_pending(W))
+	check_eq(v.line_text(B, 0), "", "la hoja rival sigue en blanco")
+	v.free()

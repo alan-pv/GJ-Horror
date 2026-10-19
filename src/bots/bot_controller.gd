@@ -93,8 +93,11 @@ func _process(delta: float) -> void:
 		_play_turn()
 
 
+## Es mi turno de pensar y jugar: toca mover, el rival ya pulsó el reloj (con
+## `require_clock_press` el turno no pasa hasta entonces) y la mano está libre.
 func _my_turn() -> bool:
 	return server.started and not server.is_over() and server.board.side_to_move == color \
+			and server.pending_press < 0 \
 			and not server.accusation_pending() and not server.is_hand_busy(color)
 
 

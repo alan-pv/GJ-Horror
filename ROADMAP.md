@@ -6,14 +6,12 @@ Solo lo **pendiente**. Lo implementado se describe en [`docs/arquitectura.md`](d
 
 ### Oleada 2 — integración (depende de la oleada 1)
 
-- **R6. Personajes y manos realistas**
-  - [ ] Personajes low-poly en lugar de primitivas (rival, jugador y mesas de fondo).
-  - [ ] Brazo con IK sobre el esqueleto nuevo; el codo nunca atraviesa la mesa.
-  - [ ] Secuencia física de cada jugada: mover, pulsar el reloj y anotar en la planilla.
-  - [ ] Lanzar `BeginnerHelper.precompute_async` también al empezar la partida y cuando el tablero cambie en el turno del humano (hoy solo tras la jugada del bot).
+- **R9. Pulido de la mesa del jugador** (tras integrar la oleada 2)
+  - [ ] Brazos en reposo y al mover con postura natural: hoy el codo queda muy alto, "en ala", y desde la cámara del jugador los brazos del rival cuelgan sobre el tablero.
+  - [ ] Iluminación de la mesa del jugador: el tablero se ve sobreexpuesto (casillas naranja y blanco quemado).
   - [ ] Subir `config.arbiter_delay` a ~6-7 s para que el árbitro llegue y revise las planillas.
   - [ ] Bloquear la entrada del jugador durante su ejecución en primera persona.
-  - [ ] Encender `MatchConfig.require_clock_press` (el servidor ya lo soporta) e impedir `press_clock` con la mano ocupada en una trampa.
+  - [ ] La planilla del rival está a su izquierda (escribe con el brazo del reloj).
 
 ## Pendiente de la etapa anterior
 

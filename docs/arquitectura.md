@@ -428,6 +428,15 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (1, 3) s, `
 - `GameRoot.figure_at(table, seat)` y `condemn_seat(table, seat)` (detiene la vida ambiental y la entrega al árbitro). Al terminar una partida de fondo se emite `table_eliminated` y se llama `arbiter.request_execution(mesa, color_perdedor)`; tras cada ejecución la lámpara parpadea y queda al 40 % y las demás mesas voltean. La ronda termina cuando acabaron las partidas y `arbiter.has_pending_work()` es false. Entre rondas las mesas se conservan; las sin partida quedan vacías y a oscuras.
 - Depuración: `--aerial[=x,y,z,tx,ty,tz]` (cámara aérea) y `--no-arbiter-exec` (el perdedor se levanta y se va).
 
+### 4.20 Mesa del jugador (`opponent_avatar.gd`, `player_controller.gd`, `hand_rig.gd`, `hand_animator.gd`)
+
+- Rival y cuerpo del jugador son `SeatedFigure` (subclase de `CharacterFigure` con inclinación, giro y desplazamiento de torso: `TorsoLeanModifier`) en las sillas a z = ∓0,80 (`RIVAL_SEAT`, `PlayerController.SEAT`). El jugador tiene la cabeza oculta y la cámara en los ojos. La cabeza del rival sigue `bot.looked`; en reposo alterna `sit_idle`/`sit_think`/`sit_nervous` cada 5-12 s; toser y tirar pieza se resuelven con cabeza y tronco.
+- `HandRig` mueve el brazo del personaje por IK (`enable_arm_ik`), orienta la mano y cierra dedos y pulgar con `ArmPoseModifier`, e inclina/adelanta el torso hasta 8 cm para casillas lejanas. API conservada: `set_grip`, `set_pose`, `attach_piece`, `release_piece`, `carry_anchor`, `stress`. El rival mueve con el brazo izquierdo (lado del reloj) y el jugador con el derecho; el otro brazo descansa (`idle_rig`). `tools/check_arm_clearance.gd` recorre 1064 posturas: ninguna atraviesa la mesa.
+- Utilería de Blender: `BoardView` (board.glb), `PieceFactory` (pieces/*.glb recoloreadas), `ClockView` (chess_clock.glb con `Label3D` en Face_A/B y botones animados).
+- **Jugada física:** `HandAnimator` mueve la pieza, golpea el botón (`clock_hit(color)` → `server.press_clock`; `require_clock_press = true`) y anota ~2 s con la pluma en la planilla. `ScoresheetView` muestra cada `sheet_entry` en SAN (11 líneas por columna). Si la mano está en una trampa al pulsar, el servidor rechaza y `GameRoot` reintenta al terminar o abortar. Los bots no piensan ni mueven hasta que el rival pulsa.
+- La ayuda para principiantes se precalcula al empezar si el humano mueve primero y tras cada trampa en su turno.
+- Depuración: `--shot-cam=side|sidenear|sidefar|px,py,pz,tx,ty,tz[,fov]`.
+
 ## 5. Configuración
 
 ### `MatchConfig` (`src/server/match_config.gd`)

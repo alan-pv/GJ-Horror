@@ -17,7 +17,8 @@ signal motion_released
 const SQUARE := PieceFactory.SQUARE
 const TABLE_TOP := 0.72
 ## Altura de la cara superior de las casillas.
-const BOARD_TOP := TABLE_TOP + 0.016
+const BOARD_TOP := TABLE_TOP + 0.015
+const MODEL_PATH := "res://assets/models/props/board.glb"
 ## Centro de la mesa a la altura del tablero (lo que usa el servidor para la mirada).
 const CENTER := Vector3(0.0, BOARD_TOP, 0.0)
 ## Centros de las pilas de captura (lado +X, a la derecha del humano y a la izquierda del rival).
@@ -25,10 +26,6 @@ const PILE_X := 0.42
 const PILE_Z := 0.22
 const PILE_COLUMNS := 4
 const PILE_SPACING := 0.04
-
-const LIGHT_TILE := Color(0.62, 0.56, 0.46)
-const DARK_TILE := Color(0.24, 0.15, 0.10)
-const FRAME_COLOR := Color(0.10, 0.055, 0.03)
 
 ## true cuando el humano juega con negras (el tablero se gira para tenerlas cerca).
 var flipped: bool = false
@@ -351,46 +348,18 @@ func _build_board() -> void:
 	_pieces_root = Node3D.new()
 	_pieces_root.name = "Piezas"
 	add_child(_pieces_root)
-
-	var span := SQUARE * 8.0
-	var frame_w := 0.03
-	var frame_mat := _lit_material(FRAME_COLOR, 0.55)
-	# Losa base bajo las casillas.
-	var slab := MeshInstance3D.new()
-	var slab_mesh := BoxMesh.new()
-	slab_mesh.size = Vector3(span + frame_w * 2.0, 0.012, span + frame_w * 2.0)
-	slab.mesh = slab_mesh
-	slab.material_override = frame_mat
-	slab.position = Vector3(0, TABLE_TOP + 0.006, 0)
-	_tiles_root.add_child(slab)
-	# Cuatro listones del marco, algo más altos que las casillas.
-	var frame_h := 0.022
-	for side in 4:
-		var strip := MeshInstance3D.new()
-		var sm := BoxMesh.new()
-		var horizontal := side < 2
-		var long_len := span + frame_w * 2.0
-		sm.size = Vector3(long_len, frame_h, frame_w) if horizontal else Vector3(frame_w, frame_h, span)
-		strip.mesh = sm
-		strip.material_override = frame_mat
-		var d := (span + frame_w) * 0.5
-		if horizontal:
-			strip.position = Vector3(0, TABLE_TOP + frame_h * 0.5, d if side == 0 else -d)
-		else:
-			strip.position = Vector3(d if side == 2 else -d, TABLE_TOP + frame_h * 0.5, 0)
-		_tiles_root.add_child(strip)
-
-	var light_mat := _lit_material(LIGHT_TILE, 0.6)
-	var dark_mat := _lit_material(DARK_TILE, 0.55)
-	var tile_mesh := BoxMesh.new()
-	tile_mesh.size = Vector3(SQUARE, 0.004, SQUARE)
-	for sq in 64:
-		var tile := MeshInstance3D.new()
-		tile.mesh = tile_mesh
-		tile.material_override = dark_mat if (ChessPiece.file_of(sq) + ChessPiece.rank_of(sq)) % 2 == 0 else light_mat
-		tile.position = square_local(sq) - Vector3(0, 0.002, 0)
-		tile.name = "Casilla_" + ChessPiece.square_name(sq)
-		_tiles_root.add_child(tile)
+	# Modelo de Blender: superficie de juego a y=0 (el marco baja hasta -0,015) y a1 en
+	# la esquina (-X, +Z); con el tablero girado (humano con negras) se gira 180 grados.
+	var scene := load(MODEL_PATH) as PackedScene
+	var model := scene.instantiate() as Node3D
+	model.name = "TableroModelo"
+	model.position = Vector3(0.0, BOARD_TOP, 0.0)
+	model.rotation.y = PI if flipped else 0.0
+	_tiles_root.add_child(model)
+	# Las casillas coinciden con la cara superior del marco: se alzan 0,7 mm contra el parpadeo.
+	var squares := model.find_child("BoardSquares", true, false) as Node3D
+	if squares != null:
+		squares.position.y = 0.0007
 
 
 func _build_highlights() -> void:
