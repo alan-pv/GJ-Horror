@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"eliminacion"
-display_name = "Eliminación en otra mesa"
+display_name = "Elimination at another table"
 kind = 0
 origin_mode = 0
 duration = 9.0

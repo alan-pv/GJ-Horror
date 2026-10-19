@@ -38,7 +38,7 @@ func setup(names: Array[String]) -> void:
 	col.add_theme_constant_override("separation", 3)
 	_box.add_child(col)
 	var title := Label.new()
-	title.text = "Bajo la mesa"
+	title.text = "Under the table"
 	title.add_theme_font_size_override("font_size", 13)
 	title.add_theme_color_override("font_color", DIM)
 	col.add_child(title)

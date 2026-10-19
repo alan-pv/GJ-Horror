@@ -112,9 +112,9 @@ func _on_accusation_resolved(accuser: int, correct: bool, warnings: int) -> void
 	var accused := ChessPiece.opposite(accuser)
 	var text := ""
 	if correct:
-		text = "Hubo trampa. Las %s quedan descalificadas." % _color_name(accused)
+		text = "Cheating confirmed. %s is disqualified." % _color_name(accused)
 	else:
-		text = "No veo nada irregular. Advertencia %d de %d para las %s." % [
+		text = "Nothing irregular here. Warning %d of %d for %s." % [
 			warnings, root.config.false_accusations_to_eliminate, _color_name(accuser)]
 	root.hud.show_subtitle(text, 4.0)
 	await _gesture(correct, accused, gen)
@@ -132,7 +132,7 @@ func _on_accusation_resolved(accuser: int, correct: bool, warnings: int) -> void
 
 
 func _color_name(c: int) -> String:
-	return "blancas" if c == ChessPiece.WHITE else "negras"
+	return "White" if c == ChessPiece.WHITE else "Black"
 
 
 # --- Movimiento ------------------------------------------------------------------------

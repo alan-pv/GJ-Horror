@@ -5,9 +5,9 @@
 [resource]
 script = ExtResource("1")
 id = &"move_enemy"
-display_name = "Mover pieza enemiga"
+display_name = "Move enemy piece"
 kind = 3
-description = "Deja una pieza enemiga donde puedas capturarla o sin defensa."
+description = "Leave an enemy piece where you can take it, or undefended."
 base_time = 1.2
 time_per_square = 0.4
 max_distance = 3

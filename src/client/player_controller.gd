@@ -84,7 +84,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _headless:
 		return
 	if event is InputEventMouseMotion and is_mouse_captured():
-		set_look(yaw - event.relative.x * MOUSE_SENSITIVITY, pitch - event.relative.y * MOUSE_SENSITIVITY)
+		var k := MOUSE_SENSITIVITY * _sensitivity_scale()
+		set_look(yaw - event.relative.x * k, pitch - event.relative.y * k)
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		if not is_mouse_captured():
 			capture_mouse(true)
@@ -95,6 +96,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("accuse"):
 		if server.started and not server.is_over():
 			server.accuse(color)
+
+
+## Multiplicador de sensibilidad de los ajustes (1.0 si no existe el autoload).
+func _sensitivity_scale() -> float:
+	var settings := get_node_or_null("/root/GameSettings")
+	return float(settings.mouse_sensitivity) if settings != null else 1.0
 
 
 func capture_mouse(on: bool) -> void:

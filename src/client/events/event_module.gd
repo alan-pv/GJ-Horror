@@ -126,7 +126,7 @@ func _on_event(id: StringName, origin: Vector3, duration: float) -> void:
 			notice_pos = origin + Vector3(0.0, 0.5, 0.0)
 		&"acusacion_ajena":
 			stage.accuser(origin, duration, root.player.global_position)
-			root.hud.show_subtitle("¡Trampa!", 2.2)
+			root.hud.show_subtitle("Cheater!", 2.2)
 			notice_pos = origin + Vector3(0.0, 1.5, 0.0)
 		&"eliminacion":
 			stage.drag_away(origin, duration, _drag_seat)

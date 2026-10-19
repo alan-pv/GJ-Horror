@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"ruido_detras"
-display_name = "Ruido detrás"
+display_name = "Noise behind"
 kind = 0
 origin_mode = 1
 duration = 2.0

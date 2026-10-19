@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"acusacion_ajena"
-display_name = "Acusación ajena"
+display_name = "Accusation at another table"
 kind = 0
 origin_mode = 0
 duration = 3.5

@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"drop_piece"
-display_name = "Tirar una pieza"
+display_name = "Drop a piece"
 kind = 1
 origin_mode = 2
 duration = 1.6

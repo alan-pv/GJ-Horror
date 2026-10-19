@@ -32,3 +32,8 @@ static func why_not(b: BoardState, color: int, def: CheatDef, from: int) -> Stri
 		if probe.reason == r:
 			return r
 	return "that piece has no possible destinations"
+
+
+## Texto visible de un motivo del servidor (los motivos ya vienen en inglés).
+static func visible_reason(reason: String) -> String:
+	return reason

@@ -5,9 +5,9 @@
 [resource]
 script = ExtResource("1")
 id = &"slide"
-display_name = "Deslizar"
+display_name = "Slide"
 kind = 1
-description = "Mueve una pieza propia varias casillas en línea."
+description = "Slide one of your pieces several squares in a line."
 base_time = 1.0
 time_per_square = 0.35
 max_distance = 4

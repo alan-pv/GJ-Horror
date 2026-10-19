@@ -385,6 +385,15 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (1, 3) s, `
 - Si se edita un `.blend` a mano se reexporta con `tools/export_models.sh` (no se regenera). `tools/check_props.gd` comprueba nodos y medidas.
 - Aún no se usan en el juego: el salón y la mesa siguen hechos con primitivas por código.
 
+### 4.16 Menús, HUD e idioma
+
+- Lo que ve u oye el jugador está en inglés (servidor, cliente y `data/*.tres`); comentarios y docs en español.
+- Autoloads (`autoloads/`, adaptados de tic-tac-toe): `GameSettings` (título provisional `GAME_TITLE`, sensibilidad del ratón, pantalla completa; `user://settings.cfg`), `SceneSwitcher` (transición de iris, `go_to`), `AudioManager` (buses Master/SFX/Music de `default_bus_layout.tres`, volúmenes en `user://audio.cfg`, `play_sfx`, música si existe `assets/audio/music.*`), `UiSounds`, `UiIntro`. Los scripts que también corren en pruebas `--script` los piden por ruta (`/root/...`).
+- La escena principal es `src/ui/main_menu.tscn` (Play, Settings, Quit). Con argumentos de usuario se arranca directo `main.tscn`; `--menu`, `--menu-screen=settings` y `--menu-play` son para capturas. Esc pausa el árbol (`PauseMenu`: Resume, Settings, Main menu).
+- Reloj 3D (`ClockView`): cada cara muestra los dos tiempos (el del dueño a la izquierda); el que corre se enciende y bajo 10 s pasa a rojo con décimas. Tic-tac en un `AudioStreamPlayer3D` (bus SFX) con `assets/audio/sfx/clock_tick/tock.wav`, más fuerte y agudo con menos de 20 s del jugador.
+- HUD: "Opponent m:ss" / "You m:ss" arriba al centro, ritmo "3+2", y del torneo solo "Round N / M", rondas restantes y jugadores que quedan.
+- Sonidos (`assets/audio/sfx/`, generados por `tools/gen_sfx.py`, ver su `CREDITS.md`): tic-tac, reloj, piezas, pluma, pasos, disparo, cuerpos, silla, sollozo, respiración, pitido, latido y ambiente. Solo el tic-tac está cableado todavía.
+
 ## 5. Configuración
 
 ### `MatchConfig` (`src/server/match_config.gd`)

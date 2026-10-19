@@ -4,7 +4,7 @@
 
 [resource]
 script = ExtResource("1")
-display_name = "El tramposo nervioso"
+display_name = "The nervous cheater"
 elo = 1100
 temperature = 1.1
 think_time_scale = 0.8

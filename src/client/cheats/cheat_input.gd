@@ -54,7 +54,7 @@ func arm(i: int) -> void:
 	if i < 0 or i >= defs.size() or not _can_act():
 		return
 	if not state.is_armed() and (server.is_hand_busy(color) or _animator_busy()):
-		hud.show_subtitle("...tengo la mano ocupada")
+		hud.show_subtitle("...my hand is busy")
 		return
 	state.toggle(i)
 	_clear_marks()
@@ -86,7 +86,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 	if event.is_action_pressed("cheat_abort"):
 		if server.abort_cheat(color):
-			hud.show_subtitle("...mejor no")
+			hud.show_subtitle("...better not")
 		return
 	if event.is_action_pressed("ui_cancel"):
 		cancel()
@@ -118,7 +118,7 @@ func click_square(sq: int) -> void:
 	if def == null:
 		return
 	if _animator_busy() or server.is_hand_busy(color):
-		_reject("tu mano está ocupada")
+		_reject("your hand is busy")
 		return
 	var r := state.on_square(sq, server.board, color, def)
 	match r.action:
@@ -136,7 +136,7 @@ func click_square(sq: int) -> void:
 
 
 func _reject(reason: String) -> void:
-	hud.show_subtitle("...no, eso no: %s" % reason, 2.5)
+	hud.show_subtitle("...no, not that: %s" % CheatTargeting.visible_reason(reason), 2.5)
 
 
 func _show_targets() -> void:
@@ -157,12 +157,12 @@ func _refresh() -> void:
 		return
 	var text := ""
 	if server.is_hand_busy(color):
-		text = "X: abortar"
+		text = "X: abort"
 	elif state.phase == CheatArmState.Phase.ARMED:
 		var def := armed_def()
 		var enemy := def.kind == CheatDef.Kind.STEAL or def.kind == CheatDef.Kind.MOVE_ENEMY
-		text = "Elige una pieza %s\n%s" % ["enemiga" if enemy else "propia", def.description]
+		text = "Pick %s\n%s" % ["an enemy piece" if enemy else "one of your pieces", def.description]
 	elif state.phase == CheatArmState.Phase.PIECE:
-		text = "Elige el destino\n(clic derecho: volver)"
+		text = "Pick the destination\n(right click: back)"
 	panel.set_state(state.index, text)
 	state_changed.emit()

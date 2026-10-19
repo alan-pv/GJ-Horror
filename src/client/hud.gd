@@ -17,7 +17,10 @@ var _result_title: Label
 var _result_reason: Label
 var _result_restart: Label
 var _round_info: Label
-var _bracket: Label
+var _rounds_left: Label
+var _own_clock: Label
+var _rival_clock: Label
+var _pace: Label
 var _status: Label
 var _subtitle_tween: Tween
 var _arbiter_tween: Tween
@@ -50,7 +53,7 @@ func _ready() -> void:
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_hint.position = Vector2(20, 40)
 	_hint.size = Vector2(700, 24)
-	_hint.text = "Clic: elegir y mover · A: acusar · Esc: soltar el ratón"
+	_hint.text = "Click: pick and move · 1-4: cheat · A: accuse · Esc: pause"
 	_crosshair = ColorRect.new()
 	_crosshair.color = Color(1, 1, 1, 0.55)
 	_crosshair.anchor_left = 0.5
@@ -71,7 +74,7 @@ func _ready() -> void:
 	_capture_prompt.anchor_bottom = 0.5
 	_capture_prompt.offset_top = -200
 	_capture_prompt.offset_bottom = -160
-	_capture_prompt.text = "Haz clic para tomar el control del ratón"
+	_capture_prompt.text = "Click to take control of the mouse"
 	_capture_prompt.visible = false
 	# Torneo: ronda y jugadores restantes arriba a la derecha, cuadro de la ronda debajo.
 	_round_info = _label(22, Color(1.0, 0.82, 0.45))
@@ -82,16 +85,16 @@ func _ready() -> void:
 	_round_info.offset_right = -20
 	_round_info.offset_top = 12
 	_round_info.offset_bottom = 44
-	_bracket = _label(15, Color(0.78, 0.74, 0.66))
-	_bracket.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_bracket.anchor_left = 1.0
-	_bracket.anchor_right = 1.0
-	_bracket.offset_left = -420
-	_bracket.offset_right = -20
-	_bracket.offset_top = 46
-	_bracket.offset_bottom = 300
-	_bracket.add_theme_constant_override("outline_size", 4)
-	# Estado de espera ("Esperando a las demás mesas...") sin tapar el salón.
+	_rounds_left = _label(16, Color(0.78, 0.74, 0.66))
+	_rounds_left.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_rounds_left.anchor_left = 1.0
+	_rounds_left.anchor_right = 1.0
+	_rounds_left.offset_left = -420
+	_rounds_left.offset_right = -20
+	_rounds_left.offset_top = 44
+	_rounds_left.offset_bottom = 70
+	_build_clocks()
+	# Estado de espera ("Waiting for the other tables...") sin tapar el salón.
 	_status = _label(24, Color(0.93, 0.89, 0.80))
 	_status.anchor_left = 0.1
 	_status.anchor_right = 0.9
@@ -160,7 +163,7 @@ func _build_result_panel() -> void:
 	_result_restart.add_theme_font_size_override("font_size", 22)
 	_result_restart.add_theme_color_override("font_color", Color(0.75, 0.7, 0.6))
 	_result_restart.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_result_restart.text = "\nR para reiniciar"
+	_result_restart.text = "\nPress R to restart"
 	box.add_child(_result_restart)
 
 
@@ -187,7 +190,7 @@ func show_arbiter(text: String, seconds: float = 3.0) -> void:
 
 
 func set_warnings(count: int, maximum: int) -> void:
-	_warnings.text = "Advertencias: %d/%d" % [count, maximum]
+	_warnings.text = "Warnings: %d/%d" % [count, maximum]
 
 
 func set_hint(text: String) -> void:
@@ -204,8 +207,8 @@ func set_mouse_captured(captured: bool) -> void:
 
 
 func show_result(won: bool, reason: String) -> void:
-	show_screen("Ganaste" if won else "Eliminado", reason.substr(0, 1).to_upper() + reason.substr(1),
-			"\nR para reiniciar", Color(0.85, 0.8, 0.55) if won else Color(0.75, 0.12, 0.1))
+	show_screen("You won" if won else "Eliminated", reason.substr(0, 1).to_upper() + reason.substr(1),
+			"\nPress R to restart", Color(0.85, 0.8, 0.55) if won else Color(0.75, 0.12, 0.1))
 
 
 ## Pantalla completa sobre el salón (entre rondas, eliminado, campeón).
@@ -226,14 +229,68 @@ func is_screen_visible() -> bool:
 	return _result_panel.visible
 
 
-## Ronda y jugadores que quedan (arriba a la derecha).
-func set_tournament_info(title: String, remaining: int) -> void:
-	_round_info.text = "%s · quedan %d" % [title, remaining]
+## Ronda en curso (arriba a la derecha): "Round 2 / 5", cuántas faltan
+## ("3 rounds left" / "Final") y los jugadores que quedan. Sin nombres.
+func set_round_info(round_no: int, total_rounds: int, is_final: bool, players_left: int) -> void:
+	if is_final:
+		_round_info.text = "Final"
+		_rounds_left.text = "%d players left" % players_left
+		return
+	_round_info.text = "Round %d / %d" % [round_no, total_rounds]
+	var left := maxi(total_rounds - round_no, 0)
+	var rounds := "Final next" if left <= 1 else "%d rounds left" % left
+	_rounds_left.text = "%s · %d players left" % [rounds, players_left]
 
 
-## Líneas del cuadro de la ronda en curso (una por partida).
-func set_bracket(lines: Array[String]) -> void:
-	_bracket.text = "\n".join(lines)
+## Dos relojes arriba al centro: el propio y el del rival; resalta el que corre.
+func set_clocks(own_seconds: float, rival_seconds: float, own_running: bool, rival_running: bool) -> void:
+	_set_clock(_own_clock, "You", own_seconds, own_running)
+	_set_clock(_rival_clock, "Opponent", rival_seconds, rival_running)
+
+
+func _set_clock(l: Label, who: String, seconds: float, running: bool) -> void:
+	var t := "%s  %s" % [who, ClockView.format_time(seconds)]
+	if l.text != t:
+		l.text = t
+	var low := seconds < 20.0
+	if running:
+		l.add_theme_color_override("font_color", Color(1.0, 0.3, 0.22) if low else Color(1.0, 0.85, 0.5))
+	else:
+		l.add_theme_color_override("font_color", Color(0.55, 0.5, 0.42))
+
+
+## Ritmo de juego discreto bajo los relojes (p. ej. "3+2"); "" lo oculta.
+func set_pace(text: String) -> void:
+	_pace.text = text
+	_pace.visible = text != ""
+
+
+func _build_clocks() -> void:
+	var box := VBoxContainer.new()
+	box.anchor_left = 0.5
+	box.anchor_right = 0.5
+	box.offset_left = -170
+	box.offset_right = 170
+	box.offset_top = 10
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(box)
+	_rival_clock = _clock_label(box, 22)
+	_own_clock = _clock_label(box, 28)
+	_pace = _clock_label(box, 14)
+	_pace.add_theme_color_override("font_color", Color(0.5, 0.46, 0.4))
+	_pace.visible = false
+
+
+func _clock_label(parent: Control, size: int) -> Label:
+	var l := Label.new()
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", Color(0.55, 0.5, 0.42))
+	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	l.add_theme_constant_override("outline_size", 6)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(l)
+	return l
 
 
 ## Mensaje persistente bajo la barra superior; "" lo oculta.

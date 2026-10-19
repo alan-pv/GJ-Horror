@@ -12,13 +12,6 @@ Solo lo **pendiente**. Lo implementado se describe en [`docs/arquitectura.md`](d
   - [ ] Personaje sentado con esqueleto apto para IK y animaciones: reposo, pensar, escribir, pulsar el reloj, mover pieza, suplicar, llorar, levantarse e intentar huir, muerte por disparo.
   - [ ] Árbitro con pistola: caminar, revisar planillas, apuntar y disparar.
   - [ ] Scripts de Blender sin interfaz que generan los `.blend` editables y exportan `.glb`.
-- **R4. Menús, HUD y reloj** (`autoloads/`, `src/ui/`, `hud.gd`, `clock_view.gd`)
-  - [ ] Menú inicial, configuración y pausa reutilizados de tic-tac-toe, en inglés.
-  - [ ] Se ven los dos tiempos (el propio y el del rival) en el reloj 3D y en el HUD.
-  - [ ] Tic-tac del reloj.
-  - [ ] HUD sin lista de nombres: solo número de ronda y rondas restantes.
-- **R5. Sonidos** (`assets/audio/sfx/`, `tools/`)
-  - [ ] Tic-tac, pasos del árbitro, disparo, cuerpo que cae, silla que se arrastra, sollozos y súplicas.
 
 ### Oleada 2 — integración (depende de la oleada 1)
 

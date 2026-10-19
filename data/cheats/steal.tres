@@ -5,9 +5,9 @@
 [resource]
 script = ExtResource("1")
 id = &"steal"
-display_name = "Robar"
+display_name = "Steal"
 kind = 2
-description = "Quita una pieza enemiga y la esconde en la mano."
+description = "Take an enemy piece and hide it in your hand."
 base_time = 1.6
 time_per_square = 0.0
 max_distance = 0

@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = &"cough"
-display_name = "Toser"
+display_name = "Cough"
 kind = 1
 origin_mode = 2
 duration = 1.2

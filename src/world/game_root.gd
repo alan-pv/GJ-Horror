@@ -20,6 +20,9 @@ extends Node3D
 ##   --clock=S            segundos por jugador en cada partida (180 por defecto)
 ##   --start-round=N      salta a la ronda N (el humano gana las anteriores, simuladas)
 ##   --demo-screen=between|champion|eliminated  muestra esa pantalla al arrancar (capturas)
+##   --demo-pause         abre el menú de pausa al arrancar (capturas)
+## Sin argumentos el juego arranca en el menú principal (`src/ui/main_menu.tscn`);
+## con cualquier argumento de usuario el menú salta directo a `main.tscn`.
 ##   --fen="..."          posición inicial distinta (pruebas)
 ##   --shot-select=e2     selecciona esa casilla antes de capturar
 ##   --no-shadows         desactiva las sombras de la lámpara
@@ -65,6 +68,7 @@ var clock_view: ClockView
 var player: PlayerController
 var avatar: OpponentAvatar
 var hud: Hud
+var pause_menu: PauseMenu
 var rival_bot: BotController
 var auto_bot: BotController
 ## animators[color]: quien mueve las piezas de ese color.
@@ -129,6 +133,17 @@ func _ready() -> void:
 	hud.show_capture_prompt = not _args.has("screenshot")
 	hud.set_mouse_captured(false)
 	player.mouse_capture_changed.connect(hud.set_mouse_captured)
+	hud.set_pace(_pace_text())
+	# Pausa con Esc: suelta el ratón al abrir y lo recaptura al reanudar.
+	pause_menu = PauseMenu.new()
+	pause_menu.name = "Pausa"
+	add_child(pause_menu)
+	pause_menu.opened.connect(func() -> void: player.capture_mouse(false))
+	pause_menu.resumed.connect(func() -> void: player.capture_mouse(true))
+	if _args.has("demo-pause"):
+		# Para la captura el bucle debe seguir corriendo aunque el árbol esté en pausa.
+		process_mode = Node.PROCESS_MODE_ALWAYS
+		pause_menu.open.call_deferred()
 	_connect_signals()
 	_install_modules()
 	_populate_hall()
@@ -143,11 +158,11 @@ func _ready() -> void:
 		# Descanso: la mesa queda sin partida y el rival no está.
 		avatar.visible = false
 		_human_settled = true
-		hud.set_status("Pasas a la siguiente ronda sin jugar")
+		hud.set_status("You advance to the next round without playing")
 	match_started.emit(server)
 	clock_view.set_running(server.clock.running)
 	if _args.has("autoplay"):
-		hud.set_hint("Modo autoplay")
+		hud.set_hint("Autoplay mode")
 	_log("%s: humano = %s, rival = %s (%s)" % [manager.round_label(), _color_name(human_color), _color_name(rival_color), rival_bot.brain.brain_name()])
 	if tgame != null:
 		_log("Rival: %s (elo %d)" % [manager.player_name(rival_id), manager.elo[rival_id]])
@@ -192,7 +207,7 @@ func _build_match(rng: RandomNumberGenerator) -> void:
 	config.black_seconds = config.white_seconds
 	# Las sesiones viven en el torneo: las advertencias se arrastran entre partidas.
 	var human := manager.sessions[manager.human_id]
-	var rival := manager.sessions[rival_id] if rival_id >= 0 else PlayerSession.new(-1, "Nadie", true)
+	var rival := manager.sessions[rival_id] if rival_id >= 0 else PlayerSession.new(-1, "Nobody", true)
 	if _args.has("autoplay"):
 		human.beginner_help = false
 	var sessions := [null, null]
@@ -282,15 +297,15 @@ func _on_beginner_warning(color: int, uci: String, text: String) -> void:
 
 
 func _on_accusation_started(accuser: int) -> void:
-	hud.show_arbiter("El árbitro se acerca a la mesa...", config.arbiter_delay + 0.5)
+	hud.show_arbiter("The arbiter is coming to the table...", config.arbiter_delay + 0.5)
 
 
 func _on_accusation_resolved(accuser: int, correct: bool, warnings: int) -> void:
 	var by_human := accuser == human_color
 	if correct:
-		hud.show_arbiter("Trampa confirmada" if by_human else "Te descubrieron")
+		hud.show_arbiter("Cheating confirmed" if by_human else "You were caught")
 	else:
-		hud.show_arbiter(("Acusación falsa: advertencia %d/%d" % [warnings, config.false_accusations_to_eliminate]) if by_human else "Acusación falsa del rival")
+		hud.show_arbiter(("False accusation: warning %d/%d" % [warnings, config.false_accusations_to_eliminate]) if by_human else "The opponent accused you falsely")
 	hud.set_warnings(server.sessions[human_color].warnings, config.false_accusations_to_eliminate)
 
 
@@ -313,11 +328,11 @@ func _on_game_over(winner: int, reason: String) -> void:
 		return
 	_human_settled = true
 	if won:
-		hud.show_subtitle("Ganaste: %s" % reason, 3.0)
+		hud.show_subtitle("You won: %s" % reason, 3.0)
 	else:
-		hud.show_subtitle("Perdiste esta partida de la final", 3.0)
+		hud.show_subtitle("You lost this game of the final", 3.0)
 	if not manager.round_complete():
-		hud.set_status("Esperando a las demás mesas...")
+		hud.set_status("Waiting for the other tables...")
 
 
 # --- Torneo ------------------------------------------------------------------------
@@ -404,27 +419,42 @@ func _refresh_tournament_hud() -> void:
 	players_remaining_changed.emit(players_left(), manager.player_count)
 	if hud == null:
 		return
-	hud.set_tournament_info(manager.round_label(), manager.remaining_count())
-	var lines: Array[String] = []
-	for g in manager.games:
-		var w := manager.player_name(g.white)
-		var b := manager.player_name(g.black)
-		var mark := "» " if g.involves(manager.human_id) else ""
-		if g.done:
-			lines.append("%s%s - %s: gana %s" % [mark, w, b, manager.player_name(g.winner_id())])
-		else:
-			lines.append("%s%s - %s" % [mark, w, b])
-	for id in manager.byes:
-		lines.append("%s%s pasa sin jugar" % ["» " if id == manager.human_id else "", manager.player_name(id)])
-	hud.set_bracket(lines)
+	# Solo ronda y cuántas faltan: sin nombres de jugadores.
+	hud.set_round_info(manager.round_no, _total_rounds(), manager.is_final, players_left())
+
+
+## Rondas totales del torneo, contando la final: cada ronda deja ceil(n/2) jugadores.
+func _total_rounds() -> int:
+	var n := manager.player_count
+	var total := 1
+	while n > 2:
+		n = (n + 1) / 2
+		total += 1
+	return total
+
+
+## Título visible de la ronda en curso ("Round 2" o "Final · game 1 of 2").
+func _round_title() -> String:
+	if manager.is_final:
+		var no := manager.games[0].game_no if not manager.games.is_empty() else manager.final_games.size() + 1
+		return "Final · game %d of 2" % no
+	return "Round %d" % manager.round_no
+
+
+## Ritmo de juego para el HUD ("3+2"); "" si aún no hay incremento en la configuración.
+func _pace_text() -> String:
+	var inc: Variant = config.get("increment_seconds")
+	if inc == null:
+		return ""
+	return "%d+%d" % [int(round(config.white_seconds / 60.0)), int(inc)]
 
 
 func _human_eliminated(reason: String) -> void:
 	_ending = true
 	_log("Humano eliminado (%s): torneo nuevo" % reason)
 	hud.set_status("")
-	hud.show_screen("Eliminado", reason.substr(0, 1).to_upper() + reason.substr(1) + "\n\nEntrando a un torneo nuevo...",
-			"\nR para empezar ya", Color(0.75, 0.12, 0.1))
+	hud.show_screen("Eliminated", reason.substr(0, 1).to_upper() + reason.substr(1) + "\n\nEntering a new tournament...",
+			"\nPress R to start now", Color(0.75, 0.12, 0.1))
 	await get_tree().create_timer(5.0 if not _args.has("autoplay") else 3.0).timeout
 	if not is_inside_tree():
 		return
@@ -457,15 +487,15 @@ func _finish_round_flow() -> void:
 		var detail := "Final %d-%d" % [s.wins.get(human_id, 0), s.wins.get(other, 0)]
 		if manager.champion_id == human_id:
 			_log("Campeón: el humano")
-			hud.show_screen("¡Campeón!", "Ganaste el torneo de %d jugadores\n%s" % [manager.player_count, detail],
-					"\nR para jugar otro torneo", Color(0.95, 0.8, 0.3))
+			hud.show_screen("Champion!", "You won the %d-player tournament\n%s" % [manager.player_count, detail],
+					"\nPress R to play another tournament", Color(0.95, 0.8, 0.3))
 			await get_tree().create_timer(12.0 if not _args.has("autoplay") else 4.0).timeout
 			if not is_inside_tree():
 				return
 		else:
 			_log("Perdió la final: campeón %s" % manager.player_name(manager.champion_id))
-			hud.show_screen("Eliminado", "%s ganó la final\n%s\n\nEntrando a un torneo nuevo..." % [manager.player_name(manager.champion_id), detail],
-					"\nR para empezar ya", Color(0.75, 0.12, 0.1))
+			hud.show_screen("Eliminated", "%s won the final\n%s\n\nEntering a new tournament..." % [manager.player_name(manager.champion_id), detail],
+					"\nPress R to start now", Color(0.75, 0.12, 0.1))
 			await get_tree().create_timer(5.0 if not _args.has("autoplay") else 3.0).timeout
 			if not is_inside_tree():
 				return
@@ -474,7 +504,7 @@ func _finish_round_flow() -> void:
 	manager.start_round()
 	_log("Siguiente: %s, quedan %d" % [manager.round_label(), manager.remaining_count()])
 	_darken_for_next_round()
-	hud.show_screen(manager.round_label(), _next_round_text(res), "", Color(0.93, 0.85, 0.6))
+	hud.show_screen(_round_title(), _next_round_text(res), "", Color(0.93, 0.85, 0.6))
 	await get_tree().create_timer(4.0).timeout
 	if not is_inside_tree():
 		return
@@ -485,16 +515,16 @@ func _next_round_text(_res: Dictionary) -> String:
 	var t := ""
 	if manager.is_final and not manager.final_games.is_empty():
 		var first: TournamentGame = manager.final_games[0]
-		t = "Primera partida: gana %s\nAhora con los colores invertidos\n" % manager.player_name(first.winner_id())
+		t = "First game: %s wins\nNow with the colors reversed\n" % manager.player_name(first.winner_id())
 	elif manager.is_final:
-		t = "Final a dos partidas, colores invertidos\nSi quedan 1-1, gana quien tenga más tiempo sobrante\n"
+		t = "Final over two games, colors reversed\nIf it ends 1-1, the most time left wins\n"
 	else:
-		t = "Quedan %d jugadores\n" % manager.remaining_count()
+		t = "%d players left\n" % manager.remaining_count()
 	var g := manager.game_of(manager.human_id)
 	if g != null:
-		t += "Tu rival: %s · juegas con %s" % [manager.player_name(g.opponent_of(manager.human_id)), _color_name(g.color_of(manager.human_id))]
+		t += "Your opponent: %s · you play %s" % [manager.player_name(g.opponent_of(manager.human_id)), _color_label(g.color_of(manager.human_id))]
 	else:
-		t += "Pasas a la siguiente ronda sin jugar"
+		t += "You advance to the next round without playing"
 	return t
 
 
@@ -518,11 +548,11 @@ func _darken_for_next_round() -> void:
 func _show_demo_screen() -> void:
 	match str(_args.get("demo-screen", "")):
 		"between":
-			hud.show_screen("Ronda 2", "Quedan 8 jugadores\nTu rival: Beatriz · juegas con negras", "", Color(0.93, 0.85, 0.6))
+			hud.show_screen("Round 2", "8 players left\nYour opponent: Beatriz · you play Black", "", Color(0.93, 0.85, 0.6))
 		"champion":
-			hud.show_screen("¡Campeón!", "Ganaste el torneo de 16 jugadores\nFinal 1-1 · más tiempo sobrante", "\nR para jugar otro torneo", Color(0.95, 0.8, 0.3))
+			hud.show_screen("Champion!", "You won the 16-player tournament\nFinal 1-1 · most time left", "\nPress R to play another tournament", Color(0.95, 0.8, 0.3))
 		"eliminated":
-			hud.show_screen("Eliminado", "Tercera acusación falsa\n\nEntrando a un torneo nuevo...", "\nR para empezar ya", Color(0.75, 0.12, 0.1))
+			hud.show_screen("Eliminated", "Third false accusation\n\nEntering a new tournament...", "\nPress R to start now", Color(0.75, 0.12, 0.1))
 
 
 # --- Bucle -----------------------------------------------------------------------
@@ -549,6 +579,8 @@ func _process(delta: float) -> void:
 	var c := server.clock
 	clock_view.set_times(c.remaining[ChessPiece.WHITE], c.remaining[ChessPiece.BLACK])
 	clock_view.set_running(c.running)
+	hud.set_clocks(c.remaining[human_color], c.remaining[rival_color],
+			c.running == human_color, c.running == rival_color)
 	# El estrés de cada mano crece cuando le queda poco tiempo en el reloj.
 	for color in 2:
 		animators[color].rig.stress = clampf(1.0 - c.remaining[color] / 45.0, 0.0, 1.0)
@@ -609,6 +641,11 @@ func _take_screenshot() -> void:
 		img.save_png(path)
 		print("[captura] guardada en ", path)
 	get_tree().quit()
+
+
+## Nombre del color para el jugador ("White" / "Black").
+func _color_label(c: int) -> String:
+	return "White" if c == ChessPiece.WHITE else "Black"
 
 
 func _color_name(c: int) -> String:

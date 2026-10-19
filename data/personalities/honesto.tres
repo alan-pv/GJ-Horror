@@ -4,7 +4,7 @@
 
 [resource]
 script = ExtResource("1")
-display_name = "El honesto"
+display_name = "The honest one"
 elo = 1300
 temperature = 1.0
 think_time_scale = 1.0
