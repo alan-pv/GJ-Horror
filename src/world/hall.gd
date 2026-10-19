@@ -405,11 +405,7 @@ func _build_table(index: int) -> void:
 		rng.seed = 7919 * (index + 1)
 		_bake_prop(kit, "board", Transform3D(Basis.IDENTITY, Vector3(0, BoardView.TABLE_TOP + 0.015, 0)))
 		var top := BoardView.TABLE_TOP
-		_bake_prop(kit, "chess_clock", _xf(Vector3(0.47, top, 0.0), rng.randf_range(-0.25, 0.25)), func(n: Node3D) -> void:
-			for hand in ["Hand_A_Left", "Hand_A_Right", "Hand_B_Left", "Hand_B_Right"]:
-				var hn := n.find_child(hand, true, false) as Node3D
-				if hn != null:
-					hn.rotation.z = rng.randf() * TAU)
+		_bake_prop(kit, "chess_clock", _xf(Vector3(0.47, top, 0.0), rng.randf_range(-0.25, 0.25)))
 		# Planillas: la blanca delante-izquierda de las blancas; la negra, en diagonal opuesta.
 		_bake_prop(kit, "scoresheet", _xf(Vector3(-0.40, top, 0.27), rng.randf_range(-0.15, 0.15)))
 		_bake_prop(kit, "scoresheet", _xf(Vector3(0.40, top, -0.27), PI + rng.randf_range(-0.15, 0.15)))
