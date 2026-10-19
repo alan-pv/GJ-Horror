@@ -33,7 +33,7 @@ const SEAT_Z := 0.80
 
 ## Energía de las lámparas de las mesas (encendidas del todo) y de la del humano.
 const DECOR_ENERGY := 2.2
-const MAIN_ENERGY := 1.4
+const MAIN_ENERGY := 0.8
 const BULB_ON := Color(1.0, 0.9, 0.7)
 const BULB_OFF := Color(0.06, 0.05, 0.045)
 const FADE_SECONDS := 1.4
@@ -469,7 +469,7 @@ func _build_lamp(root: Node3D, main: bool) -> Dictionary:
 	var l := SpotLight3D.new()
 	l.name = "Foco"
 	l.rotation_degrees = Vector3(-90, 0, 0)
-	l.light_color = Color(1.0, 0.88, 0.72) if main else Color(1.0, 0.78, 0.55)
+	l.light_color = Color(1.0, 0.9, 0.78) if main else Color(1.0, 0.78, 0.55)
 	if main:
 		l.spot_angle = SPOT_ANGLE
 		l.spot_range = 4.0
@@ -496,7 +496,7 @@ func _build_lamp(root: Node3D, main: bool) -> Dictionary:
 			fill.position = Vector3(0.0, BoardView.TABLE_TOP + 0.38, sgn * 0.62) - Vector3(0.0, LAMP_Y, 0.0)
 			fill.omni_range = 1.5
 			fill.omni_attenuation = 1.4
-			fill.light_energy = 0.28
+			fill.light_energy = 0.2
 			fill.light_color = Color(1.0, 0.8, 0.6)
 			fill.shadow_enabled = false
 			anchor.add_child(fill)

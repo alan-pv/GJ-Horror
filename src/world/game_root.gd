@@ -229,6 +229,8 @@ func _build_match(rng: RandomNumberGenerator) -> void:
 	config.require_clock_press = true
 	config.white_seconds = float(_args.get("clock", config.white_seconds))
 	config.black_seconds = config.white_seconds
+	# Suspenso de una acusación: el árbitro cruza la sala y revisa las planillas (`--arbiter-delay=S`).
+	config.arbiter_delay = float(_args.get("arbiter-delay", 6.5))
 	# Las sesiones viven en el torneo: las advertencias se arrastran entre partidas.
 	var human := manager.sessions[manager.human_id]
 	var rival := manager.sessions[rival_id] if rival_id >= 0 else PlayerSession.new(-1, "Nobody", true)
@@ -271,6 +273,7 @@ func _build_actors(rng: RandomNumberGenerator) -> void:
 	add_child(ra)
 	ra.setup(avatar.hand_rig, board_view, clock_view, rival_color, rival_rest)
 	ra.sheet = sheet_view
+	ra.set_write_rig(avatar.idle_rig, Vector3(-0.34, BoardView.TABLE_TOP + 0.03, -0.40))
 	animators[human_color] = ha
 	animators[rival_color] = ra
 	player.animator = ha

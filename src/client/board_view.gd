@@ -356,10 +356,33 @@ func _build_board() -> void:
 	model.position = Vector3(0.0, BOARD_TOP, 0.0)
 	model.rotation.y = PI if flipped else 0.0
 	_tiles_root.add_child(model)
+	_dim_materials(model)
 	# Las casillas coinciden con la cara superior del marco: se alzan 0,7 mm contra el parpadeo.
 	var squares := model.find_child("BoardSquares", true, false) as Node3D
 	if squares != null:
 		squares.position.y = 0.0007
+
+
+## Colores del tablero bajo la lámpara (ambiente de terror: nada quemado): casillas claras de
+## hueso/crema apagado, oscuras de madera, marco de madera oscura. Las piezas blancas
+## (`PieceFactory.IVORY`) quedan más claras que las casillas claras y las negras más oscuras.
+const SQUARE_LIGHT := Color(0.54, 0.49, 0.38)
+const SQUARE_DARK := Color(0.27, 0.16, 0.09)
+const FRAME_COLOR := Color(0.19, 0.12, 0.075)
+
+
+## Sustituye los colores del modelo (pensados para luz neutra) por los de `SQUARE_*`/`FRAME_COLOR`.
+func _dim_materials(model: Node3D) -> void:
+	var colors := {"Light": SQUARE_LIGHT, "Dark": SQUARE_DARK, "Board_Frame": FRAME_COLOR}
+	for mi in model.find_children("*", "MeshInstance3D", true, false):
+		var mesh := (mi as MeshInstance3D).mesh
+		for i in mesh.get_surface_count():
+			var mat := mesh.surface_get_material(i) as StandardMaterial3D
+			if mat != null and colors.has(mat.resource_name):
+				var copy := mat.duplicate() as StandardMaterial3D
+				copy.albedo_color = colors[mat.resource_name]
+				copy.roughness = 0.8
+				(mi as MeshInstance3D).set_surface_override_material(i, copy)
 
 
 func _build_highlights() -> void:

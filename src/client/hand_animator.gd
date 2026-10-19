@@ -7,8 +7,11 @@ extends Node
 ## tablero impide que dos manos se muevan a la vez.
 ##
 ## Cada jugada es: MOVER la pieza, PULSAR el reloj, ANOTAR en la planilla (la pluma, ~2 s).
-## La mano mueve el brazo del personaje (`HandRig`, IK); en reposo el brazo queda sobre la mesa,
-## junto al tablero (`rest_grip`), para no tapar las piezas.
+## La mano mueve el brazo del personaje (`HandRig`, IK); en reposo el antebrazo queda apoyado en
+## la mesa, junto al tablero (`rest_grip`), para no tapar las piezas. (Las animaciones de
+## sentado dejan las manos sobre el propio tablero, por eso el reposo también va por IK.)
+## La planilla se puede escribir con la OTRA mano (`write_rig`, p. ej. el rival escribe con la
+## derecha y pulsa el reloj con la izquierda).
 ##
 ## Casos: jugada normal, captura (primero la pieza rival va a la pila),
 ## enroque (rey y luego torre) y coronación (se cambia la pieza al llegar).
@@ -35,6 +38,8 @@ const KING_HEIGHT := 0.095
 const SPEED := 1.3
 
 var rig: HandRig
+## Mano que escribe en la planilla (por defecto la misma `rig`).
+var write_rig: HandRig
 var board: BoardView
 var clock: ClockView
 ## Planillas de la mesa (opcional): si existe, tras pulsar el reloj la mano anota la jugada.
@@ -42,7 +47,9 @@ var sheet: ScoresheetView
 var color: int = ChessPiece.WHITE
 ## Pose de reposo del punto de pinza (mundo).
 var rest_grip: Vector3 = Vector3.ZERO
-var rest_pitch: float = 25.0
+var rest_pitch: float = 20.0
+var write_rest_grip: Vector3 = Vector3.ZERO
+var write_rest_pitch: float = 25.0
 ## Fase actual: idle, reach, grab, carry, release, press, return, hesitate.
 var phase: StringName = &"idle"
 
@@ -52,6 +59,8 @@ var _job_speed: float = 1.0
 var _rng := RandomNumberGenerator.new()
 var _clock: float = 0.0
 var _current_job: Dictionary = {}
+## Mano que se está moviendo ahora (`rig` o `write_rig`).
+var _cur: HandRig
 
 
 func setup(p_rig: HandRig, p_board: BoardView, p_clock: ClockView, p_color: int, p_rest_grip: Vector3) -> void:
@@ -61,8 +70,19 @@ func setup(p_rig: HandRig, p_board: BoardView, p_clock: ClockView, p_color: int,
 	color = p_color
 	rest_grip = p_rest_grip
 	_rng.randomize()
+	write_rig = rig
+	_cur = rig
 	rig.set_grip(rest_grip, rest_pitch)
 	rig.set_active(true, 0.0)
+
+
+## Hace que `r` (la otra mano de la figura) escriba en la planilla; descansa en `rest`.
+func set_write_rig(r: HandRig, rest: Vector3) -> void:
+	write_rig = r
+	if r != rig:
+		write_rest_grip = rest
+		write_rest_pitch = rest_pitch
+		r.rest_at(rest, rest_pitch)
 
 
 func is_busy() -> bool:
@@ -82,6 +102,8 @@ func enqueue_hesitate(uci: String) -> void:
 
 func _process(delta: float) -> void:
 	_clock += delta
+	if write_rig != null and write_rig != rig:
+		write_rig.stress = rig.stress
 
 
 ## Pone en cola el gesto de una trampa. `kind` es `CheatDef.Kind`; `to_sq` es -1
@@ -136,6 +158,7 @@ func _pump() -> void:
 				_queue.clear()
 				break
 		_current_job = job
+		_cur = rig
 		_job_speed = _rng.randf_range(0.85, 1.25)
 		match job.kind:
 			"move":
@@ -182,8 +205,14 @@ func _run_move(job: Dictionary) -> void:
 		await _pause(0.15)
 	# 5) Reloj, planilla y vuelta.
 	await _press_clock()
-	await _write_entry()
-	await _return_home()
+	if write_rig != rig and sheet != null and sheet.has_pending(color):
+		# La otra mano escribe: la del reloj se retira y se suelta.
+		await _return_home()
+		await _write_entry()
+		await _return_home()
+	else:
+		await _write_entry()
+		await _return_home()
 
 
 func _run_hesitate(job: Dictionary) -> void:
@@ -481,22 +510,26 @@ func _write_entry() -> void:
 	if sheet == null or not sheet.has_pending(color):
 		return
 	_set_phase(&"write")
+	var w := write_rig
+	w.drives_posture = true
+	rig.drives_posture = w == rig
+	_cur = w
 	var pen := sheet.pen(color)
 	var pen_grip := sheet.pen_rest_grip(color)
-	rig.set_pose(HandRig.Pose.OPEN, _dur(0.2))
+	w.set_pose(HandRig.Pose.OPEN, _dur(0.2))
 	await _move_to(pen_grip + Vector3(0, 0.06, 0), _dur(0.45), 0.05, 55.0)
 	await _move_to(pen_grip + Vector3(0, 0.004, 0), _dur(0.18), 0.0, 60.0)
-	await rig.set_pose(HandRig.Pose.PINCH, _dur(0.12))
+	await w.set_pose(HandRig.Pose.PINCH, _dur(0.12))
 	# La pluma pasa a la mano, inclinada como al escribir (punta abajo, hacia el cuerpo).
 	var start := sheet.write_point(color)
-	var toward_body := rig.shoulder_position() - start
+	var toward_body := w.shoulder_position() - start
 	toward_body.y = 0.0
 	toward_body = toward_body.normalized()
 	var axis := (toward_body * 0.62 + Vector3.UP * 0.78).normalized()
 	var perp := (Vector3.UP - axis * axis.dot(Vector3.UP)).normalized()
 	var held_basis := Basis(axis, perp, axis.cross(perp))
-	pen.reparent(rig.carry_anchor, true)
-	rig.carried = pen
+	pen.reparent(w.carry_anchor, true)
+	w.carried = pen
 	var from_t := pen.transform
 	var to_t := Transform3D(held_basis, -axis * ScoresheetView.PEN_GRIP)
 	var tw := create_tween()
@@ -522,16 +555,23 @@ func _write_entry() -> void:
 	# Deja la pluma en su sitio.
 	await _move_to(pen_grip + Vector3(0, 0.03, 0), _dur(0.4), 0.04, 58.0)
 	await _move_to(pen_grip + Vector3(0, 0.004, 0), _dur(0.16), 0.0, 60.0)
-	rig.release_piece()
+	w.release_piece()
 	await sheet.rest_pen(color, _dur(0.2))
-	await rig.set_pose(HandRig.Pose.OPEN, _dur(0.12))
+	await w.set_pose(HandRig.Pose.OPEN, _dur(0.12))
 	await _move_to(pen_grip + Vector3(0, 0.07, 0), _dur(0.2), 0.0, 55.0)
 
 
 func _return_home() -> void:
 	_set_phase(&"return")
-	rig.set_pose(HandRig.Pose.OPEN, _dur(0.3))
-	await _move_to(rest_grip, _dur(0.55), 0.05, rest_pitch)
+	var hand := _cur
+	hand.set_pose(HandRig.Pose.OPEN, _dur(0.3))
+	if hand == rig:
+		await _move_to(rest_grip, _dur(0.55), 0.05, rest_pitch)
+	else:
+		await _move_to(write_rest_grip, _dur(0.55), 0.05, write_rest_pitch)
+		hand.drives_posture = false
+		rig.drives_posture = true
+	_cur = rig
 
 
 # --- Movimiento -----------------------------------------------------------------
@@ -539,8 +579,8 @@ func _return_home() -> void:
 ## Mueve el punto de pinza por un arco de Bézier (ver `Vector3.bezier_interpolate`)
 ## con `lift` metros extra de altura en los puntos de control.
 func _move_to(dest: Vector3, duration: float, lift: float = 0.0, pitch: float = -1.0) -> void:
-	var start := rig.get_grip()
-	var p0 := rig.get_pitch_deg()
+	var start := _cur.get_grip()
+	var p0 := _cur.get_pitch_deg()
 	var p1 := p0 if pitch < 0.0 else pitch
 	var delta := dest - start
 	var c1 := start + Vector3.UP * lift + delta * 0.25
@@ -549,7 +589,7 @@ func _move_to(dest: Vector3, duration: float, lift: float = 0.0, pitch: float = 
 		return
 	var tw := create_tween()
 	tw.tween_method(func(t: float) -> void:
-		rig.set_grip(start.bezier_interpolate(c1, c2, dest, t), lerpf(p0, p1, t)), 0.0, 1.0, maxf(duration, 0.02)) \
+		_cur.set_grip(start.bezier_interpolate(c1, c2, dest, t), lerpf(p0, p1, t)), 0.0, 1.0, maxf(duration, 0.02)) \
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	await tw.finished
 

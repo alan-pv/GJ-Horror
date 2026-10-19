@@ -69,7 +69,7 @@ func cancel() -> void:
 
 
 func _can_act() -> bool:
-	return server.started and not server.is_over()
+	return server.started and not server.is_over() and not player.input_locked
 
 
 func _animator_busy() -> bool:

@@ -1,8 +1,8 @@
 class_name ScoresheetView
 extends Node3D
 ## Las dos planillas de la mesa principal (`scoresheet.glb`) con su pluma (`pen.glb`), a la
-## derecha-delante de cada jugador: la del humano en (+X, +Z) y la del rival en (+X, -Z), junto
-## al reloj (cada uno escribe con el brazo que queda de ese lado). El servidor avisa de cada
+## derecha-delante de cada jugador: la del humano en (+X, +Z), junto al reloj, y la del rival en
+## (-X, -Z), que es su derecha (escribe con la mano derecha y pulsa el reloj con la izquierda). El servidor avisa de cada
 ## jugada anotada (`add_entry`); la mano la escribe (`HandAnimator`) y, al terminar, la
 ## jugada aparece en la hoja (`reveal_next`) como texto en renglones, en una columna y
 ## 11 filas por página (al llenarse se pasa a una hoja en blanco).
@@ -41,8 +41,9 @@ func _build_sheet(color: int) -> Dictionary:
 	var near := color == near_color
 	var root := Node3D.new()
 	root.name = "Planilla_" + ("Humano" if near else "Rival")
-	# El rival está al otro lado de la mesa: su planilla es el punto simétrico, girada 180 grados.
-	root.position = SHEET_POS if near else Vector3(SHEET_POS.x, SHEET_POS.y, -SHEET_POS.z)
+	# El rival está al otro lado de la mesa: su planilla es el punto simétrico (giro de 180 grados
+	# sobre la mesa), girada 180 grados: queda a su derecha.
+	root.position = SHEET_POS if near else Vector3(-SHEET_POS.x, SHEET_POS.y, -SHEET_POS.z)
 	root.rotation.y = 0.0 if near else PI
 	add_child(root)
 	var sheet := (load(SHEET_PATH) as PackedScene).instantiate() as Node3D

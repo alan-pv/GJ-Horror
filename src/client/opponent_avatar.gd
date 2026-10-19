@@ -22,7 +22,7 @@ var figure: SeatedFigure
 ## Marcador pegado al hueso de la cabeza (posición de la cabeza para efectos y sonidos).
 var head: Node3D
 var hand_rig: HandRig
-## Mano derecha (libre): descansa sobre la mesa.
+## La otra mano (derecha): descansa sobre la mesa y es la que escribe en la planilla (`HandAnimator.write_rig`).
 var idle_rig: HandRig
 var bot: BotController
 
@@ -63,7 +63,7 @@ func build(look: Dictionary, arm_side: StringName = &"L") -> void:
 	idle_rig.name = "ManoLibreRival"
 	add_child(idle_rig)
 	idle_rig.setup(figure, &"R" if arm_side == &"L" else &"L")
-	idle_rig.rest_at(Vector3(-0.34, BoardView.TABLE_TOP + 0.03, -0.40))
+	idle_rig.rest_at(Vector3(-0.34, BoardView.TABLE_TOP + 0.03, -0.40), 20.0)
 
 
 func bind_bot(p_bot: BotController) -> void:

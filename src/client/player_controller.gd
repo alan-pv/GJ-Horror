@@ -37,6 +37,9 @@ var body: SeatedFigure
 var send_gaze: bool = true
 ## true si la cámara está fija en un punto de depuración (`--shot-cam`).
 var debug_camera: bool = false
+## true durante la ejecución en primera persona: no se puede mover, hacer trampa, acusar ni mirar
+## (la cámara la gira el árbitro hacia el cañón).
+var input_locked: bool = false
 var yaw: float = 0.0
 var pitch: float = 0.0
 var selected: int = -1
@@ -86,7 +89,7 @@ func setup(p_server: MatchServer, p_board: BoardView, p_color: int, look: Dictio
 	idle_rig.name = "ManoLibre"
 	add_child(idle_rig)
 	idle_rig.setup(body, &"L")
-	idle_rig.rest_at(Vector3(-0.34, BoardView.TABLE_TOP + 0.03, 0.40))
+	idle_rig.rest_at(Vector3(-0.34, BoardView.TABLE_TOP + 0.03, 0.40), 20.0)
 	_apply_debug_camera()
 
 
@@ -137,8 +140,16 @@ func _apply_look() -> void:
 	_head.rotation = Vector3(pitch, yaw, 0.0)
 
 
+## Bloquea o devuelve toda la entrada del jugador (movimiento, trampas, acusación y mirada).
+func set_input_locked(on: bool) -> void:
+	input_locked = on
+	if on:
+		_deselect()
+		board.set_hover(-1)
+
+
 func _unhandled_input(event: InputEvent) -> void:
-	if _headless:
+	if _headless or input_locked:
 		return
 	if event is InputEventMouseMotion and is_mouse_captured():
 		var k := MOUSE_SENSITIVITY * _sensitivity_scale()
@@ -190,7 +201,7 @@ func _my_turn() -> bool:
 
 
 func _can_play() -> bool:
-	return _my_turn() and (animator == null or not animator.is_busy())
+	return not input_locked and _my_turn() and (animator == null or not animator.is_busy())
 
 
 ## Casilla bajo el centro de la pantalla (o -1).

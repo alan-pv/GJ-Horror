@@ -8,6 +8,15 @@ const TABLE_HALF := Vector2(0.65, 0.45)
 const TABLE_TOP := 0.72
 ## Margen bajo el cual un punto del brazo dentro de la huella de la mesa cuenta como atravesada.
 const SLAB_BOTTOM := 0.60
+## Altura del hombro con la figura erguida (el tronco inclinado lo baja, así que se mide contra esta).
+const SHOULDER_REST_Y := 0.892
+
+## Métricas de naturalidad acumuladas (una entrada por postura alcanzada).
+var _dbg := 0
+var _nat_rel_sh: Array[float] = []  # altura del codo menos la del hombro (m)
+var _nat_above: Array[float] = []   # altura del codo sobre la mesa (m)
+var _nat_out: Array[float] = []     # desplazamiento lateral del codo hacia fuera (m)
+var _nat_back: Array[float] = []    # cuánto queda el codo detrás de la mano (m)
 
 
 func _init() -> void:
@@ -68,6 +77,11 @@ func _run() -> void:
 					if far < 6:
 						print("no alcanza: figura %d objetivo %s pitch %.0f error %.3f lean %.2f" % [who, t, pitch, err, fig.lean_now()])
 				worst = minf(worst, c)
+				if err < 0.03:
+					_sample_naturalness(fig, rig.side)
+					if OS.get_cmdline_user_args().has("--debug") and _nat_rel_sh[-1] > 0.05 and _dbg < 12:
+						_dbg += 1
+						print("DBG fig %d t %s pitch %.0f rel %.3f lean %.2f sh.y %.3f el %s hand %s" % [who, t, pitch, _nat_rel_sh[-1], fig.lean_now(), fig.bone_global(StringName("UpperArm." + rig.side)).origin.y, fig.bone_global(StringName("Forearm." + rig.side)).origin, fig.bone_global(StringName("Hand." + rig.side)).origin])
 				if c < 0.0:
 					fails += 1
 					if fails < 8:
@@ -75,6 +89,8 @@ func _run() -> void:
 		fig.queue_free()
 		rig.queue_free()
 		board.queue_free()
+	_report_naturalness()
+	await _check_rest()
 	print("[brazo] %d posturas, %d atraviesan la mesa, holgura mínima %.3f m, error máximo de pinza %.3f m" % [checked, fails, worst, max_err])
 	quit(1 if fails > 0 else 0)
 
@@ -100,3 +116,63 @@ func _inside_depth(p: Vector3) -> float:
 	var dy_bot := SLAB_BOTTOM - p.y
 	# Dentro si es "interior" en los tres ejes; la holgura es la salida más corta.
 	return maxf(maxf(-dx, -dz), maxf(dy_top, dy_bot))
+
+
+## Anota la naturalidad de la postura actual: el codo debe quedar por fuera y por detrás de la
+## mano, por encima de la mesa pero no a la altura del hombro ("brazo en ala").
+func _sample_naturalness(fig: SeatedFigure, side: StringName) -> void:
+	var inv := fig.global_transform.affine_inverse()
+	var sh: Vector3 = inv * fig.bone_global(StringName("UpperArm." + side)).origin
+	var el: Vector3 = inv * fig.bone_global(StringName("Forearm." + side)).origin
+	var ha: Vector3 = inv * fig.bone_global(StringName("Hand." + side)).origin
+	var outward := -1.0 if side == &"R" else 1.0
+	_nat_rel_sh.append(el.y - SHOULDER_REST_Y)
+	_nat_above.append(fig.bone_global(StringName("Forearm." + side)).origin.y - TABLE_TOP)
+	_nat_out.append((el.x - lerpf(sh.x, ha.x, 0.5)) * outward)
+	_nat_back.append(ha.z - el.z)
+
+
+func _stat(a: Array[float]) -> String:
+	if a.is_empty():
+		return "sin datos"
+	var sum := 0.0
+	for v in a:
+		sum += v
+	return "min %.3f  media %.3f  max %.3f" % [a.min(), sum / a.size(), a.max()]
+
+
+func _report_naturalness() -> void:
+	var wing := 0
+	var above := 0
+	for v in _nat_rel_sh:
+		if v > -0.03:
+			wing += 1
+		if v > 0.0:
+			above += 1
+	print("[natural] %d posturas alcanzadas" % _nat_rel_sh.size())
+	print("[natural] codo - hombro erguido (m, ideal < 0):  ", _stat(_nat_rel_sh))
+	print("[natural] codo sobre la mesa (m):        ", _stat(_nat_above))
+	print("[natural] codo hacia fuera (m, > 0):     ", _stat(_nat_out))
+	print("[natural] codo detras de la mano (m, > 0): ", _stat(_nat_back))
+	print("[natural] codo a la altura del hombro o mas (en ala): %.1f %%" % (100.0 * wing / maxf(_nat_rel_sh.size(), 1)))
+	print("[natural] codo por encima del hombro: %.1f %%" % (100.0 * above / maxf(_nat_rel_sh.size(), 1)))
+
+
+## Reposo: con el IK apagado manda la animación; se mide dónde quedan codo y mano y la holgura.
+func _check_rest() -> void:
+	for anim in [&"sit_idle", &"sit_think", &"sit_nervous"]:
+		for who in 2:
+			var fig := SeatedFigure.new()
+			root.add_child(fig)
+			fig.position = Vector3(0, 0, 0.8 if who == 0 else -0.8)
+			fig.rotation.y = PI if who == 0 else 0.0
+			fig.play(anim, 0.0)
+			for i in 6:
+				await process_frame
+			for side in [&"R", &"L"]:
+				var inv := fig.global_transform.affine_inverse()
+				var el: Vector3 = fig.bone_global(StringName("Forearm." + side)).origin
+				var ha: Vector3 = fig.bone_global(StringName("Hand." + side)).origin
+				var sh: Vector3 = fig.bone_global(StringName("UpperArm." + side)).origin
+				print("[reposo] %s %s figura %d: codo %s mano %s (local %s) holgura %.3f codo-hombro %.3f" % [anim, side, who, el, ha, inv * ha, _clearance(fig, side), el.y - sh.y])
+			fig.queue_free()

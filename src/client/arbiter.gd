@@ -198,6 +198,8 @@ func _run() -> void:
 				_idle()
 		else:
 			await _patrol_step()
+		if not is_inside_tree():
+			return
 		await get_tree().process_frame
 
 
@@ -423,6 +425,7 @@ func _announce_now(accuser: int, correct: bool, warnings: int) -> void:
 func _do_player_execution() -> void:
 	var spot := ArbiterRoutes.HUMAN_SIDE_SPOT
 	var player := root.player
+	player.set_input_locked(true)
 	_start_fp_audio()
 	var progress := func(remaining: float) -> void:
 		var k := clampf(1.0 - remaining / 9.0, 0.0, 1.0)

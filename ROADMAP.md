@@ -6,15 +6,9 @@ Solo lo **pendiente**. Lo implementado se describe en [`docs/arquitectura.md`](d
 
 ### Oleada 2 — integración (depende de la oleada 1)
 
-- **R9. Pulido de la mesa del jugador** (tras integrar la oleada 2)
-  - [ ] Brazos en reposo y al mover con postura natural: hoy el codo queda muy alto, "en ala", y desde la cámara del jugador los brazos del rival cuelgan sobre el tablero.
-  - [ ] Iluminación de la mesa del jugador: el tablero se ve sobreexpuesto (casillas naranja y blanco quemado).
-  - [ ] Subir `config.arbiter_delay` a ~6-7 s para que el árbitro llegue y revise las planillas.
-  - [ ] Bloquear la entrada del jugador durante su ejecución en primera persona.
-  - [ ] La planilla del rival está a su izquierda (escribe con el brazo del reloj).
-
 ## Pendiente de la etapa anterior
 
+- [ ] Las animaciones `sit_idle/sit_think/sit_nervous` dejan las manos sobre el propio tablero (a z = ±0,30 con la silla a 0,80), así que los brazos van siempre por IK en reposo y no se ven sus gestos (mano al mentón, nerviosismo). Se necesitaría acercar las sillas o reanimar las poses en Blender.
 - [ ] Las partidas de fondo empiezan desde la posición inicial; podrían arrancar de un medio juego (`Hall.mid_game_fen`) para que los tableros se vean avanzados.
 - [ ] Pasillo entre filas de ~1,16 m entre sillas (`HallLayout.SPACING_Z` = 3,2): subirlo si el árbitro pasa justo.
 

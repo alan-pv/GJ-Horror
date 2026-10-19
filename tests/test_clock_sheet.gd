@@ -183,3 +183,14 @@ func test_scoresheet_view_writes_entries() -> void:
 	check(not v.has_pending(W))
 	check_eq(v.line_text(B, 0), "", "la hoja rival sigue en blanco")
 	v.free()
+
+
+func test_scoresheet_positions() -> void:
+	# La del humano queda a su derecha (+X, junto al reloj); la del rival, a la derecha del rival (-X).
+	var v := ScoresheetView.new()
+	v.setup(W)
+	var mine: Vector3 = (v._sheets[W].root as Node3D).position
+	var theirs: Vector3 = (v._sheets[B].root as Node3D).position
+	check(mine.x > 0.3 and mine.z > 0.0, "planilla del humano en (+X, +Z): %s" % mine)
+	check(theirs.x < -0.3 and theirs.z < 0.0, "planilla del rival en (-X, -Z): %s" % theirs)
+	v.free()
