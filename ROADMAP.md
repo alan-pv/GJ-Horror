@@ -26,26 +26,23 @@ Es lo que el jugador ve todo el tiempo: debe ser lo más pulido del juego.
 - [ ] Maniquíes sin rasgos: la nariz y las orejas son geometría de `Skin` en `player.glb` y quedan como relieve; hace falta una variante sin rasgos (o separar esa geometría) en Blender.
 - [ ] Rehacer cada una con `CharacterFigure` (animaciones nuevas en Blender si hace falta: toser, levantarse y señalar, ser arrastrado). No tienen que ser 1:1 con las antiguas, solo coherentes con la acción.
 
-### Frente D — El rival voltea ante distracciones (espera la elección del usuario)
-Hoy `BotController.notice_event` hace voltear con `turn_to_event_chance × intensity`. Se propone una probabilidad por evento; el usuario elige cuáles entran:
+### Frente D — El rival voltea ante distracciones
+Hoy `BotController.notice_event` hace voltear con `turn_to_event_chance × intensity`. Eventos elegidos por el usuario (2026-10-19), con su probabilidad de voltear:
 
-| Evento candidato | Probabilidad propuesta |
+| Evento | Probabilidad |
 | --- | --- |
 | Disparo de una ejecución en otra mesa | Muy alta |
-| Guardias arrastrando a un eliminado | Alta |
-| Alguien huye corriendo de su mesa | Alta |
 | Grito de "¡Trampa!" en otra mesa (acusación ajena) | Alta |
 | Apagón o parpadeo de lámparas | Alta |
-| Banqueta o golpe detrás | Alta |
 | El árbitro pasa cerca o detrás | Media (de reojo, rápido) |
 | Llanto o súplica de un condenado | Media |
-| Puerta que se abre o se cierra | Media |
-| Lámpara de una mesa que queda a media luz tras una ejecución | Baja |
 | Pieza que cae en una mesa vecina | Baja |
 | Reloj vecino que pita al caer la bandera | Baja |
-| Tos o ruido del propio jugador (requiere la tecla pendiente del humano) | Media |
 
-- [ ] Implementar los eventos elegidos con su probabilidad en `EventDef`/personalidad, con giro de cabeza hacia el origen y regreso natural.
+Descartados: lámpara a media luz tras una ejecución, guardias arrastrando a un eliminado, alguien que huye corriendo, banqueta o golpe detrás, puerta, tos o ruido del jugador.
+
+- [ ] Probabilidad por evento (en `EventDef` o en la personalidad) multiplicada por `turn_to_event_chance`; giro de cabeza hacia el origen y regreso natural al tablero.
+- [ ] Emitir el aviso a los bots desde los eventos que hoy no lo hacen (disparo de la ejecución, llanto/súplica del condenado, pieza que cae y bandera en mesas de fondo).
 
 ### Frente E — Escenificación según lo que ve el jugador
 - [ ] Calcular qué mesas están en la línea de visión directa del jugador (cono de la cámara en reposo, sin oclusión) y llevar ahí las reacciones más dramáticas (huidas, súplicas, ejecuciones con más preparación); las mesas fuera de cuadro usan reacciones discretas.
