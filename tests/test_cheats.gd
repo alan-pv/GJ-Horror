@@ -107,6 +107,7 @@ func test_correct_accusation_eliminates_cheater() -> void:
 
 func test_window_only_since_last_move() -> void:
 	var m := _make()
+	m.config.accusation_window_moves = 1
 	m.start_cheat(B, &"nudge", _sq("d7"), _sq("d6"))
 	m.tick(1.0)
 	m.submit_move(W, "e2e4")  # la trampa quedó antes de la última jugada blanca
@@ -184,3 +185,54 @@ func test_legal_cache_follows_board() -> void:
 	check_eq(m.board.piece_at(_sq("e5")), ChessPiece.NONE, "peón robado")
 	check_eq(m.legal_moves().size(), ChessRules.legal_moves(m.board).size(), "caché igual al cálculo directo")
 	check(m.legal_moves().size() != n, "la lista cambió tras la trampa")
+
+
+## Partida con `w_moves` jugadas blancas tras una trampa negra (la trampa va tras la primera).
+func _cheat_then_moves(window: int, w_moves: int) -> MatchServer:
+	var m := _make()
+	m.config.accusation_window_moves = window
+	m.tick(1.0)
+	m.submit_move(W, "e2e4")
+	m.tick(1.0)
+	m.start_cheat(B, &"nudge", _sq("d7"), _sq("d6"))
+	m.tick(5.0)
+	var whites := ["d2d4", "g1f3", "b1c3", "c1e3"]
+	var blacks := ["a7a6", "a6a5", "a5a4", "h7h6"]
+	for i in w_moves:
+		m.submit_move(B, blacks[i])
+		m.tick(1.0)
+		m.submit_move(W, whites[i])
+		m.tick(1.0)
+	return m
+
+
+func test_window_three_moves_covers_cheat_two_moves_ago() -> void:
+	var m := _cheat_then_moves(3, 2)
+	m.accuse(W)
+	m.tick(1.1)
+	check_eq(m.end_reason, MatchServer.REASON_CAUGHT, "con N=3 cubre la trampa de hace 2 jugadas")
+	var m1 := _cheat_then_moves(1, 2)
+	m1.accuse(W)
+	m1.tick(1.1)
+	check(not m1.is_over(), "con N=1 es falsa")
+
+
+func test_window_three_moves_misses_cheat_four_moves_ago() -> void:
+	var m := _cheat_then_moves(3, 4)
+	m.accuse(W)
+	m.tick(1.1)
+	check(not m.is_over(), "trampa de hace 4 jugadas: falsa")
+
+
+func test_false_accusation_resets_window() -> void:
+	var m := _cheat_then_moves(3, 4)
+	m.accuse(W)
+	m.tick(1.1)
+	check_eq(m.sessions[W].warnings, 1)
+	# Tras la falsa, la ventana arranca en ese instante.
+	check(m.accusation_window_start(W) >= m.time - 0.001, "ventana reiniciada")
+	m.start_cheat(B, &"nudge", _sq("g7"), _sq("g6"))
+	m.tick(3.0)
+	m.accuse(W)
+	m.tick(1.1)
+	check_eq(m.end_reason, MatchServer.REASON_CAUGHT, "la trampa posterior sí cuenta")

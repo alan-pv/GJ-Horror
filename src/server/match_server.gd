@@ -61,7 +61,8 @@ var _pending_number: int = 0
 var _sheets: Array[PackedStringArray] = [PackedStringArray(), PackedStringArray()]
 
 var _looking: Array[bool] = [true, true]
-var _last_move_time: PackedFloat64Array = [0.0, 0.0]
+## Instante de la última acusación falsa de cada jugador (la ventana no retrocede de ahí).
+var _last_false_accusation: PackedFloat64Array = [0.0, 0.0]
 var _active_cheat: Array = [null, null]
 var _pending_accusation: Dictionary = {}
 var _position_counts: Dictionary = {}
@@ -191,7 +192,6 @@ func submit_move(color: int, uci: String) -> Dictionary:
 	var info := ChessRules.apply_move(board, move)
 	_invalidate_legal()
 	ply += 1
-	_last_move_time[color] = time
 	move_log.append({"color": color, "uci": move.uci(), "time": time})
 	_record_position()
 	move_made.emit(color, move.uci(), info)
@@ -317,7 +317,23 @@ func is_arbiter_near() -> bool:
 	return _arbiter_near
 
 
-## Llama al árbitro. Cubre solo lo ocurrido desde la última jugada del acusador.
+## Inicio de la ventana de acusación de `color`: la N-ésima jugada más reciente
+## propia (`config.accusation_window_moves`; si ha jugado menos, el inicio de la
+## partida), pero nunca antes de su última acusación falsa.
+func accusation_window_start(color: int) -> float:
+	var n := maxi(config.accusation_window_moves, 1)
+	var start := 0.0
+	var seen := 0
+	for i in range(move_log.size() - 1, -1, -1):
+		if move_log[i].color == color:
+			seen += 1
+			if seen == n:
+				start = move_log[i].time
+				break
+	return maxf(start, _last_false_accusation[color])
+
+
+## Llama al árbitro. Cubre lo ocurrido desde la ventana de acusación (ver `accusation_window_start`).
 func accuse(color: int) -> Dictionary:
 	var err := _can_act(color)
 	if err == "" and is_hand_busy(color):
@@ -326,8 +342,9 @@ func accuse(color: int) -> Dictionary:
 		return {"ok": false, "reason": err}
 	var accused := ChessPiece.opposite(color)
 	var correct := false
+	var window_start := accusation_window_start(color)
 	for e in cheat_log:
-		if e.color == accused and e.status != "aborted" and e.start >= _last_move_time[color]:
+		if e.color == accused and e.status != "aborted" and e.start >= window_start:
 			correct = true
 			break
 	_pending_accusation = {"accuser": color, "correct": correct, "resolve_at": time + config.arbiter_delay}
@@ -394,7 +411,7 @@ func _resolve_accusation() -> void:
 		session.warnings += 1
 		# La ventana de la siguiente acusación arranca aquí: así una
 		# acusación falsa no se puede repetir sobre lo mismo.
-		_last_move_time[accuser] = time
+		_last_false_accusation[accuser] = time
 		accusation_resolved.emit(accuser, false, session.warnings)
 		if session.warnings >= config.false_accusations_to_eliminate:
 			_end(ChessPiece.opposite(accuser), REASON_FALSE_ACCUSATIONS)

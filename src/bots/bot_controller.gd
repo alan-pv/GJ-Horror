@@ -158,13 +158,16 @@ func _play_turn() -> void:
 	_target_dir = (board_center - eye_position).normalized()
 	var board := server.board.clone()
 	var ply_at_start := server.ply
-	var think := think_time(board, server.clock.remaining[color], _rng) * personality.think_time_scale
-	_think_deadline = _time + think
+	# Plazo provisional (no empieza trampas largas) mientras el cerebro calcula la política.
+	_think_deadline = _time + 1.5
 	var t0 := Time.get_ticks_msec()
 	var policy: Dictionary = await brain.get_policy(board, personality.elo, opponent_elo)
 	var spent := (Time.get_ticks_msec() - t0) / 1000.0
 	if not is_inside_tree():
 		return
+	# El tiempo de pensar depende de lo difícil que es la posición (la política) y del reloj.
+	var think := think_time(board, server.clock.remaining[color], policy, _rng, server.config.increment_seconds) * personality.think_time_scale
+	_think_deadline = _time + maxf(think - spent, 0.0)
 	if think > spent:
 		if not await _wait(think - spent):
 			return
@@ -197,23 +200,51 @@ func _wait(seconds: float) -> bool:
 	return is_inside_tree() and server != null
 
 
-## Tiempo de pensar: pausas variables según el reloj y la complejidad, no
-## respuestas instantáneas. En apuros juega mucho más rápido.
-static func think_time(board: BoardState, remaining: float, rng: RandomNumberGenerator) -> float:
+## Dificultad de la posición (0..1) según la política del cerebro: mezcla de
+## 1 - probabilidad máxima y entropía normalizada. Una jugada obvia (95 %) da ~0,07;
+## muchas candidatas parecidas, ~1. Sin política útil devuelve 0,5.
+static func policy_difficulty(policy: Dictionary) -> float:
+	if policy.size() <= 1:
+		return 0.0 if policy.size() == 1 else 0.5
+	var total := 0.0
+	var pmax := 0.0
+	for k in policy:
+		var p: float = policy[k]
+		total += p
+		pmax = maxf(pmax, p)
+	if total <= 0.0:
+		return 0.5
+	var h := 0.0
+	for k in policy:
+		var p: float = float(policy[k]) / total
+		if p > 0.0:
+			h -= p * log(p)
+	var hn := h / log(float(policy.size()))
+	return clampf(0.5 * (1.0 - pmax / total) + 0.5 * hn, 0.0, 1.0)
+
+
+## Tiempo de pensar (segundos, antes de `think_time_scale`). Presupuesto por jugada =
+## restante / jugadas que se esperan aún (max(20, 40 - nº de jugada)) + la mitad del
+## incremento; con menos de 20 s se reduce en proporción. Se reparte según la
+## dificultad (de 0,1 a 1,0 del presupuesto), la apertura (primeras 6 jugadas) va a
+## 0,4x, con ruido log-normal moderado. Mínimo 0,3 s y nunca más del 15 % del reloj ni 15 s.
+static func think_time(board: BoardState, remaining: float, policy: Dictionary, rng: RandomNumberGenerator, increment: float = 2.0) -> float:
+	var cap := minf(remaining * 0.15, 15.0)
+	var lo := minf(0.3, cap)
 	var n := ChessRules.legal_moves(board).size()
 	if n <= 1:
-		return rng.randf_range(0.4, 0.9)
-	var base := 1.2 + 0.06 * n
+		return clampf(rng.randf_range(0.4, 0.9), lo, maxf(cap, lo))
+	var moves_left := maxf(20.0, 40.0 - board.fullmove_number)
+	var budget := remaining / moves_left + increment * 0.5
+	if remaining < 20.0:
+		budget *= remaining / 20.0
+	var base := budget * lerpf(0.1, 1.0, policy_difficulty(policy))
 	if board.fullmove_number <= 6:
-		base *= 0.5  # aperturas de memoria
+		base *= 0.4  # aperturas de memoria
 	if ChessRules.in_check(board, board.side_to_move):
 		base *= 1.2
-	# Distribución log-normal: a veces piensa mucho más.
-	var t := base * exp(rng.randfn(0.0, 0.45))
-	var budget := remaining / 25.0
-	if remaining < 20.0:
-		budget = remaining / 40.0
-	return clampf(minf(t, budget * 2.0), 0.3, 12.0)
+	var t := base * exp(rng.randfn(0.0, 0.35))
+	return clampf(t, lo, maxf(cap, lo))
 
 
 # --- Trampa propia --------------------------------------------------------------

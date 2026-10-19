@@ -290,6 +290,12 @@ func _make_bot(color: int, eye: Vector3, rng: RandomNumberGenerator, player_id: 
 		# Cada jugador del torneo tiene su nivel.
 		personality = personality.duplicate() as BotPersonality
 		personality.elo = manager.elo[player_id]
+	# Elo del rival de este bot (para Maia): el humano cuenta 1300 en el torneo.
+	var opp_elo := 1300
+	if player_id >= 0:
+		var g := manager.game_of(player_id)
+		if g != null:
+			opp_elo = manager.elo[g.opponent_of(player_id)]
 	var brain: ChessBrain
 	if ResourceLoader.exists("res://src/bots/maia_brain.gd"):
 		brain = load("res://src/bots/maia_brain.gd").new()
@@ -299,6 +305,7 @@ func _make_bot(color: int, eye: Vector3, rng: RandomNumberGenerator, player_id: 
 	bot.name = "Bot_" + _color_name(color)
 	add_child(bot)
 	bot.setup(server, color, personality, brain, eye, BoardView.CENTER)
+	bot.opponent_elo = opp_elo
 	return bot
 
 
@@ -475,29 +482,15 @@ func _setup_tournament(rng: RandomNumberGenerator) -> void:
 		rival_id = -1
 
 
-## Mesas con partida o descanso en la ronda en curso (índice -> true).
-func _used_tables() -> Dictionary:
-	var used := {}
-	for g in manager.games:
-		if g.table >= 0:
-			used[g.table] = true
-	for id in manager.byes:
-		var t: int = manager.bye_tables.get(id, TournamentGame.TABLE_NONE)
-		if t >= 0:
-			used[t] = true
-	return used
-
-
-## Lámparas de las mesas del salón según la ronda en curso: las 16 mesas siguen en su
-## sitio, pero las que no se usan quedan vacías (sin figuras ni piezas) y a oscuras. La
-## de la mesa del humano está siempre encendida.
+## Lámparas del salón: las 16 mesas siguen encendidas en todas las rondas (las vacías
+## también, para que el salón no se vaya quedando a oscuras); solo se retiran las figuras
+## y las piezas de las mesas que no se usan. La atenuación llega solo con las ejecuciones.
 func _populate_hall() -> void:
-	var used := _used_tables()
 	for i in hall.table_count():
 		if i == HallLayout.HUMAN_TABLE:
 			continue
 		hall.clear_table_board(i)
-		hall.set_table_active(i, used.has(i), false)
+		hall.set_table_active(i, true, false)
 
 
 func _start_background() -> void:
@@ -701,7 +694,6 @@ func _finish_round_flow() -> void:
 		return
 	manager.start_round()
 	_log("Siguiente: %s, quedan %d" % [manager.round_label(), manager.remaining_count()])
-	_darken_for_next_round()
 	hud.show_screen(_round_title(), _next_round_text(res), "", Color(0.93, 0.85, 0.6))
 	await get_tree().create_timer(4.0).timeout
 	if not is_inside_tree():
@@ -724,18 +716,6 @@ func _next_round_text(_res: Dictionary) -> String:
 	else:
 		t += "You advance to the next round without playing"
 	return t
-
-
-## Las mesas que no se usan en la siguiente ronda se apagan con atenuación; las figuras
-## de esta ronda se retiran con la recarga de escena (pantalla entre rondas). Las 16 mesas
-## siguen en su sitio.
-func _darken_for_next_round() -> void:
-	var used := _used_tables()
-	for i in hall.table_count():
-		if i == HallLayout.HUMAN_TABLE or used.has(i):
-			continue
-		if hall.table_level(i) > 0.0:
-			hall.set_table_active(i, false, true)
 
 
 ## Pantallas de prueba para capturas (`--demo-screen=...`).

@@ -19,6 +19,9 @@ extends Resource
 @export var arbiter_delay: float = 3.0
 ## La tercera acusación falsa elimina.
 @export var false_accusations_to_eliminate: int = 3
+## Ventana de acusación: se cubren las trampas rivales desde la N-ésima jugada
+## más reciente del acusador (1 = solo desde su última jugada).
+@export var accusation_window_moves: int = 3
 ## ¿Una acusación correcta borra una advertencia?
 @export var correct_accusation_clears_warning: bool = false
 ## Ayuda para principiantes (siempre activa en el prototipo).

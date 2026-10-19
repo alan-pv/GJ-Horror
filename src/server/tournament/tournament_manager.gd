@@ -18,6 +18,11 @@ const BOT_NAMES := [
 	"Barnaby", "Cordelia", "Desmond", "Eloise", "Fletcher", "Griselda", "Horace", "Imogen",
 ]
 
+## Elo del rival del humano: sube con la ronda, de `rival_elo_min` en la primera a
+## `rival_elo_max` en la final. 1500 ≈ mediana de Lichess, la escala con la que se
+## entrenó Maia. Configurable: se pueden cambiar antes de `start_round()`.
+var rival_elo_min: int = 1000
+var rival_elo_max: int = 1500
 var rng := RandomNumberGenerator.new()
 var player_count: int
 ## sessions[id]: las sesiones sobreviven a las partidas (llevan las advertencias).
@@ -147,6 +152,9 @@ func start_round() -> Array[TournamentGame]:
 		for i in range(0, pool.size(), 2):
 			games.append(_random_colors(pool[i], pool[i + 1]))
 	_assign_tables()
+	var hg := game_of(human_id)
+	if hg != null:
+		elo[hg.opponent_of(human_id)] = rival_elo_for_round(round_no)
 	phase = Phase.PLAYING
 	return games
 
@@ -328,6 +336,16 @@ static func rounds_for(n: int) -> int:
 		n = (n + 1) / 2
 		r += 1
 	return r + 1
+
+
+## Elo del rival del humano en la ronda `round_index` (1 = primera, la final = última):
+## interpolación lineal entre `rival_elo_min` y `rival_elo_max` según `rounds_for(player_count)`.
+func rival_elo_for_round(round_index: int) -> int:
+	var total := rounds_for(player_count)
+	if total <= 1:
+		return rival_elo_max
+	var k := clampf(float(round_index - 1) / float(total - 1), 0.0, 1.0)
+	return roundi(lerpf(rival_elo_min, rival_elo_max, k))
 
 
 ## Nombre de la ronda en curso para la interfaz.

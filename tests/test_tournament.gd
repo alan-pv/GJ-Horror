@@ -330,3 +330,29 @@ func test_background_resolves_at_planned_end() -> void:
 	check_eq(g.loser_seat(), ChessPiece.opposite(bg.server.winner), "asiento del perdedor")
 	check_eq(bg.server.config.increment_seconds, 2.0, "reloj 3+2")
 	check(bg.server.scoresheet(0).is_empty(), "las mesas de fondo no llevan planilla")
+
+
+func test_rival_elo_for_round() -> void:
+	var m := TournamentManager.new(32, 3)
+	var got: Array[int] = []
+	for r in range(1, 6):
+		got.append(m.rival_elo_for_round(r))
+	check_eq(got, [1000, 1125, 1250, 1375, 1500] as Array[int], "32 jugadores: 5 rondas")
+	var m2 := TournamentManager.new(2, 3)
+	check_eq(m2.rival_elo_for_round(1), 1500, "solo la final")
+	check_eq(m.rival_elo_for_round(99), 1500, "techo")
+
+
+func test_human_rival_gets_round_elo() -> void:
+	var m := TournamentManager.new(16, 11)
+	for r in range(1, 5):
+		m.start_round()
+		var g := m.game_of(m.human_id)
+		check(g != null)
+		check_eq(m.elo[g.opponent_of(m.human_id)], m.rival_elo_for_round(m.round_no), "ronda %d" % r)
+		for pg in m.pending_games():
+			var t: PackedFloat64Array = [10.0, 10.0]
+			m.report_result(pg, ChessPiece.WHITE if pg.white == m.human_id or (pg.black != m.human_id and pg.white < pg.black) else ChessPiece.BLACK, "prueba", t)
+		m.finish_round()
+		if m.is_finished():
+			break
