@@ -1,66 +1,58 @@
 # ROADMAP
 
-Plan por hitos del prototipo (un humano contra bots, exportado a web) y del lanzamiento. Cada hito se divide en frentes que implementan subagentes en paralelo (ver `CLAUDE.md`). Las casillas marcadas ya están en `main`.
+Solo lo **pendiente**. Lo implementado se describe en [`docs/arquitectura.md`](docs/arquitectura.md) y se borra de aquí en el mismo commit que lo termina (ver `CLAUDE.md`). Cada hito se divide en frentes que implementan subagentes en paralelo.
 
-## Hito 1 — Partida 1v1 jugable ✅
+## Ronda de pulido 1 (2026-10-19)
 
-- [x] Servidor: tablero físico, reglas completas (perft), reloj de 3 min, las tablas ganan negras.
-- [x] Trampas como datos y su validación (empujoncito, deslizar, robar, mover pieza enemiga).
-- [x] Acusaciones: ventana desde la última jugada, tres falsas eliminan, pausa del reloj.
-- [x] Ayuda para principiantes (bloquea un error grave una vez).
-- [x] Bots: política muestreada, Maia en el navegador (hoy Maia-3 5M) y respaldo en GDScript; personalidades.
-- [x] Cliente 3D: salón, lámpara, tablero, mano con TwoBoneIK3D, cámara en primera persona, reloj, HUD.
+### Oleada 1 — bases independientes
 
-## Hito 2 — Trampas y vigilancia ✅
+- **R1. Servidor: reloj, planillas y torneo** (`src/server/`)
+  - [ ] Ritmo 3+2: incremento de 2 s al pulsar el reloj.
+  - [ ] El turno pasa al **pulsar el reloj**, no al decidir la jugada: intención `press_clock`; mientras no se pulsa, sigue corriendo el reloj de quien movió y el rival no puede mover.
+  - [ ] Planillas: cada jugador anota sus jugadas legales en notación algebraica (las trampas no se anotan). El árbitro las revisa al acusar (solo visual: la acusación sigue usando la ventana desde la última jugada).
+  - [ ] Torneo de 32 jugadores en 16 mesas fijas en cuadrícula 4x4; la mesa del jugador es interior y no cambia.
+  - [ ] Eliminaciones repartidas a lo largo de la ronda (las partidas de fondo terminan en momentos distintos, no todas al final).
+  - [ ] Textos del juego que salen del servidor en inglés.
+- **R2. Rendimiento del turno** (`src/bots/`, `beginner_helper.gd`, `chess_rules.gd`, `board_state.gd`)
+  - [ ] Eliminar el tirón al terminar de elegir la jugada (medir: ayuda para principiantes, cerebro del bot, historial de Maia).
+- **R3. Arte low-poly en Blender** (`art/`, `assets/models/`)
+  - [ ] Personaje sentado con esqueleto apto para IK y animaciones: reposo, pensar, escribir, pulsar el reloj, mover pieza, suplicar, llorar, levantarse e intentar huir, muerte por disparo.
+  - [ ] Árbitro con pistola: caminar, revisar planillas, apuntar y disparar.
+  - [ ] Utilería: mesa, silla, reloj de dos caras, planilla y pluma, pistola, lámpara, piezas.
+  - [ ] Scripts de Blender sin interfaz que generan los `.blend` editables y exportan `.glb`.
+- **R4. Menús, HUD y reloj** (`autoloads/`, `src/ui/`, `hud.gd`, `clock_view.gd`)
+  - [ ] Menú inicial, configuración y pausa reutilizados de tic-tac-toe, en inglés.
+  - [ ] Se ven los dos tiempos (el propio y el del rival) en el reloj 3D y en el HUD.
+  - [ ] Tic-tac del reloj.
+  - [ ] HUD sin lista de nombres: solo número de ronda y rondas restantes.
+- **R5. Sonidos** (`assets/audio/sfx/`, `tools/`)
+  - [ ] Tic-tac, pasos del árbitro, disparo, cuerpo que cae, silla que se arrastra, sollozos y súplicas.
 
-- **2A. Trampas del jugador y árbitro** (`src/client/cheats/`, `hand_animator.gd`, `src/client/arbiter.gd`)
-  - [x] Elegir trampa (teclas 1-4), pieza y destino; abortar a mitad.
-  - [x] Animación propia y reconocible de cada trampa, para ambas manos y con la duración que dicta el servidor.
-  - [x] Pieza robada escondida en la mano/regazo; evidencia visible (pieza descentrada, pieza que falta).
-  - [x] Árbitro que camina a la mesa al acusar y anuncia el veredicto; `pass_behind()` para el evento disuasivo.
-- **2B. Bots tramposos** (`src/bots/`)
-  - [x] Planificador de trampas: cuándo (el rival no mira, más si va perdiendo) y cuál (la que más ayuda sin dejar posiciones imposibles).
-  - [x] Abortar si el rival voltea; provocar distracciones del rival antes de una trampa.
+### Oleada 2 — integración (depende de la oleada 1)
 
-## Hito 3 — Eventos y director de tensión ✅
+- **R6. Personajes y manos realistas**
+  - [ ] Personajes low-poly en lugar de primitivas (rival, jugador y mesas de fondo).
+  - [ ] Brazo con IK sobre el esqueleto nuevo; el codo nunca atraviesa la mesa.
+  - [ ] Secuencia física de cada jugada: mover, pulsar el reloj y anotar en la planilla.
+- **R7. Salón en cuadrícula y mesas vivas**
+  - [ ] Salón con 16 mesas en cuadrícula 4x4 que rodean al jugador.
+  - [ ] Jugadores de fondo animados (piensan, mueven, pulsan el reloj, anotan, miran alrededor), aunque sus partidas no se vean.
+  - [ ] Entre rondas se conservan las mesas, vacías las de los eliminados.
+- **R8. Árbitro verdugo y eliminaciones**
+  - [ ] Árbitro que patrulla el salón todo el tiempo, con pasos espaciales que se oyen acercarse y alejarse.
+  - [ ] Al perder, el árbitro va a la mesa y dispara a la cabeza; el cuerpo queda en la mesa hasta el fin de la ronda.
+  - [ ] Mesas visibles frente al jugador con eliminaciones variadas (suplicar, llorar, intentar huir, quedarse inmóvil).
+  - [ ] Eliminación del propio jugador en primera persona.
+  - [ ] Revisión de las dos planillas al acusar.
 
-- **3. Director y eventos** (`src/server/tension_director.gd`, `src/client/events/`, `data/events/`)
-  - [x] Director de tensión en el servidor: elige evento, origen y momento; más frecuencia con menos jugadores.
-  - [x] Globales: apagón, ruido detrás, acusación ajena, eliminación en otra mesa.
-  - [x] Del rival: tirar una pieza y toser (con tiempo de espera, sospechosos en sí mismos).
-  - [x] Disuasivo: el árbitro pasa detrás (mientras está cerca, las trampas se ven).
-  - [x] Sonido espacial con `AudioStreamPlayer3D` (sonidos sintetizados mientras no haya assets).
-  - [x] Los bots voltean ante los eventos.
+## Pendiente de la etapa anterior
 
-## Hito 4 — Torneo ✅
-
-- **4. Torneo y salón vivo** (`src/server/tournament/`, `hall.gd`, flujo de `game_root.gd`)
-  - [x] Gestor de torneo: rondas sincronizadas, emparejamiento aleatorio, impares (pasa sin jugar), final a dos partidas con colores invertidos y desempate por tiempo sobrante.
-  - [x] Partidas de fondo bot contra bot simuladas de forma barata en las otras mesas.
-  - [x] Al eliminar a alguien su lámpara se apaga y su figura sale del salón; el salón se oscurece.
-  - [x] Advertencias que se arrastran entre partidas; cola automática a un torneo nuevo al ser eliminado.
-  - [x] Pantallas entre rondas (quedan N jugadores) y de campeón.
-
-## Integración de los hitos 2-4 (en curso)
-
-- [ ] Corrutinas seguras al recargar la escena entre partidas (árbitro, manos, bots, eventos).
-- [ ] El servidor avisa `cheat_aborted` al terminar la partida con una trampa en curso.
-- [ ] El torneo informa al director de tensión cuántos quedan; guardias y figuras coherentes al eliminar.
-- [ ] Verificar visualmente al árbitro que pasa detrás (disuasivo).
-- [ ] Caché de jugadas legales en `MatchServer` (picos de las mesas de fondo).
-- [ ] Balance de bots: variedad de trampas (no solo robar), menos eliminaciones por acusaciones falsas, distracciones menos frecuentes.
-
-## Hito 5 — Web y pulido
-
-- [x] Bots con **Maia-3 5M** (más humano: 55,4 % vs 52,0 %; 11 MB; Elo continuo), 100 % local: onnxruntime-web incluido en el build, sin CDN. Usa las últimas 8 posiciones físicas (52,9 % vs 48,9 % sin historial).
-- [x] Licencia AGPL-3.0 (requisito de Maia-3).
-- [ ] **Repo público el día que se publique el juego** en itch.io.
-- [ ] Exportación web real (plantillas de Godot 4.6) y prueba de Maia-3 en navegador.
-- [ ] Rendimiento: ayuda para principiantes por debajo de 0,1 s, IK lejano con menos frecuencia, medir mesas visibles en una máquina modesta.
+- [ ] **Repo público el día que se publique el juego** en itch.io (AGPL de Maia-3).
+- [ ] Exportación web real (plantillas de Godot) y prueba de Maia-3 en navegador.
+- [ ] Rendimiento: IK lejano con menos frecuencia, medir 16 mesas visibles en una máquina modesta.
 - [ ] Audio ambiente (relojes, piezas, murmullos que disminuyen al vaciarse el salón).
 - [ ] Tutorial corto (mover, mirar, hacer trampa, acusar).
 - [ ] Ajuste de balance con bots: ¿más tiempo para blancas (Armageddon)?, cono de visión, duraciones de trampas.
-- [ ] Arte: reemplazar primitivas por modelos (manos, piezas, personajes).
 
 ## Lanzamiento — Multijugador
 
@@ -75,8 +67,9 @@ Plan por hitos del prototipo (un humano contra bots, exportado a web) y del lanz
 | --- | --- |
 | ¿El reloj se pausa mientras llega el árbitro? | Sí |
 | ¿Una acusación correcta borra una advertencia? | No |
-| Ventana de acusación | Desde la última jugada del acusador |
-| ¿Más tiempo para blancas? | No (3:00 / 3:00) |
-| Jugadores por torneo | 16 (configurable con `--players`) |
+| Ventana de acusación | Desde la última jugada del acusador (las planillas son visuales) |
+| Ritmo | 3 min + 2 s por jugada |
+| ¿Más tiempo para blancas? | No |
+| Jugadores por torneo | 32 en cuadrícula 4x4 (configurable con `--players`) |
 | Título del juego | Pendiente |
 | Motor de los bots | Maia-3 5M (AGPL); Maia-2 (MIT) queda en el historial como plan B |

@@ -21,3 +21,6 @@ Thumbs.db
 
 # Worktrees de los subagentes
 /.claude/worktrees/
+
+# Respaldos de Blender
+*.blend1
