@@ -12,10 +12,6 @@ Solo lo **pendiente**. Lo implementado se describe en [`docs/arquitectura.md`](d
   - [ ] Secuencia física de cada jugada: mover, pulsar el reloj y anotar en la planilla.
   - [ ] Lanzar `BeginnerHelper.precompute_async` también al empezar la partida y cuando el tablero cambie en el turno del humano (hoy solo tras la jugada del bot).
   - [ ] Encender `MatchConfig.require_clock_press` (el servidor ya lo soporta) e impedir `press_clock` con la mano ocupada en una trampa.
-- **R7. Salón en cuadrícula y mesas vivas**
-  - [ ] Salón con 16 mesas en cuadrícula 4x4 que rodean al jugador.
-  - [ ] Jugadores de fondo animados (piensan, mueven, pulsan el reloj, anotan, miran alrededor), aunque sus partidas no se vean.
-  - [ ] Entre rondas se conservan las mesas, vacías las de los eliminados.
 - **R8. Árbitro verdugo y eliminaciones**
   - [ ] Árbitro que patrulla el salón todo el tiempo, con pasos espaciales que se oyen acercarse y alejarse.
   - [ ] Al perder, el árbitro va a la mesa y dispara a la cabeza; el cuerpo queda en la mesa hasta el fin de la ronda.
@@ -24,6 +20,9 @@ Solo lo **pendiente**. Lo implementado se describe en [`docs/arquitectura.md`](d
   - [ ] Revisión de las dos planillas al acusar.
 
 ## Pendiente de la etapa anterior
+
+- [ ] Las partidas de fondo empiezan desde la posición inicial; podrían arrancar de un medio juego (`Hall.mid_game_fen`) para que los tableros se vean avanzados.
+- [ ] Pasillo entre filas de ~1,16 m entre sillas (`HallLayout.SPACING_Z` = 3,2): subirlo si el árbitro pasa justo.
 
 - [ ] `BotController.opponent_elo` nunca se asigna (Maia siempre ve un rival de 1200).
 - [ ] `tests/run_tests.gd` lista `test_beginner_helper.gd`, que no existe.

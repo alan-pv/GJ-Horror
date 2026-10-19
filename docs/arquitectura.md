@@ -415,6 +415,15 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (1, 3) s, `
 - `bone_global()`, `eye_global_position()`, `head_global_position()` leen un caché con la pose ya modificada (no usar `get_bone_global_pose()`, que devuelve la pose sin modificar). `attach(node, bone)`; `set_hidden_for_first_person(on)` encoge la cabeza.
 - `ArbiterFigure`: `WALK_SPEED = 0.744`, `set_walk_speed(mps)`, `muzzle()`, `pistol()`, `set_gun_visible(on)`.
 
+### 4.19 Salón y mesas de fondo (`hall.gd`, `background_table.gd`)
+
+- `Hall` arma las 16 mesas de `HallLayout` con los `.glb` de Blender (mesa, sillas, lámpara con `SpotLight3D` en `LightAnchor`, tablero, reloj, planillas) en una sala de 18x19 m con columnas, puertas, zócalos y estandartes. La mesa del humano solo lleva mesa, sillas y lámpara (lo de encima es de la vista de la partida); es la única con sombras y relleno.
+- Para el límite de luces por objeto de Compatibility, el suelo va en una baldosa por mesa y el decorado se fusiona por muro (`MeshBaker`); las piezas de fondo son una malla por bando (`StaticBoard`).
+- API: `table_root`, `chair`, `seat_transform(i, seat)`, `set_table_level(i, nivel, animado, parpadeo)`, `set_table_board`/`set_table_fen`, `mid_game_fen`.
+- `BackgroundTable`: dos `CharacterFigure` (`random_look`) por mesa activa. Alternan reposo, pensar y nervios según turno y reloj; miran al tablero, a otras mesas, al árbitro cerca, a los ruidos. Con cada `move_made` de su `BackgroundMatch` quien movió hace `sit_move_piece` → `sit_press_clock` → `sit_write` y el tablero se actualiza. Al terminar: el ganador se queda quieto y el perdedor nervioso. Mesas lejanas o fuera de cuadro animan a 10 Hz / 2 Hz (0,13 ms/fotograma de media con 30 figuras).
+- `GameRoot.figure_at(table, seat)` y `condemn_seat(table, seat)` (detiene la vida ambiental y la entrega al árbitro). Al terminar una partida de fondo se emite `table_eliminated` y se llama `arbiter.request_execution(mesa, color_perdedor)`; tras cada ejecución la lámpara parpadea y queda al 40 % y las demás mesas voltean. La ronda termina cuando acabaron las partidas y `arbiter.has_pending_work()` es false. Entre rondas las mesas se conservan; las sin partida quedan vacías y a oscuras.
+- Depuración: `--aerial[=x,y,z,tx,ty,tz]` (cámara aérea) y `--no-arbiter-exec` (el perdedor se levanta y se va).
+
 ## 5. Configuración
 
 ### `MatchConfig` (`src/server/match_config.gd`)

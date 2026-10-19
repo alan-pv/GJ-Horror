@@ -26,6 +26,8 @@ extends Node3D
 ##   --fen="..."          posición inicial distinta (pruebas)
 ##   --shot-select=e2     selecciona esa casilla antes de capturar
 ##   --no-shadows         desactiva las sombras de la lámpara
+##   --aerial[=x,y,z,tx,ty,tz]  cámara aérea del salón entero, sin techo (capturas)
+##   --no-arbiter-exec    las eliminaciones de fondo usan el respaldo sin árbitro (pruebas)
 ##   --verbose            imprime el desarrollo de la partida
 
 ## Se emite cuando la partida ya está armada y arrancó. Los módulos se enganchan aquí.
@@ -90,6 +92,14 @@ var _anims_done: int = 0
 var arbiter: Arbiter = null
 var _shot_done: bool = false
 var _shot_armed_at: float = -1.0
+## Vida de las mesas de fondo: índice de mesa -> BackgroundTable.
+var bg_tables: Dictionary = {}
+var _bt_cost_ms: float = 0.0
+var _bt_max_ms: float = 0.0
+var _bt_frames: int = 0
+var _fps_sum: float = 0.0
+var _draw_sum: float = 0.0
+var _proc_sum: float = 0.0
 
 
 func _ready() -> void:
@@ -107,6 +117,7 @@ func _ready() -> void:
 	hall = Hall.new()
 	add_child(hall)
 	hall.build()
+	_setup_aerial_camera.call_deferred()
 	_setup_tournament(rng)
 	rival_color = ChessPiece.opposite(human_color)
 
@@ -366,20 +377,29 @@ func _setup_tournament(rng: RandomNumberGenerator) -> void:
 		rival_id = -1
 
 
-## Ocupantes y lámparas de las mesas del salón según la ronda en curso.
-func _populate_hall() -> void:
-	for i in hall.table_count():
-		hall.set_occupants(i, 0)
-		hall.set_table_active(i, false, false)
+## Mesas con partida o descanso en la ronda en curso (índice -> true).
+func _used_tables() -> Dictionary:
+	var used := {}
 	for g in manager.games:
 		if g.table >= 0:
-			hall.set_table_active(g.table, true, false)
-			hall.set_occupants(g.table, 2)
+			used[g.table] = true
 	for id in manager.byes:
 		var t: int = manager.bye_tables.get(id, TournamentGame.TABLE_NONE)
 		if t >= 0:
-			hall.set_table_active(t, true, false)
-			hall.set_occupants(t, 1)
+			used[t] = true
+	return used
+
+
+## Lámparas de las mesas del salón según la ronda en curso: las 16 mesas siguen en su
+## sitio, pero las que no se usan quedan vacías (sin figuras ni piezas) y a oscuras. La
+## de la mesa del humano está siempre encendida.
+func _populate_hall() -> void:
+	var used := _used_tables()
+	for i in hall.table_count():
+		if i == HallLayout.HUMAN_TABLE:
+			continue
+		hall.clear_table_board(i)
+		hall.set_table_active(i, used.has(i), false)
 
 
 func _start_background() -> void:
@@ -390,6 +410,30 @@ func _start_background() -> void:
 				manager.elo[g.white], manager.elo[g.black], randi(), config.white_seconds)
 		bg.finished.connect(_on_background_finished.bind(bg))
 		background.append(bg)
+		if g.table >= 0 and g.table != HallLayout.HUMAN_TABLE:
+			_make_bg_table(g.table, bg, [true, true])
+	# Quien descansa espera sentado en su mesa (el humano, en la suya, lo maneja el cliente).
+	for id in manager.byes:
+		var t: int = manager.bye_tables.get(id, TournamentGame.TABLE_NONE)
+		if t >= 0 and t != HallLayout.HUMAN_TABLE and not bg_tables.has(t):
+			_make_bg_table(t, null, [true, false])
+	# Cada mesa conoce a las demás (y a la del humano) para mirarlas de vez en cuando.
+	for t in bg_tables:
+		var bt: BackgroundTable = bg_tables[t]
+		bt.neighbors.clear()
+		bt.neighbors.append(Vector3.ZERO)
+		for u in bg_tables:
+			if u != t:
+				bt.neighbors.append(hall.table_position(u))
+	if arbiter != null and not arbiter.executed.is_connected(_on_executed):
+		arbiter.executed.connect(_on_executed)
+
+
+func _make_bg_table(table: int, bg: BackgroundMatch, present: Array) -> void:
+	var bt := BackgroundTable.new()
+	hall.table_root(table).add_child(bt)
+	bt.setup(hall, table, bg, present, randi())
+	bg_tables[table] = bt
 
 
 func _on_background_finished(g: TournamentGame, bg: BackgroundMatch) -> void:
@@ -398,25 +442,56 @@ func _on_background_finished(g: TournamentGame, bg: BackgroundMatch) -> void:
 	var loser_color := ChessPiece.opposite(bg.server.winner)
 	_log("Mesa %d: gana %s a %s (%s)" % [g.table, manager.player_name(g.winner_id()), manager.player_name(g.loser_id()), g.reason])
 	if g.table >= 0:
-		# Si hay quien escuche (módulo de eventos), los guardias se llevan al perdedor;
-		# si no, la figura se levanta y se va sola.
-		if table_eliminated.get_connections().is_empty():
-			hall.remove_occupant(g.table, loser_color)
+		var bt: BackgroundTable = bg_tables.get(g.table)
+		if bt != null:
+			bt.on_game_over(bg.server.winner)
+		table_eliminated.emit(g.table, hall.table_position(g.table), loser_color)
+		if arbiter != null and not _args.has("no-arbiter-exec"):
+			# El árbitro va a la mesa y ejecuta al perdedor; `_on_executed` apaga la lámpara.
+			arbiter.request_execution(g.table, loser_color)
 		else:
-			table_eliminated.emit(g.table, hall.table_position(g.table), loser_color)
+			# Sin árbitro: la figura se levanta y se va; la lámpara queda tenue.
+			if bt != null:
+				bt.send_away(loser_color)
+			hall.set_table_level(g.table, 0.4, true, true)
 	_refresh_tournament_hud()
 
 
+## Terminó la ejecución en (`table`, `seat`): la lámpara de esa mesa titila y queda tenue,
+## el ganador sigue sentado esperando, y el disparo se oye en todo el salón.
+func _on_executed(table: int, _seat: int) -> void:
+	if not is_inside_tree():
+		return
+	var pos := hall.table_position(table)
+	if table != HallLayout.HUMAN_TABLE:
+		hall.set_table_level(table, 0.4, true, true)
+	for t in bg_tables:
+		if t != table:
+			(bg_tables[t] as BackgroundTable).notice_noise(pos)
+
+
 ## Figura sentada en (`table`, `seat`); `seat` = color (0 blancas, 1 negras). En la
-## mesa del humano devuelve la del rival o el cuerpo del propio jugador. Null si no hay.
-## Contrato de la oleada 2 (R7 lo implementa).
-func figure_at(_table: int, _seat: int) -> CharacterFigure:
-	return null
+## mesa del humano devuelve la del rival (`avatar.figure`) o el cuerpo del propio jugador
+## (`player.body`) si existen. Null si no hay. Contrato de la oleada 2.
+func figure_at(table: int, seat: int) -> CharacterFigure:
+	if table == HallLayout.HUMAN_TABLE:
+		var node: Variant = null
+		if seat == human_color:
+			node = player.get("body") if player != null else null
+		else:
+			node = avatar.get("figure") if avatar != null else null
+		return node as CharacterFigure if node is CharacterFigure else null
+	var bt: BackgroundTable = bg_tables.get(table)
+	return bt.figure(seat) if bt != null else null
 
 
 ## Quita la figura de (`table`, `seat`) de su animación ambiental y la entrega a
-## quien la va a ejecutar (el árbitro la controla desde ahí). Contrato de la oleada 2 (R7).
+## quien la va a ejecutar (el árbitro la controla desde ahí). La figura queda en su silla
+## hasta que termine la ronda. Contrato de la oleada 2.
 func condemn_seat(table: int, seat: int) -> CharacterFigure:
+	if table != HallLayout.HUMAN_TABLE:
+		var bt: BackgroundTable = bg_tables.get(table)
+		return bt.condemn(seat) if bt != null else null
 	return figure_at(table, seat)
 
 
@@ -493,6 +568,11 @@ func _finish_round_flow() -> void:
 	await get_tree().create_timer(1.5).timeout
 	if not is_inside_tree():
 		return
+	# Las ejecuciones en curso del árbitro terminan antes de cerrar la ronda.
+	while arbiter != null and arbiter.has_pending_work():
+		await get_tree().process_frame
+		if not is_inside_tree():
+			return
 	var res := manager.finish_round()
 	_refresh_tournament_hud()
 	var human_id := manager.human_id
@@ -543,20 +623,16 @@ func _next_round_text(_res: Dictionary) -> String:
 	return t
 
 
-## Las mesas que ya no se usan en la siguiente ronda se apagan y se vacían.
+## Las mesas que no se usan en la siguiente ronda se apagan con atenuación; las figuras
+## de esta ronda se retiran con la recarga de escena (pantalla entre rondas). Las 16 mesas
+## siguen en su sitio.
 func _darken_for_next_round() -> void:
-	var used := {}
-	for g in manager.games:
-		used[g.table] = true
-	for id in manager.byes:
-		used[manager.bye_tables.get(id, TournamentGame.TABLE_NONE)] = true
+	var used := _used_tables()
 	for i in hall.table_count():
-		if used.has(i):
+		if i == HallLayout.HUMAN_TABLE or used.has(i):
 			continue
-		if hall.is_table_active(i):
+		if hall.table_level(i) > 0.0:
 			hall.set_table_active(i, false, true)
-		for seat in 2:
-			hall.remove_occupant(i, seat)
 
 
 ## Pantallas de prueba para capturas (`--demo-screen=...`).
@@ -588,8 +664,14 @@ func _process(delta: float) -> void:
 		_bg_cost_ms += ms
 		_bg_max_ms = maxf(_bg_max_ms, ms)
 		_bg_frames += 1
+	_tick_bg_tables(delta)
 	server.tick(delta)
-	if not _ending and _human_settled and manager.round_complete():
+	_fps_sum += Engine.get_frames_per_second()
+	_draw_sum += Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
+	_proc_sum += Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+	# La ronda termina cuando acabaron todas las partidas y el árbitro no tiene trabajo pendiente.
+	if not _ending and _human_settled and manager.round_complete() \
+			and (arbiter == null or not arbiter.has_pending_work()):
 		_finish_round_flow()
 	var c := server.clock
 	clock_view.set_times(c.remaining[ChessPiece.WHITE], c.remaining[ChessPiece.BLACK])
@@ -607,6 +689,45 @@ func _process(delta: float) -> void:
 		_update_screenshot()
 
 
+## Vida de las mesas de fondo (figuras, tablero) con su costo medido.
+func _tick_bg_tables(delta: float) -> void:
+	if bg_tables.is_empty():
+		return
+	var t0 := Time.get_ticks_usec()
+	var cam := get_viewport().get_camera_3d()
+	var arb_pos: Variant = null
+	if arbiter != null and arbiter.is_inside_tree() and arbiter.visible:
+		arb_pos = arbiter.global_position
+	for t in bg_tables:
+		(bg_tables[t] as BackgroundTable).tick(delta, cam, arb_pos)
+	var ms := (Time.get_ticks_usec() - t0) / 1000.0
+	_bt_cost_ms += ms
+	_bt_max_ms = maxf(_bt_max_ms, ms)
+	_bt_frames += 1
+
+
+## Cámara aérea de depuración (`--aerial`): sin techo, mirando el salón entero.
+func _setup_aerial_camera() -> void:
+	if not _args.has("aerial"):
+		return
+	var v: Array = [1.5, 13.0, 9.0, 1.5, 0.0, -2.0]
+	if str(_args["aerial"]).contains(","):
+		var parts := str(_args["aerial"]).split(",")
+		for k in mini(parts.size(), 6):
+			v[k] = float(parts[k])
+	hall.set_ceiling_visible(false)
+	var env_node := get_node_or_null("Entorno") as WorldEnvironment
+	if env_node != null and env_node.environment != null:
+		env_node.environment.ambient_light_energy = 1.0
+	var cam := Camera3D.new()
+	cam.name = "CamaraAerea"
+	cam.fov = 65.0
+	add_child(cam)
+	cam.global_position = Vector3(v[0], v[1], v[2])
+	cam.look_at(Vector3(v[3], v[4], v[5]), Vector3.UP)
+	cam.make_current()
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("restart"):
 		_restart_tournament()
@@ -617,6 +738,9 @@ func _print_summary() -> void:
 		_elapsed, _moves_seen, _anims_done, server.is_over(), server.ply])
 	if _bg_frames > 0:
 		print("[resumen] mesas de fondo: %d activas, %.3f ms/fotograma de media, %.2f ms máximo" % [background.size(), _bg_cost_ms / _bg_frames, _bg_max_ms])
+	if _bt_frames > 0:
+		print("[resumen] vida de mesas: %d mesas, %.3f ms/fotograma de media, %.2f ms máximo" % [bg_tables.size(), _bt_cost_ms / _bt_frames, _bt_max_ms])
+		print("[resumen] FPS medios %.1f, llamadas de dibujo %.0f, _process total %.2f ms/fotograma" % [_fps_sum / _bt_frames, _draw_sum / _bt_frames, _proc_sum / _bt_frames])
 	print("[resumen] torneo: %s, quedan %d de %d, eliminados %d" % [manager.round_label(), manager.remaining_count(), manager.player_count, manager.eliminated_log.size()])
 	print("[resumen] correcciones de sincronía visual: %d" % board_view.sync_fixes)
 	print("[resumen] FEN final: ", server.board.to_fen())
