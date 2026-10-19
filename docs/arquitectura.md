@@ -382,6 +382,10 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (1, 3) s, `
 
 - `art/` guarda los `.blend` editables y los scripts que los generan (Blender 5.2 sin interfaz); Godot no lo importa (`art/.gdignore`). Los `.glb` exportados viven en `assets/models/`.
 - Utilería (`art/props/`, `build_props.py`): mesa, silla, tablero, lámpara (Empty `LightAnchor`), reloj de dos caras (`Button_A/B`, `Face_A/B`, agujas `Hand_*`), planilla, pluma, pistola (Empty `Muzzle`), piezas (un `.glb` por tipo, material `Piece`), columna, puerta, panel y estandarte. Orientaciones y orígenes en `art/README.md`.
+- Personajes (`art/characters/`, `build_player.py` / `build_arbiter.py`, malla común en `body.py`): esqueleto de 23 huesos (`Hips, Spine, Chest, Neck, Head` y `Shoulder, UpperArm, Forearm, Hand, Fingers, Thumb, Thigh, Shin, Foot` con `.L`/`.R`), A-pose con codos y rodillas pre-doblados, ~1600 triángulos, materiales `Skin, Shirt, Jacket, Pants, Shoes, Hair, Eyes` (el árbitro además `Gloves, Mask, Tie, Metal, Grip`), peinados `Hair_Short/Long/Bald`. Miran a +Z en Godot; origen bajo el centro del asiento.
+  - Jugador (`player.glb`): `sit_idle, sit_think, sit_nervous, sit_write, sit_beg, sit_cry, sit_frozen, stand_flee_loop` (cíclicas) y `sit_look_left/right, sit_move_piece, sit_press_clock, stand_flee, death_slump_table, death_fall_back, death_standing`.
+  - Árbitro (`arbiter.glb`): figura alta con máscara pálida y pistola hija de `Hand.R` (Empty `Muzzle`); `idle, walk` (0,744 m/s, paso 0,483 m), `aim_hold` (cíclicas) y `inspect_sheets, aim, shoot, lower_gun, point_accuse`.
+  - `tools/check_characters.gd` comprueba huesos, materiales y animaciones.
 - Si se edita un `.blend` a mano se reexporta con `tools/export_models.sh` (no se regenera). `tools/check_props.gd` comprueba nodos y medidas.
 - Aún no se usan en el juego: el salón y la mesa siguen hechos con primitivas por código.
 

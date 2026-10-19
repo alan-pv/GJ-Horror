@@ -4,13 +4,6 @@ Solo lo **pendiente**. Lo implementado se describe en [`docs/arquitectura.md`](d
 
 ## Ronda de pulido 1 (2026-10-19)
 
-### Oleada 1 — bases independientes
-
-- **R3. Arte low-poly en Blender** (`art/`, `assets/models/`)
-  - [ ] Personaje sentado con esqueleto apto para IK y animaciones: reposo, pensar, escribir, pulsar el reloj, mover pieza, suplicar, llorar, levantarse e intentar huir, muerte por disparo.
-  - [ ] Árbitro con pistola: caminar, revisar planillas, apuntar y disparar.
-  - [ ] Scripts de Blender sin interfaz que generan los `.blend` editables y exportan `.glb`.
-
 ### Oleada 2 — integración (depende de la oleada 1)
 
 - **R6. Personajes y manos realistas**
