@@ -378,6 +378,13 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (1, 3) s, `
 
 **Sonidos:** solo sintetizados (ver 4.9). No hay audio ambiente ni música.
 
+### 4.15 Arte (Blender)
+
+- `art/` guarda los `.blend` editables y los scripts que los generan (Blender 5.2 sin interfaz); Godot no lo importa (`art/.gdignore`). Los `.glb` exportados viven en `assets/models/`.
+- Utilería (`art/props/`, `build_props.py`): mesa, silla, tablero, lámpara (Empty `LightAnchor`), reloj de dos caras (`Button_A/B`, `Face_A/B`, agujas `Hand_*`), planilla, pluma, pistola (Empty `Muzzle`), piezas (un `.glb` por tipo, material `Piece`), columna, puerta, panel y estandarte. Orientaciones y orígenes en `art/README.md`.
+- Si se edita un `.blend` a mano se reexporta con `tools/export_models.sh` (no se regenera). `tools/check_props.gd` comprueba nodos y medidas.
+- Aún no se usan en el juego: el salón y la mesa siguen hechos con primitivas por código.
+
 ## 5. Configuración
 
 ### `MatchConfig` (`src/server/match_config.gd`)
