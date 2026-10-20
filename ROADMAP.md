@@ -8,14 +8,14 @@ Pedidos del 2026-10-19 que no entran en la tanda de arreglos rápidos. Cada fren
 
 El arte (modelado y animación) también lo hacen los agentes con scripts de Blender: el usuario no anima. El código pide **roles** de animación (`<rol>` o `<rol>__<variante>`) con respaldo, para que añadir variantes no exija tocar código.
 
-### Frente A — Mano del jugador con cinco dedos y agarre real
-Es lo que el jugador ve todo el tiempo: debe ser lo más pulido del juego.
-- [ ] Agarres por tipo de pieza (peón por la cabeza, torre/alfil por el cuerpo, caballo, dama y rey por la corona): puntos de contacto definidos por pieza en `PieceFactory` y dedos que se cierran hasta tocar (sin atravesar ni quedar en el aire).
-- [ ] Orientación de la muñeca controlada (hoy el IK no la controla): la palma mira a la pieza al acercarse.
-- [ ] Pulsar el reloj, tomar la pluma y escribir con la mano nueva; temblor por estrés en los dedos.
-- [ ] Capturas de cerca de cada fase (alcanzar, agarrar, trasladar, soltar) antes de entregar.
-- [ ] Gestos de trampa continuos: hoy los tramos de `_cmove` paran entre sí (los gestos normales ya son una sola curva).
-- [ ] Si la trampa interrumpe la anotación del humano hay ~0,25 s de retraso por dejar la pluma; el rival (que escribe con la otra mano) podría empezarla a la vez.
+### Frente A — Mano del jugador: retoques del agarre
+Lo que quedó tras la mano de cinco dedos y el agarre por pieza.
+- [ ] Oposición pulgar-índice de 80° a 160° según la pieza: el pulgar cierra a lo largo de los dedos y no de lado, así que se ve como garra sobre la cabeza, no como pinza diametral.
+- [ ] Con agarres bajos (torre) los dedos que no tocan pueden quedar hasta 5 mm bajo la mesa: falta límite de suelo para ellos.
+- [ ] Dama y rey: el pulgar queda alto sobre la corona.
+- [ ] Pluma: el eje atraviesa un poco los dedos.
+- [ ] Reloj: variante de pulsar con los dedos juntos.
+- [ ] Medir el coste de la resolución de dedos en el juego (dos brazos con IK, 16 mesas) en una máquina modesta.
 
 ### Frente B — Pulido de animaciones
 - [ ] El puño al máximo de los clips (`curl` ~80) no cierra del todo y entre dedos curvados se ve el canto plano de la palma.

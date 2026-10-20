@@ -14,7 +14,7 @@ extends Node3D
 ## Cuando no hay trabajo (`set_active(false)`) el IK se desvanece y el brazo vuelve a la
 ## animación del personaje (reposo, pensar, etc.).
 
-enum Pose { OPEN, PINCH, GRIP }
+enum Pose { OPEN, PINCH, GRIP, POINT }
 
 ## Alcance cómodo de la muñeca desde el hombro (el brazo mide ~0,59 m).
 const REACH_COMFORT := 0.55
@@ -31,18 +31,27 @@ const ELBOW_MARGIN := 0.05
 const ELBOW_PREF := deg_to_rad(-50.0)
 const ELBOW_MAX := deg_to_rad(70.0)
 const ELBOW_BACK := 0.35
-## Punto de pinza en el sistema local de la mano (Y = hacia los dedos): cerca de la yema.
-const PINCH_Y := 0.165
-const PINCH_PALM := 0.012
+## Radio del eje de pinza cuando no hay agarre, y de la pluma.
+const DEFAULT_R := 0.014
+const PEN_R := 0.0045
+## Flexión del índice al pulsar con la yema (casi extendido).
+const POINT_C := 0.12
+## Pitch con el que se planea la pinza de la pluma y la mano sin agarre (grados).
+const PLAN_PITCH := 55.0
+## Distancia (m) del punto de pinza a la pieza a la que la mano ya adopta la orientación de agarre.
+const GRASP_NEAR := 0.02
+const GRASP_FAR := 0.11
 ## Geometría de la figura sentada (espacio local de la figura), medida con `sit_idle`.
 const PIVOT := Vector3(0.0, 0.61, 0.03)
 const CHEST := Vector3(0.0, 0.7387, 0.0481)
 const UPPER_R := Vector3(-0.18, 0.8919, 0.0907)
-## Cierre (dedos, pulgar) en radianes de cada pose.
+## Flexión de cada dedo (pulgar, índice, medio, anular, meñique) de cada pose, en las unidades
+## de `ArmPoseModifier` (0 = abierto). Con un agarre activo, PINCH cierra hasta tocar la pieza.
 const POSE_CURLS := {
-	Pose.OPEN: Vector2(0.15, 0.0),
-	Pose.PINCH: Vector2(0.75, 0.55),
-	Pose.GRIP: Vector2(1.35, 0.9),
+	Pose.OPEN: [0.05, 0.12, 0.16, 0.20, 0.26],
+	Pose.PINCH: [0.55, 0.60, 0.9, 1.2, 1.3],
+	Pose.GRIP: [0.90, 1.20, 1.30, 1.35, 1.40],
+	Pose.POINT: [0.70, 0.12, 1.10, 1.25, 1.30],
 }
 
 var figure: SeatedFigure
@@ -66,7 +75,18 @@ var _phase := Vector3(1.3, 4.1, 2.7)
 var _time: float = 0.0
 var _active: bool = false
 var _influence: float = 0.0
-var _curl := Vector2(0.15, 0.0)
+var _curls := PackedFloat32Array([0.05, 0.12, 0.16, 0.2, 0.26])
+## Cuánto se cierra la mano sobre el agarre activo (0 = abierta, 1 = tocando) y cuánto señala.
+var _grasp_w: float = 0.0
+var _point_w: float = 0.0
+## Agarre activo: datos de `PieceFactory.grasp_for` (o de una herramienta); vacío = ninguno.
+var _grasp: Dictionary = {}
+var _grasp_kind: StringName = &""
+var _grasp_node: Node3D = null
+var _grasp_data: Dictionary = {}
+var _pinch_cur := Vector3(-0.012, 0.165, 0.0)
+var _pinch_init: bool = false
+var _plan_swing: float = 0.0
 var _pose_tween: Tween
 var _influence_tween: Tween
 var _hand_basis := Basis.IDENTITY
@@ -95,7 +115,17 @@ func setup(p_figure: SeatedFigure, p_side: StringName) -> void:
 	add_child(carry_anchor)
 	figure.skeleton().skeleton_updated.connect(_update_anchor)
 	_grip = shoulder_position() + figure.global_basis * Vector3(0.0, -0.3, 0.45)
-	_set_curl(_curl)
+	_set_curls(POSE_CURLS[Pose.OPEN])
+	_prewarm_plans()
+
+
+## Calcula de antemano los planes de pinza de cada pieza y de la pluma (el primero cuesta ~5 ms).
+func _prewarm_plans() -> void:
+	for t in [ChessPiece.PAWN, ChessPiece.ROOK, ChessPiece.KNIGHT, ChessPiece.BISHOP, ChessPiece.QUEEN, ChessPiece.KING]:
+		var g := PieceFactory.grasp_for(t)
+		hand_modifier.pinch_plan(maxf(float(g.radius), 0.0045), deg_to_rad(float(g.pitch)), deg_to_rad(float(g.roll)))
+	hand_modifier.pinch_plan(DEFAULT_R, deg_to_rad(PLAN_PITCH), 0.0)
+	hand_modifier.pinch_plan(PEN_R, deg_to_rad(PLAN_PITCH), 0.0)
 
 
 func shoulder_position() -> Vector3:
@@ -179,20 +209,20 @@ func _process(delta: float) -> void:
 
 
 func _update_arm() -> void:
-	# Orientación de la mano: dedos hacia delante y abajo según `_pitch`, palma abajo.
+	var dt := get_process_delta_time()
+	_ensure_grasp()
+	# Orientación de la mano: dedos hacia delante y abajo según el pitch, palma abajo. Cerca de la
+	# pieza el pitch pasa suavemente al del agarre (la palma mira a la pieza).
 	var to := _grip - shoulder_position()
 	var flat := Vector3(to.x, 0.0, to.z)
 	var fwd := figure.global_basis * Vector3(0, 0, 1)
 	var dir_h := fwd if flat.length() < 0.02 else flat.normalized()
-	var d := (dir_h * cos(_pitch) + Vector3.DOWN * sin(_pitch)).normalized()
-	var up_perp := (Vector3.UP - d * d.dot(Vector3.UP)).normalized()
-	var x_axis := up_perp * _pal
-	var b := Basis(x_axis, d, x_axis.cross(d))
-	if absf(_roll) > 0.0001:
-		b = b * Basis(Vector3(0, 1, 0), _roll)
-	_hand_basis = b.orthonormalized()
+	_hand_basis = basis_for(dir_h, _effective_pitch(), _effective_roll(), _pal)
 	hand_modifier.hand_basis = _hand_basis
-	var wrist := _grip - _hand_basis * _pinch_local() + _tremor_offset()
+	var pt := _pinch_target()
+	_pinch_cur = pt if not _pinch_init else _pinch_cur.lerp(pt, 1.0 - exp(-25.0 * dt))
+	_pinch_init = true
+	var wrist := _grip - _hand_basis * _pinch_cur + _tremor_offset()
 
 	# Inclinación del torso para que la muñeca quede al alcance.
 	var inv := figure.global_transform.affine_inverse()
@@ -218,9 +248,7 @@ func _update_arm() -> void:
 
 	_update_pole(sh, w_local)
 
-	# Dedos.
-	hand_modifier.finger_curl = _curl.x
-	hand_modifier.thumb_curl = _curl.y
+	_feed_fingers(dt)
 
 
 ## Polo del codo, recalculado cada fotograma (espacio local de la figura). El codo se coloca
@@ -255,9 +283,76 @@ func _update_pole(sh: Vector3, wrist: Vector3) -> void:
 	pole.position = sh + u * a + (e1 * cos(_elbow_angle) + e2 * sin(_elbow_angle)) * (h + 0.3)
 
 
+## Base de la mano: Y hacia los dedos (hacia `dir_h` e inclinada `pitch` rad hacia abajo), palma
+## abajo; `roll` gira sobre Y. `pal` = +1 (R) / -1 (L).
+static func basis_for(dir_h: Vector3, pitch: float, roll: float, pal: float) -> Basis:
+	var d := (dir_h * cos(pitch) + Vector3.DOWN * sin(pitch)).normalized()
+	var up_perp := (Vector3.UP - d * d.dot(Vector3.UP)).normalized()
+	var x_axis := up_perp * pal
+	var b := Basis(x_axis, d, x_axis.cross(d))
+	if absf(roll) > 0.0001:
+		b = b * Basis(Vector3(0, 1, 0), roll)
+	return b.orthonormalized()
+
+
+## Punto de pinza en el espacio de la mano (suavizado): donde queda el eje de la pieza (o la
+## pluma) entre las yemas.
 func _pinch_local() -> Vector3:
-	# Normal de la palma: -X local en R, +X en L; la pinza queda un poco hacia la palma.
-	return Vector3(-_pal * PINCH_PALM, PINCH_Y, 0.0)
+	return _pinch_cur
+
+
+## Punto de pinza deseado (espacio de la mano): el eje de la pieza entre las yemas de pulgar e
+## índice, derivado de la geometría real de los dedos (`ArmPoseModifier.pinch_plan`). Con la pose
+## POINT es la yema del índice.
+func _pinch_target() -> Vector3:
+	var r: float = DEFAULT_R
+	# Pitch y giro fijos (los del agarre o unos por defecto): el plan se calcula una vez por radio.
+	var pitch := deg_to_rad(PLAN_PITCH)
+	var roll := 0.0
+	if not _grasp.is_empty():
+		r = maxf(float(_grasp.get("radius", DEFAULT_R)), 0.0045)
+		if float(_grasp.get("pitch", -1.0)) > 0.0:
+			pitch = deg_to_rad(float(_grasp.pitch))
+			roll = deg_to_rad(float(_grasp.get("roll", 0.0)))
+	var plan: Dictionary = hand_modifier.pinch_plan(r, pitch, roll)
+	_plan_swing = float(plan.get("sw", 0.0))
+	var a: Vector3 = plan.a
+	if _point_w > 0.001:
+		a = a.lerp(hand_modifier.fingertip_point(ArmPoseModifier.INDEX, POINT_C), _point_w)
+	return a
+
+
+func _axis_dir() -> Vector3:
+	if _grasp_kind == &"tool" and carried != null and is_instance_valid(carried):
+		return carried.global_basis.x.normalized()
+	return Vector3.UP
+
+
+## Cuánto domina el agarre sobre la orientación pedida: 1 con la pieza en la mano o con el punto de
+## pinza sobre ella, 0 lejos (la mano sigue la orientación del traslado).
+func _grasp_weight() -> float:
+	if _grasp.is_empty() or _grasp_kind != &"piece":
+		return 0.0
+	if carried != null or _grasp_node == null or not is_instance_valid(_grasp_node):
+		return 1.0
+	var p := _grasp_node.global_position + Vector3(0, float(_grasp.height), 0)
+	return 1.0 - smoothstep(GRASP_NEAR, GRASP_FAR, _grip.distance_to(p))
+
+
+## Pitch efectivo: el pedido por el gesto, llevado al del agarre cuando la mano está sobre la pieza.
+func _effective_pitch() -> float:
+	var w := _grasp_weight()
+	if w <= 0.0:
+		return _pitch
+	return lerp_angle(_pitch, deg_to_rad(float(_grasp.pitch)), w)
+
+
+## Giro efectivo sobre los dedos: palma de lado (pulgar arriba) al agarrar.
+func _effective_roll() -> float:
+	var w := _grasp_weight()
+	if w <= 0.0:
+		return _roll
+	return lerp_angle(_roll, deg_to_rad(float(_grasp.get("roll", 0.0))) * _pal, w)
 
 
 ## Hombro (raíz del brazo) tras inclinar el torso `phi` radianes, en espacio local de la figura.
@@ -308,6 +403,8 @@ func _update_anchor() -> void:
 
 ## La pieza pasa a colgar del ancla de la mano, derecha, con la pinza a `grip_h` de su base.
 func attach_piece(piece: Node3D, grip_h: float) -> void:
+	if _grasp_node != piece or _grasp.is_empty():
+		begin_grasp(piece)
 	var yaw := piece.global_rotation.y
 	piece.reparent(carry_anchor, false)
 	piece.position = Vector3(0.0, -grip_h, 0.0)
@@ -321,34 +418,124 @@ func attach_tool(tool_node: Node3D, offset: Vector3, basis: Basis) -> void:
 	tool_node.reparent(carry_anchor, false)
 	tool_node.transform = Transform3D(basis, offset)
 	carried = tool_node
+	_begin_tool_grasp(tool_node)
 
 
 ## Suelta la pieza (sigue siendo hija del ancla hasta que el tablero la reciba).
 func release_piece() -> Node3D:
 	var p := carried
 	carried = null
+	end_grasp()
 	return p
+
+
+# --- Agarre ---------------------------------------------------------------------------
+
+## Empieza a agarrar `piece` (un nodo de `PieceFactory`, con su meta `code`): la mano se
+## orienta hacia ella al acercarse y, con la pose PINCH, los dedos se cierran hasta tocarla.
+## Llamarlo antes de alcanzarla; `attach_piece` lo hace sola si no se llamó.
+func begin_grasp(piece: Node3D) -> void:
+	if piece == null or not piece.has_meta("code"):
+		return
+	_grasp = PieceFactory.grasp_for(int(piece.get_meta("code")))
+	_grasp_kind = &"piece"
+	_grasp_node = piece
+
+
+## Fin del agarre (se llama sola al soltar con `release_piece`).
+func end_grasp() -> void:
+	_grasp = {}
+	_grasp_kind = &""
+	_grasp_node = null
+	hand_modifier.grasp = {}
+
+
+func has_grasp() -> bool:
+	return not _grasp.is_empty()
+
+
+func _begin_tool_grasp(tool_node: Node3D) -> void:
+	_grasp = {
+		"radius": PEN_R, "pitch": -1.0, "height": 0.0,
+		"contact": PackedInt32Array([ArmPoseModifier.THUMB, ArmPoseModifier.INDEX, ArmPoseModifier.MIDDLE]),
+		"profile": PackedFloat32Array([PEN_R, PEN_R]), "step": 1.0,
+	}
+	_grasp_kind = &"tool"
+	_grasp_node = tool_node
+
+
+## Si algo cuelga de la mano sin pasar por `attach_*`, se deduce el agarre (pieza o herramienta).
+func _ensure_grasp() -> void:
+	if carried == null or not _grasp.is_empty() or not is_instance_valid(carried):
+		return
+	if carried.has_meta("code"):
+		begin_grasp(carried)
+	else:
+		_begin_tool_grasp(carried)
+
+
+## Pasa a los dedos las flexiones, el agarre y el temblor de este fotograma.
+func _feed_fingers(dt: float) -> void:
+	var m := hand_modifier
+	m.curls = _curls
+	m.time = _time
+	m.dt = dt
+	m.tremor = lerpf(0.006, 0.07, pow(clampf(stress, 0.0, 1.0), 1.5))
+	if _grasp.is_empty():
+		m.grasp = {}
+		return
+	var base := Vector3.ZERO
+	var dir := Vector3.UP
+	if _grasp_kind == &"tool" and carried != null and is_instance_valid(carried):
+		base = carried.global_position
+		dir = carried.global_basis.x.normalized()
+	elif _grasp_node != null and is_instance_valid(_grasp_node):
+		base = _grasp_node.global_position
+	else:
+		base = _grip - Vector3(0, float(_grasp.height), 0)
+	_grasp_data["axis_point"] = base
+	_grasp_data["axis_dir"] = dir
+	_grasp_data["profile"] = _grasp.profile
+	_grasp_data["step"] = _grasp.step
+	_grasp_data["contact"] = _grasp.contact
+	_grasp_data["weight"] = _grasp_w
+	_grasp_data["relax"] = 0.7
+	_grasp_data["thumb_swing"] = _plan_swing
+	m.grasp = _grasp_data
 
 
 # --- Poses de dedos -----------------------------------------------------------------
 
-## Mezcla hacia una pose en `duration` segundos (corrutina: se puede esperar).
+## Mezcla hacia una pose en `duration` segundos (corrutina: se puede esperar). PINCH con un
+## agarre activo cierra los dedos hasta tocar la pieza; POINT estira el índice (pulsar el reloj).
 func set_pose(pose: Pose, duration: float = 0.2) -> void:
 	if _pose_tween != null and _pose_tween.is_valid():
 		_pose_tween.kill()
-	var goal: Vector2 = POSE_CURLS[pose]
+	var goal := PackedFloat32Array(POSE_CURLS[pose])
+	var g_goal := 1.0 if pose == Pose.PINCH else 0.0
+	var p_goal := 1.0 if pose == Pose.POINT else 0.0
 	if duration <= 0.0 or not is_inside_tree():
-		_set_curl(goal)
+		_set_curls(goal)
+		_grasp_w = g_goal
+		_point_w = p_goal
 		return
-	var from := _curl
+	var from := _curls.duplicate()
+	var g0 := _grasp_w
+	var p0 := _point_w
 	_pose_tween = create_tween()
-	_pose_tween.tween_method(func(t: float) -> void: _set_curl(from.lerp(goal, t)), 0.0, 1.0, duration) \
+	_pose_tween.tween_method(func(t: float) -> void:
+		var c := PackedFloat32Array()
+		c.resize(5)
+		for i in 5:
+			c[i] = lerpf(from[i], goal[i], t)
+		_set_curls(c)
+		_grasp_w = lerpf(g0, g_goal, t)
+		_point_w = lerpf(p0, p_goal, t), 0.0, 1.0, duration) \
 			.set_trans(Tween.TRANS_SINE)
 	await _pose_tween.finished
 
 
-func _set_curl(c: Vector2) -> void:
-	_curl = c
+func _set_curls(c: PackedFloat32Array) -> void:
+	_curls = c
 	if hand_modifier != null:
-		hand_modifier.finger_curl = c.x
-		hand_modifier.thumb_curl = c.y
+		hand_modifier.curls = c

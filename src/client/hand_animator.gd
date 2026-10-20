@@ -70,6 +70,10 @@ var phase: StringName = &"idle"
 
 var _queue: Array[Dictionary] = []
 var _running: bool = false
+## Cola y estado de la escritura cuando se hace con la OTRA mano (`write_rig != rig`): corre en
+## paralelo a la cola de acciones, sin interrumpirse por jugadas ni trampas.
+var _wqueue: Array[Dictionary] = []
+var _writing: bool = false
 var _job_speed: float = 1.0
 var _rng := RandomNumberGenerator.new()
 var _clock: float = 0.0
@@ -103,7 +107,23 @@ func set_write_rig(r: HandRig, rest: Vector3) -> void:
 
 
 func is_busy() -> bool:
-	return _running or not _queue.is_empty()
+	return _running or not _queue.is_empty() or _writing or not _wqueue.is_empty()
+
+
+## ¿Se escribe con la otra mano? Entonces la anotación va en paralelo a jugadas y trampas.
+func _parallel_write() -> bool:
+	return write_rig != null and write_rig != rig
+
+
+## ¿La anotación va a la cola paralela de la otra mano?
+func _goes_to_write_queue(job: Dictionary) -> bool:
+	return job.kind == "write" and _parallel_write()
+
+
+## ¿Debe la escritura dejar la pluma ahora? Solo si hay una acción en espera y escribe la misma
+## mano que actúa (con la otra mano nunca hace falta el mismo brazo).
+func _write_should_abort() -> bool:
+	return not _parallel_write() and _action_waiting()
 
 
 ## Como `is_busy`, pero ignora la anotación en la planilla: la escritura se interrumpe sola
@@ -135,8 +155,12 @@ func enqueue_hesitate(uci: String) -> void:
 
 func _process(delta: float) -> void:
 	_clock += delta
-	if write_rig != null and write_rig != rig:
+	if _parallel_write():
 		write_rig.stress = rig.stress
+		# Con las dos manos a la vez, el tronco lo sigue la que juega; si no, la que escribe.
+		if _writing:
+			rig.drives_posture = _running
+			write_rig.drives_posture = not _running
 
 
 ## Pone en cola el gesto de una trampa. `kind` es `CheatDef.Kind`; `to_sq` es
@@ -176,6 +200,11 @@ func _open_cheat_job() -> Dictionary:
 
 
 func _push(job: Dictionary) -> void:
+	if _goes_to_write_queue(job):
+		# La otra mano escribe: su propia cola, sin esperar ni interrumpir a la de acciones.
+		_wqueue.append(job)
+		_pump_write()
+		return
 	if job.kind != "write":
 		board.hold_sync()
 	_queue.append(job)
@@ -232,8 +261,38 @@ func _pump() -> void:
 	_running = false
 	if not is_inside_tree():
 		return
+	if _writing:
+		_set_phase(&"write")
+		return
 	_set_phase(&"idle")
 	idle.emit()
+
+
+## Cola de escritura de la mano libre (rival): anota una a una sin tocar el cerrojo de movimiento
+## ni el estado de la cola de acciones; al acabar deja el tronco al cuidado de la mano que juega.
+func _pump_write() -> void:
+	if _writing:
+		return
+	_writing = true
+	while not _wqueue.is_empty():
+		if not is_inside_tree() or not is_instance_valid(board):
+			_wqueue.clear()
+			break
+		var job: Dictionary = _wqueue.pop_front()
+		await _run_write(job)
+		if not is_inside_tree() or not is_instance_valid(board):
+			_wqueue.clear()
+			break
+		job_done.emit(job.kind)
+	_writing = false
+	if not is_inside_tree():
+		return
+	if write_rig != null:
+		write_rig.drives_posture = false
+	rig.drives_posture = true
+	if not _running:
+		_set_phase(&"idle")
+		idle.emit()
 
 
 
@@ -262,10 +321,12 @@ func _run_move(job: Dictionary) -> void:
 	# el cerrojo de movimiento y se puede interrumpir con una jugada o una trampa.
 	await _press_clock()
 	if sheet != null and sheet.has_pending(color):
-		if write_rig != rig:
-			# La otra mano escribe: la del reloj se retira y descansa.
+		if _parallel_write():
+			# La otra mano escribe a la vez: la anotación arranca ya y la del reloj se retira.
+			_push({"kind": "write"})
 			await _return_home()
-		_push({"kind": "write"})
+		else:
+			_push({"kind": "write"})
 	else:
 		await _return_home()
 
@@ -287,11 +348,13 @@ func _run_hesitate(job: Dictionary) -> void:
 	var code := int(node.get_meta("code"))
 	var grip := node.global_position + Vector3(0, PieceFactory.grip_height(code), 0)
 	_set_phase(&"hesitate")
+	rig.begin_grasp(node)
 	var wps := _lift_wps(rig)
 	wps.append(_wp(grip + Vector3(0, 0.09, 0), 58.0))
 	wps.append(_wp(grip + Vector3(0, 0.025, 0), 60.0, 0.5))
 	await _flow(rig, wps, _dur(0.75), {"fitts": true, "events": [_ev(0.05, func() -> void: rig.set_pose(HandRig.Pose.OPEN, _dur(0.25)))]})
 	await _pause(_rng.randf_range(0.9, 1.4))
+	rig.end_grasp()
 	await _return_home()
 
 
@@ -311,6 +374,7 @@ func _carry(from_sq: int, to_sq: int, to_pile: bool) -> void:
 	# vertical y despacio sobre la pieza (fase de precisión). Los dedos se abren al salir y se
 	# cierran un poco antes de llegar.
 	_set_phase(&"reach")
+	rig.begin_grasp(node)
 	var wps := _lift_wps(rig)
 	wps.append(_wp(grip_a + Vector3(0, 0.10, 0), 58.0, 1.0))
 	wps.append(_wp(grip_a + Vector3(0, 0.04, 0), 60.0, 0.7))
@@ -368,7 +432,7 @@ func _run_cheat(job: Dictionary) -> void:
 	if job.resolved and not job.applied:
 		return
 	# El gesto debe acabar cuando el servidor aplica el cambio: se ajusta al tiempo que queda.
-	var total := maxf(job.deadline - _clock, CHEAT_MIN_TIME)
+	var total := _cheat_total(job)
 	match int(job.cheat_kind):
 		CheatDef.Kind.STEAL:
 			await _cheat_steal(job, total)
@@ -381,7 +445,15 @@ func _run_cheat(job: Dictionary) -> void:
 	await _return_home_cheat()
 
 
-## Empujón: la mano empuja la pieza una casilla (también en diagonal), sin levantarla.
+## Duración de la curva del gesto: el tiempo que falta hasta el `deadline` del servidor.
+func _cheat_total(job: Dictionary) -> float:
+	return maxf(float(job.deadline) - _clock, CHEAT_MIN_TIME)
+
+
+## Empujón: la mano empuja la pieza una casilla (también en diagonal), sin levantarla. Es UNA
+## curva de duración `total`: llega por encima y por detrás, baja al contacto sin detenerse y
+## sigue empujando; la pieza avanza con la proyección de la mano sobre el empujón. La curva acaba
+## cuando el servidor aplica el cambio; entonces se asienta con el descentrado definitivo.
 func _cheat_nudge(job: Dictionary, total: float) -> bool:
 	var node: Node3D = board.take_piece(job.from)
 	if node == null:
@@ -390,110 +462,150 @@ func _cheat_nudge(job: Dictionary, total: float) -> bool:
 	var start := node.global_position
 	var delta := board.square_to_world(job.to) - board.square_to_world(job.from)
 	delta.y = 0.0
-	var dir := delta.normalized()
-	var contact := start + Vector3(0, gh * 0.7, 0) - dir * 0.02
+	var plan := _plan_nudge(start, gh, delta)
+	var contact: Vector3 = plan.contact
+	var dir: Vector3 = plan.dir
+	var length := delta.length()
+	var st := {"pushing": false}
+	var step := func(_s: float, _seg: float) -> void:
+		# La pieza va donde la empuja la mano (solo avanza, nunca retrocede de su casilla).
+		var t := clampf((rig.get_grip() - contact).dot(dir) / maxf(length, 1e-4), 0.0, 1.0)
+		if t > 0.0 and not st.pushing:
+			st.pushing = true
+			_set_phase(&"cheat")
+		node.global_position = start + delta * t
 	_set_phase(&"reach")
 	rig.set_pose(HandRig.Pose.GRIP, 0.25)
-	if not await _cmove(job, contact + Vector3(0, 0.07, 0) - dir * 0.02, total * 0.40, 0.08, 72.0):
-		return _cheat_restore(node, job.from)
-	if not await _cmove(job, contact, total * 0.12, 0.0, 78.0):
-		return _cheat_restore(node, job.from)
-	_set_phase(&"cheat")
-	var step := func(t: float) -> void:
-		node.global_position = start + delta * t
-	if not await _cmove(job, contact + delta, total * 0.38, 0.0, 78.0, step):
+	if not await _flow(rig, plan.wps, total, {"job": job, "on_step": step}):
 		node.global_position = start
 		return _cheat_restore(node, job.from)
 	if not await _wait_resolved(job):
 		node.global_position = start
 		return _cheat_restore(node, job.from)
 	board.put_piece(node, job.to, job.offset)
-	await _cmove(null, contact + delta + Vector3(0, 0.06, 0), total * 0.10, 0.0, 70.0)
+	_at_contact = true
 	return true
 
 
-## Pieza a distancia 2 o más: pinza, se levanta, cruza en arco y se posa en el destino.
+## Pieza a distancia 2 o más: un solo gesto (alcanzar, pinza, levantar, cruzar en arco, posar).
 func _cheat_drag(job: Dictionary, total: float) -> bool:
-	var node: Node3D = board.take_piece(job.from)
-	if node == null:
-		return false
-	var gh := PieceFactory.grip_height(int(node.get_meta("code")))
-	var grip_a := node.global_position + Vector3(0, gh, 0)
-	var dest := board.square_to_world(job.to)
-	var clear_y := BoardView.BOARD_TOP + KING_HEIGHT + CARRY_CLEARANCE + gh
-	_set_phase(&"reach")
-	rig.set_pose(HandRig.Pose.OPEN, 0.2)
-	if not await _cmove(job, grip_a + Vector3(0, 0.06, 0), total * 0.28, 0.08, 58.0):
-		return _cheat_restore(node, job.from)
-	_set_phase(&"grab")
-	if not await _cmove(job, grip_a, total * 0.10, 0.0, 62.0):
-		return _cheat_restore(node, job.from)
-	rig.set_pose(HandRig.Pose.PINCH, 0.12)
-	rig.attach_piece(node, gh)
-	_set_phase(&"cheat")
-	var drop_y := dest.y + gh + 0.004
-	if not await _cmove(job, Vector3(grip_a.x, clear_y, grip_a.z), total * 0.12, 0.0, 58.0):
-		return await _cheat_return_piece(job)
-	if not await _cmove(job, Vector3(dest.x, clear_y, dest.z), total * 0.30, 0.025, 58.0):
-		return await _cheat_return_piece(job)
-	if not await _cmove(job, Vector3(dest.x, drop_y, dest.z), total * 0.20, 0.0, 62.0):
-		return await _cheat_return_piece(job)
-	if not await _wait_resolved(job):
-		return await _cheat_return_piece(job)
-	var held := rig.release_piece()
-	board.put_piece(held, job.to, job.offset)
-	rig.set_pose(HandRig.Pose.OPEN, 0.12)
-	await _cmove(null, Vector3(dest.x, dest.y + gh + 0.07, dest.z), total * 0.10, 0.0, 55.0)
-	return true
+	return await _cheat_carry(job, total, board.square_to_world(job.to), false)
 
 
-## Robar: pinza, levanta la pieza rival y la lleva a la pila de capturas propia, donde queda.
+## Robar: igual que el arrastre, pero la pieza rival va a la pila de capturas propia, donde queda.
 func _cheat_steal(job: Dictionary, total: float) -> bool:
+	return await _cheat_carry(job, total, board.pile_slot(color, board.piles[color].size()), true)
+
+
+## Gesto de llevar una pieza (arrastre y robo): UNA curva de duración `total` por los puntos de
+## `_plan_carry`. La mano no se detiene al agarrar: la pinza se cierra al acercarse y la pieza
+## pasa a la mano al llegar al punto de agarre (`grab_seg`), a mitad de curva. La curva acaba en el
+## destino cuando el servidor aplica el cambio; solo entonces se suelta.
+func _cheat_carry(job: Dictionary, total: float, dest: Vector3, to_pile: bool) -> bool:
 	var node: Node3D = board.take_piece(job.from)
 	if node == null:
 		return false
 	var gh := PieceFactory.grip_height(int(node.get_meta("code")))
 	var grip_a := node.global_position + Vector3(0, gh, 0)
-	var clear_y := BoardView.BOARD_TOP + KING_HEIGHT + CARRY_CLEARANCE + gh
-	var slot := board.pile_slot(color, board.piles[color].size())
+	var plan := _plan_carry(grip_a, gh, dest)
+	var grab_seg: float = plan.grab_seg
+	var st := {"stage": 0}
+	var step := func(_s: float, seg: float) -> void:
+		if st.stage == 0 and seg >= grab_seg - 0.45:
+			st.stage = 1
+			_set_phase(&"grab")
+			rig.set_pose(HandRig.Pose.PINCH, 0.14)
+		if st.stage == 1 and seg >= grab_seg:
+			st.stage = 2
+			rig.attach_piece(node, gh)
+			_set_phase(&"cheat")
 	_set_phase(&"reach")
-	rig.set_pose(HandRig.Pose.OPEN, 0.2)
-	if not await _cmove(job, grip_a + Vector3(0, 0.06, 0), total * 0.28, 0.08, 58.0):
-		return _cheat_restore(node, job.from)
-	_set_phase(&"grab")
-	if not await _cmove(job, grip_a, total * 0.10, 0.0, 62.0):
-		return _cheat_restore(node, job.from)
-	rig.set_pose(HandRig.Pose.PINCH, 0.12)
-	rig.attach_piece(node, gh)
-	_set_phase(&"cheat")
-	if not await _cmove(job, Vector3(grip_a.x, clear_y, grip_a.z), total * 0.12, 0.0, 58.0):
-		return await _cheat_return_piece(job)
-	if not await _cmove(job, Vector3(slot.x, clear_y, slot.z), total * 0.30, 0.025, 58.0):
-		return await _cheat_return_piece(job)
-	if not await _cmove(job, Vector3(slot.x, slot.y + gh + 0.004, slot.z), total * 0.15, 0.0, 62.0):
-		return await _cheat_return_piece(job)
+	var events := [_ev(0.03, func() -> void: rig.set_pose(HandRig.Pose.OPEN, 0.2))]
+	if not await _flow(rig, plan.wps, total, {"job": job, "on_step": step, "events": events}):
+		return await _cheat_abort_carry(job, node)
 	if not await _wait_resolved(job):
-		return await _cheat_return_piece(job)
+		return await _cheat_abort_carry(job, node)
 	var held := rig.release_piece()
-	board.add_to_pile(held, color)
+	if to_pile:
+		board.add_to_pile(held, color)
+	else:
+		board.put_piece(held, job.to, job.offset)
 	rig.set_pose(HandRig.Pose.OPEN, 0.12)
-	await _cmove(null, Vector3(slot.x, slot.y + gh + 0.07, slot.z), total * 0.08, 0.0, 55.0)
+	_at_contact = true
 	return true
 
 
-## Abortada con la pieza en el aire: vuelve a su casilla de origen.
+## Puntos de paso del empujón desde la posición `start` de la pieza (altura de pinza `gh`) con
+## el desplazamiento horizontal `delta`: llega por encima y por detrás del contacto, baja a él y
+## sigue en línea hasta el destino. Devuelve {wps, contact, dir}.
+static func _plan_nudge(start: Vector3, gh: float, delta: Vector3) -> Dictionary:
+	var dir := delta.normalized()
+	var contact := start + Vector3(0, gh * 0.7, 0) - dir * 0.02
+	return {
+		"contact": contact,
+		"dir": dir,
+		"wps": [
+			_wp(contact + Vector3(0, 0.07, 0) - dir * 0.02, 72.0, 1.0),
+			_wp(contact, 78.0, 0.5),
+			_wp(contact + delta, 78.0, 0.8),
+		],
+	}
+
+
+## Puntos de paso del gesto de llevar una pieza desde su punto de pinza `grip_a` (altura de pinza
+## `gh`) a `dest` (base de la casilla o de la pila): baja vertical y lenta al agarre (`grab_seg`
+## = índice fraccionario del punto de agarre en la curva), sube hasta librar las piezas, cruza en
+## arco y baja despacio al soltar. Devuelve {wps, grab_seg}.
+static func _plan_carry(grip_a: Vector3, gh: float, dest: Vector3) -> Dictionary:
+	var clear_y := BoardView.BOARD_TOP + KING_HEIGHT + CARRY_CLEARANCE + gh
+	var mid := (grip_a + dest) * 0.5
+	# Dirección horizontal hacia el destino: la mano llega por el lado contrario y sale hacia él,
+	# así el agarre es el fondo redondeado de una "U" y no una inversión brusca.
+	var dir := Vector3(dest.x - grip_a.x, 0.0, dest.z - grip_a.z).normalized()
+	var wps: Array = [
+		_wp(grip_a + Vector3(0, 0.10, 0) - dir * 0.03, 58.0, 1.0),
+		_wp(grip_a + Vector3(0, 0.04, 0) - dir * 0.012, 60.0, 0.7),
+		_wp(grip_a, 62.0, 0.45),
+		_wp(grip_a + Vector3(0, (clear_y - grip_a.y) * 0.55, 0) + dir * 0.008, 58.0, 1.2),
+		_wp(Vector3(grip_a.x, clear_y, grip_a.z) + dir * 0.02, 58.0, 1.3),
+		_wp(Vector3(mid.x, clear_y + 0.02, mid.z), 58.0, 1.0),
+		_wp(Vector3(dest.x, clear_y, dest.z), 58.0, 1.1),
+		_wp(Vector3(dest.x, dest.y + gh + 0.035, dest.z), 61.0, 0.7),
+		_wp(Vector3(dest.x, dest.y + gh + 0.004, dest.z), 62.0, 0.45),
+	]
+	return {"wps": wps, "grab_seg": 3.0}
+
+
+## Aborto de un arrastre o robo: si la pieza ya está en la mano la devuelve a su casilla con un
+## gesto corto y continuo; si no, la deja donde estaba. Siempre devuelve false.
+func _cheat_abort_carry(job: Dictionary, node: Node3D) -> bool:
+	if rig.carried == null:
+		rig.set_pose(HandRig.Pose.OPEN, 0.12)
+		return _cheat_restore(node, job.from)
+	return await _cheat_return_piece(job)
+
+
+## Abortada con la pieza en el aire: vuelve a su casilla de origen en una sola curva corta
+## (sube, cruza y baja) y la deja allí.
 func _cheat_return_piece(job: Dictionary) -> bool:
 	if rig.carried == null:
 		return false
-	var gh := PieceFactory.grip_height(int(rig.carried.get_meta("code")))
+	var held := rig.carried
+	var gh := PieceFactory.grip_height(int(held.get_meta("code")))
 	var home := board.square_to_world(job.from)
 	var clear_y := BoardView.BOARD_TOP + KING_HEIGHT + CARRY_CLEARANCE + gh
-	# El gesto de regreso es corto para no alargar la trampa abortada.
-	await _cmove(null, Vector3(home.x, clear_y, home.z), 0.35, 0.03, 58.0)
-	await _cmove(null, Vector3(home.x, home.y + gh + 0.004, home.z), 0.18, 0.0, 62.0)
+	var cur := rig.get_grip()
+	var wps: Array = [
+		_wp(Vector3(cur.x, maxf(cur.y, clear_y), cur.z), 58.0, 1.4),
+		_wp(Vector3(home.x, clear_y, home.z), 58.0, 1.0),
+		_wp(Vector3(home.x, home.y + gh + 0.035, home.z), 61.0, 0.7),
+		_wp(Vector3(home.x, home.y + gh + 0.004, home.z), 62.0, 0.45),
+	]
+	# El gesto de regreso es corto para no alargar la trampa abortada (sin `job`: no se aborta).
+	await _flow(rig, wps, 0.6, {})
 	_cheat_restore(rig.release_piece(), job.from)
 	rig.set_pose(HandRig.Pose.OPEN, 0.12)
-	await _cmove(null, Vector3(home.x, home.y + gh + 0.07, home.z), 0.15, 0.0, 55.0)
+	_at_contact = true
 	return false
 
 
@@ -515,26 +627,14 @@ func _wait_resolved(job: Dictionary) -> bool:
 	return job.resolved and job.applied
 
 
-## Movimiento de la mano de una trampa con duración exacta (sin variación humana): la misma
-## curva suave y perfil de mínimo jerk que el resto de gestos, pero ajustada al tiempo dado.
-## `job` != null permite abortar: devuelve false en cuanto la trampa se cancela.
-## `on_step` recibe el progreso 0..1 (para arrastrar la pieza sin sujetarla).
-func _cmove(job: Variant, dest: Vector3, duration: float, lift: float = 0.0, pitch: float = -1.0, on_step: Callable = Callable()) -> bool:
-	var wps: Array = []
-	if lift > 0.0:
-		var mid_pitch := lerpf(rig.get_pitch_deg(), pitch, 0.5) if pitch >= 0.0 else -1.0
-		wps.append(_wp((rig.get_grip() + dest) * 0.5 + Vector3.UP * lift * 0.8, mid_pitch))
-	wps.append(_wp(dest, pitch))
-	var opts := {"job": job}
-	if on_step.is_valid():
-		opts["on_step"] = func(s: float, _seg: float) -> void: on_step.call(s)
-	return await _flow(rig, wps, duration, opts)
-
-
+## Tras soltar (o deshacer) el gesto, la mano sube y vuelve al reposo en una sola curva.
 func _return_home_cheat() -> void:
 	_set_phase(&"return")
 	rig.set_pose(HandRig.Pose.OPEN, 0.2)
-	await _cmove(null, rest_grip, 0.6, 0.05, rest_pitch)
+	var wps := _lift_wps(rig, 0.06)
+	wps.append(_wp((rig.get_grip() + rest_grip) * 0.5 + Vector3(0, 0.06, 0), -1.0, 1.0))
+	wps.append(_wp(rest_grip, rest_pitch, 0.8))
+	await _flow(rig, wps, 0.7, {})
 	rig.set_pose(HandRig.Pose.OPEN, 0.25)
 
 
@@ -547,7 +647,7 @@ func _press_clock() -> void:
 	wps.append(_wp(top + Vector3(0, 0.08, 0), 70.0, 1.0))
 	wps.append(_wp(top + Vector3(0, 0.025, 0), 73.0, 0.6))
 	wps.append(_wp(top + Vector3(0, 0.004, 0), 75.0, 0.4))
-	await _flow(rig, wps, _dur(0.7), {"fitts": true, "events": [_ev(0.05, func() -> void: rig.set_pose(HandRig.Pose.GRIP, _dur(0.2)))]})
+	await _flow(rig, wps, _dur(0.7), {"fitts": true, "events": [_ev(0.05, func() -> void: rig.set_pose(HandRig.Pose.POINT, _dur(0.2)))]})
 	clock.press_button(color)
 	clock_hit.emit(color)
 	_at_contact = true
@@ -561,15 +661,19 @@ func _press_clock() -> void:
 func _run_write(_job: Dictionary) -> void:
 	if sheet == null or not sheet.has_pending(color):
 		return
-	_set_phase(&"write")
 	var w := write_rig
-	w.drives_posture = true
-	rig.drives_posture = w == rig
-	_cur = w
+	var parallel := _parallel_write()
+	if not parallel:
+		_set_phase(&"write")
+		w.drives_posture = true
+		rig.drives_posture = w == rig
+		_cur = w
+	elif not _running:
+		_set_phase(&"write")
 	var pen := sheet.pen(color)
 	var pen_grip := sheet.pen_rest_grip(color)
 	var up := Vector3.UP
-	var abort := func() -> bool: return _action_waiting()
+	var abort := func() -> bool: return _write_should_abort()
 	var st := {"held": false, "committed": false, "tween": null}
 
 	# 1) Tomar la pluma: baja vertical y despacio; los dedos se cierran justo antes.
@@ -641,7 +745,11 @@ func _run_write(_job: Dictionary) -> void:
 	w.set_pose(HandRig.Pose.OPEN, _dur(0.12))
 	await sheet.rest_pen(color, _dur(0.2))
 	_at_contact = true
-	if _queue.is_empty():
+	if parallel:
+		# La otra mano vuelve al reposo sin tocar `_cur` (la mano que juega sigue su cola).
+		if _wqueue.is_empty():
+			await _send_write_home(w)
+	elif _queue.is_empty():
 		await _return_home()
 	elif w != rig:
 		_send_write_home(w)
@@ -664,10 +772,14 @@ func _write_abort(w: HandRig, st: Dictionary) -> void:
 		w.set_pose(HandRig.Pose.OPEN, 0.1)
 	if not st.committed:
 		sheet.clear_partial(color)
-		_queue.append({"kind": "write"})
+		if _parallel_write():
+			_wqueue.append({"kind": "write"})
+		else:
+			_queue.append({"kind": "write"})
 	if w != rig:
 		_send_write_home(w)
-	_cur = rig
+	if not _parallel_write():
+		_cur = rig
 	rig.drives_posture = true
 
 

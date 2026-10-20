@@ -16,6 +16,8 @@ extends Node3D
 ##   --shot-look=yaw,pitch  gira la cámara del jugador (grados) antes de capturar
 ##   --shot-when=rival_carry|player_carry  espera a que esa mano lleve una pieza
 ##   --shot-after=S       con shot-when, segundos extra tras empezar a llevar la pieza
+##   --shot-rel=dx,dy,dz[,fov]  cámara a ese desplazamiento del punto de pinza al capturar
+##   --shot-phase=F       espera a esa fase de la mano (reach|grab|carry|release|press|write); --shot-rival = la del rival
 ##   --players=N          jugadores del torneo (32 por defecto)
 ##   --clock=S            segundos por jugador en cada partida (180 por defecto)
 ##   --start-round=N      salta a la ronda N (el humano gana las anteriores, simuladas)
@@ -837,9 +839,14 @@ func _update_screenshot() -> void:
 	if _scene_elapsed < delay:
 		return
 	var when := str(_args.get("shot-when", ""))
+	if _args.has("shot-phase"):
+		# Fase concreta de la mano (reach, grab, carry, release, press, write...) del humano, o del
+		# rival con --shot-rival.
+		when = "phase"
 	if when != "":
-		var who := animators[rival_color] if when == "rival_carry" else animators[human_color]
-		if who.phase != &"carry":
+		var who := animators[rival_color] if (when == "rival_carry" or _args.has("shot-rival")) else animators[human_color]
+		var want_phase := StringName(str(_args.get("shot-phase", "carry")))
+		if who.phase != want_phase:
 			if _scene_elapsed > delay + 60.0:
 				push_warning("No hubo fase 'carry' para la captura.")
 				_shot_done = true
@@ -854,6 +861,19 @@ func _update_screenshot() -> void:
 
 
 func _take_screenshot() -> void:
+	var shooter := animators[rival_color] if _args.has("shot-rival") else animators[human_color]
+	var at := shooter.rig.carry_anchor.global_position
+	print("[captura] punto de pinza de la mano: ", at)
+	if _args.has("shot-rel"):
+		# Cámara pegada a la mano: desplazamiento dx,dy,dz[,fov] respecto del punto de pinza.
+		var v := str(_args["shot-rel"]).split(",")
+		if v.size() >= 3:
+			var cam := player.camera
+			cam.top_level = true
+			if v.size() >= 4:
+				cam.fov = float(v[3])
+			cam.look_at_from_position(at + Vector3(float(v[0]), float(v[1]), float(v[2])), at, Vector3.UP)
+	await RenderingServer.frame_post_draw
 	await RenderingServer.frame_post_draw
 	if not is_inside_tree():
 		return
