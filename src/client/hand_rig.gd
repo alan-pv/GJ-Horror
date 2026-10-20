@@ -119,14 +119,28 @@ func get_pitch_deg() -> float:
 
 ## Activa el IK (con un fundido de `fade` s) o devuelve el brazo a la animación del personaje.
 func set_active(on: bool, fade: float = 0.3) -> void:
-	_active = on
+	set_ik_weight(1.0 if on else 0.0, fade)
+
+
+## Lleva la influencia del IK a `weight` (0 = solo la animación del personaje, 1 = la muñeca va al
+## objetivo) con una mezcla suave de `seconds`. Con 0 el brazo muestra la animación (p. ej. la mano
+## en la cara de `sit_wait__chin`); con 1 obedece a `set_grip`.
+func set_ik_weight(weight: float, seconds: float = 0.4) -> void:
+	weight = clampf(weight, 0.0, 1.0)
+	_active = weight > 0.001
 	if _influence_tween != null and _influence_tween.is_valid():
 		_influence_tween.kill()
-	if fade <= 0.0 or not is_inside_tree():
-		_apply_influence(1.0 if on else 0.0)
+	if seconds <= 0.0 or not is_inside_tree():
+		_apply_influence(weight)
 		return
 	_influence_tween = create_tween()
-	_influence_tween.tween_method(_apply_influence, _influence, 1.0 if on else 0.0, fade)
+	_influence_tween.tween_method(_apply_influence, _influence, weight, seconds) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+
+## Influencia actual del IK (0..1).
+func ik_weight() -> float:
+	return _influence
 
 
 ## Deja la mano quieta en `world_pos` (brazo sin animador).

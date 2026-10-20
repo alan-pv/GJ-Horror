@@ -30,6 +30,11 @@ var fleeing: bool = false
 var fled: bool = false
 ## Nodo del que se oye venir al árbitro (para mirarlo).
 var threat: Node3D
+## Mesa del condenado (-1 si no se conoce): origen del aviso de súplica.
+var table: int = -1
+## Segundos entre avisos de llanto/súplica a quienes lo oyen (`Distraction` tipo `plea`).
+const PLEA_EVERY := Vector2(6.0, 11.0)
+var _next_plea: float = 2.0
 
 var _voice: AudioStreamPlayer3D
 var _loop: AudioStreamPlayer3D
@@ -108,6 +113,12 @@ func _process(delta: float) -> void:
 		figure.look_at_point(tp)
 	elif mode == Mode.CRY or mode == Mode.SOB:
 		figure.set_look(0.0, -0.45)
+	# Llanto o súplica: avisa a quien lo oiga (los demás pueden voltear). Los paralizados callan.
+	_next_plea -= delta
+	if _next_plea <= 0.0:
+		_next_plea = _rng.randf_range(PLEA_EVERY.x, PLEA_EVERY.y)
+		if mode != Mode.FROZEN and is_inside_tree():
+			Distraction.broadcast(self, &"plea", figure.head_global_position(), table)
 	# Lloriqueos sueltos sobre la respiración o el sollozo.
 	_next_whimper -= delta
 	if _next_whimper <= 0.0:

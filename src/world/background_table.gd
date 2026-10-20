@@ -5,10 +5,13 @@ extends Node3D
 ## su partida no se vea, y el tablero de piezas estáticas que refleja la partida real.
 ##
 ## Comportamiento:
-##  - alternan `sit_idle` / `sit_think` / `sit_nervous` (a veces `sit_write`) según de quién
-##    es el turno y el reloj de su `BackgroundMatch`;
+##  - alternan los roles `sit_wait` / `sit_think` / `sit_nervous` (a veces `sit_write`) según de
+##    quién es el turno y el reloj de su `BackgroundMatch`, cada 5-12 s y sin pisar una mezcla;
 ##  - miran alrededor con `set_look`: al tablero, a otras mesas, a su rival, al árbitro si
-##    pasa cerca, hacia los ruidos (`notice_noise`) y, rara vez, al jugador;
+##    pasa cerca, hacia las distracciones (`notice_event`, mismas probabilidades que los bots,
+##    ver `Distraction`; los eventos fuertes además les hacen `sit_startle`) y, rara vez, al jugador;
+##  - rara vez se les cae una pieza (`sit_pick_up`, aviso `piece_drop`) y al caer la bandera de
+##    un reloj suena un pitido (aviso `flag`);
 ##  - cuando su partida hace una jugada, quien movió reproduce `sit_move_piece` ->
 ##    `sit_press_clock` -> `sit_write` en secuencia (`play_once`); el tablero cambia a la
 ##    mitad del gesto;
@@ -35,8 +38,12 @@ const MOVE_BLEND := 0.7
 const PRESS_BLEND := 0.4
 const WRITE_BLEND := 0.6
 
-const POSES_TURN := {&"sit_think": 6.0, &"sit_idle": 2.0}
-const POSES_WAIT := {&"sit_idle": 5.0, &"sit_think": 2.0, &"sit_write": 0.6}
+## Pesos de los roles de reposo cuando es su turno / cuando espera (`sit_write` es un clip directo).
+const POSES_TURN := {&"sit_think": 6.0, &"sit_wait": 2.0}
+const POSES_WAIT := {&"sit_wait": 6.0, &"sit_think": 1.5, &"sit_write": 0.6}
+const POSE_DWELL := Vector2(5.0, 12.0)
+## Promedio de segundos entre dos caídas de pieza de un mismo asiento.
+const DROP_MEAN := 1500.0
 
 var table_index: int = -1
 var hall: Hall
@@ -48,7 +55,7 @@ var figures: Array[CharacterFigure] = [null, null]
 var _rng := RandomNumberGenerator.new()
 var _clock: float = 0.0
 ## Por asiento: {present, stage, gen, until, pose_t, look_t, calm, noise_pos, noise_until, manual}.
-## stage: ambient | move | press | write | relief | doomed | condemned | left.
+## stage: ambient | move | press | write | relief | doomed | startle | pick | lent | condemned | left.
 var _seats: Array[Dictionary] = []
 var _decide_acc: float = 0.0
 var _anim_acc: float = 0.0
@@ -71,7 +78,8 @@ func setup(p_hall: Hall, index: int, p_bg: BackgroundMatch, present: Array, seed
 		var s := {
 			"present": bool(present[color]), "stage": &"ambient", "gen": 0, "until": 0.0,
 			"pose_t": _rng.randf_range(0.0, 3.0), "look_t": _rng.randf_range(0.2, 3.0), "calm": false,
-			"noise_pos": Vector3.ZERO, "noise_until": -1.0, "manual": false, "flinch": false,
+			"noise_pos": Vector3.ZERO, "noise_until": -1.0, "manual": false,
+			"factor": _rng.randf_range(0.7, 1.3),
 		}
 		_seats.append(s)
 		if not s.present:
@@ -82,9 +90,10 @@ func setup(p_hall: Hall, index: int, p_bg: BackgroundMatch, present: Array, seed
 		f.rotation.y = PI if color == ChessPiece.WHITE else 0.0
 		f.setup(CharacterFigure.bot_look(_rng))
 		add_child(f)
-		f.play(&"sit_idle", 0.0)
+		var clip := f.play_role(&"sit_wait", _rng)
+		f.play(clip, 0.0)
 		var ap := f.animation_player()
-		ap.seek(_rng.randf() * ap.get_animation(&"sit_idle").length, true)
+		ap.seek(_rng.randf() * ap.get_animation(clip).length, true)
 		f.set_look(0.0, BOARD_PITCH, true)
 		figures[color] = f
 	if bg != null:
@@ -155,7 +164,7 @@ func _apply_manual(color: int, manual: bool) -> void:
 	if f == null or not is_instance_valid(f):
 		return
 	var s := _seats[color]
-	if s.stage == &"condemned" or s.stage == &"left":
+	if s.stage == &"condemned" or s.stage == &"left" or s.stage == &"lent":
 		return
 	if s.manual == manual:
 		return
@@ -190,12 +199,15 @@ func _decide(dt: float) -> void:
 		_refresh_board()
 	for color in 2:
 		var s := _seats[color]
-		if not s.present or s.stage == &"condemned" or s.stage == &"left":
+		if not s.present or s.stage == &"condemned" or s.stage == &"left" or s.stage == &"lent":
 			continue
 		if (s.stage == &"write" or s.stage == &"relief") and _clock >= s.until:
 			s.stage = &"ambient"
 			s.pose_t = 0.0
 		var free: bool = s.stage == &"ambient" or s.stage == &"doomed"
+		if s.stage == &"ambient" and not _game_over and _rng.randf() < dt / DROP_MEAN:
+			_drop_piece(color)
+			continue
 		if free:
 			s.pose_t -= dt
 			if s.pose_t <= 0.0:
@@ -210,17 +222,13 @@ func _pick_pose(color: int) -> void:
 	var s := _seats[color]
 	var f := figures[color]
 	var weights: Dictionary
-	if f.is_blending() and not s.flinch:
+	if f.is_blending():
 		return  # reintenta en el próximo ciclo (0,1 s): sin cambios de pose sobre otra mezcla
 	var low := bg != null and not bg.server.is_over() and bg.server.clock.remaining[color] < 25.0
-	if s.flinch:
-		s.flinch = false
-		weights = {&"sit_nervous": 1.0}
-		s.pose_t = _rng.randf_range(2.0, 3.5)
-	elif s.stage == &"doomed":
-		weights = {&"sit_nervous": 5.0, &"sit_frozen": 3.0, &"sit_idle": 1.0}
+	if s.stage == &"doomed":
+		weights = {&"sit_nervous": 5.0, &"sit_frozen": 3.0, &"sit_wait": 1.0}
 	elif s.calm:
-		weights = {&"sit_idle": 6.0, &"sit_think": 1.0}
+		weights = {&"sit_wait": 6.0, &"sit_think": 1.0}
 	elif bg != null and not bg.server.is_over() and bg.server.board.side_to_move == color:
 		weights = POSES_TURN.duplicate()
 		weights[&"sit_nervous"] = 5.0 if low else 1.0
@@ -231,15 +239,17 @@ func _pick_pose(color: int) -> void:
 	for k in weights:
 		total += weights[k]
 	var roll := _rng.randf() * total
-	var chosen: StringName = &"sit_idle"
+	var chosen: StringName = &"sit_wait"
 	for k in weights:
 		roll -= weights[k]
 		if roll <= 0.0:
 			chosen = k
 			break
-	f.play(chosen, AMBIENT_BLEND)
-	if s.pose_t <= 0.0:
-		s.pose_t = _rng.randf_range(3.0, 9.0)
+	if AnimRoles.is_role(chosen):
+		f.play_role(chosen, _rng)
+	else:
+		f.play(chosen, AMBIENT_BLEND)
+	s.pose_t = _rng.randf_range(POSE_DWELL.x, POSE_DWELL.y)
 
 
 func _pick_look(color: int) -> void:
@@ -248,7 +258,7 @@ func _pick_look(color: int) -> void:
 	s.look_t = _rng.randf_range(1.5, 4.5)
 	if s.noise_until > _clock:
 		f.look_at_point(s.noise_pos + Vector3(0, 1.1, 0))
-		s.look_t = _rng.randf_range(1.0, 2.5)
+		s.look_t = clampf(s.noise_until - _clock, 0.3, 4.0)
 		return
 	var roll := _rng.randf()
 	if _arbiter_pos != null:
@@ -273,18 +283,110 @@ func _pick_look(color: int) -> void:
 		f.set_look(_rng.randf_range(-0.9, 0.9), _rng.randf_range(-0.1, 0.25))
 
 
-## Un ruido en `world_pos`: quienes están sentados voltean a mirar (algunos se sobresaltan).
-func notice_noise(world_pos: Vector3) -> void:
+## Una distracción de tipo `kind` (ver `Distraction`) en `world_pos`: cada figura sentada voltea con
+## la probabilidad del tipo (o `chance` si es >= 0) por su propio factor, tras un retardo de
+## reacción, y los eventos fuertes además la sobresaltan (`sit_startle`).
+func notice_event(world_pos: Vector3, kind: StringName, chance: float = -1.0) -> void:
 	for color in 2:
 		var s := _seats[color]
-		if not s.present or s.stage == &"condemned" or s.stage == &"left":
+		if not s.present or s.stage == &"condemned" or s.stage == &"left" or s.stage == &"lent":
+			continue
+		var plan := Distraction.plan(kind, chance, s.factor, _rng)
+		if not plan.turn:
 			continue
 		s.noise_pos = world_pos
-		s.noise_until = _clock + _rng.randf_range(2.0, 4.0)
-		s.look_t = _rng.randf_range(0.05, 0.5)
-		if s.stage == &"ambient" and _rng.randf() < 0.3:
-			s.flinch = true
-			s.pose_t = _rng.randf_range(0.1, 0.5)
+		s.noise_until = _clock + plan.delay + plan.seconds
+		s.look_t = plan.delay
+		if plan.startle:
+			_startle(color, world_pos, plan.delay)
+
+
+func _startle(color: int, world_pos: Vector3, delay: float) -> void:
+	var s := _seats[color]
+	var f := figures[color]
+	if s.stage != &"ambient" or not f.has_role(&"sit_startle"):
+		return
+	s.gen += 1
+	var g: int = s.gen
+	s.stage = &"startle"
+	await get_tree().create_timer(delay).timeout
+	if not _same_job(color, g, &"startle"):
+		return
+	var local := f.global_transform.affine_inverse() * world_pos
+	var clip := &"sit_startle__left" if local.x > 0.0 else &"sit_startle__right"
+	await f.play_once(clip if f.has_animation(clip) else f.pick_role_clip(&"sit_startle", _rng), AnimRoles.blend_of(&"sit_startle"))
+	if not _same_job(color, g, &"startle"):
+		return
+	s.stage = &"ambient"
+	s.pose_t = 0.0
+
+
+## Se le cae una pieza a un asiento: se inclina a recogerla, suena y avisa a los vecinos.
+func _drop_piece(color: int) -> void:
+	var s := _seats[color]
+	var f := figures[color]
+	if not f.has_role(&"sit_pick_up"):
+		return
+	s.gen += 1
+	var g: int = s.gen
+	s.stage = &"pick"
+	var pos := f.global_position + Vector3(0.0, 0.05, 0.0)
+	_play_sound(&"clack", pos, -4.0)
+	Distraction.broadcast(self, &"piece_drop", pos, table_index)
+	await f.play_role_once(&"sit_pick_up", _rng)
+	if not _same_job(color, g, &"pick"):
+		return
+	s.stage = &"ambient"
+	s.pose_t = 0.0
+
+
+func _play_sound(key: StringName, pos: Vector3, volume_db: float) -> void:
+	var p := AudioStreamPlayer3D.new()
+	p.stream = EventSounds.get_stream(key)
+	p.unit_size = 4.0
+	p.max_distance = 30.0
+	p.volume_db = volume_db
+	add_child(p)
+	p.global_position = pos
+	p.finished.connect(p.queue_free)
+	p.play()
+
+
+## Presta la figura del asiento a otro (el evento de acusación ajena): deja de animarla hasta
+## `give_back`. Devuelve null si no hay figura libre.
+func lend(seat: int) -> CharacterFigure:
+	var f := figure(seat)
+	if f == null or _seats[seat].stage != &"ambient":
+		return null
+	var s := _seats[seat]
+	s.gen += 1
+	_apply_manual(seat, false)
+	s.stage = &"lent"
+	return f
+
+
+## Recupera la figura prestada: vuelve a su vida ambiental.
+func give_back(seat: int) -> void:
+	var s := _seats[seat]
+	if s.stage != &"lent":
+		return
+	s.gen += 1
+	s.stage = &"ambient"
+	s.pose_t = 0.0
+	s.look_t = 0.5
+	_apply_manual(seat, _tier > 0)
+
+
+## Entrega la figura prestada para siempre (se la llevan los guardias): el asiento queda vacío.
+func take_away(seat: int) -> CharacterFigure:
+	var f := figure(seat)
+	if f == null:
+		return null
+	var s := _seats[seat]
+	s.gen += 1
+	_apply_manual(seat, false)
+	s.stage = &"left"
+	return f
 
 
 # --- Jugadas y fin de partida --------------------------------------------------------------------
@@ -292,7 +394,7 @@ func notice_noise(world_pos: Vector3) -> void:
 func _on_move(color: int, _uci: String, _info: Dictionary) -> void:
 	_board_due = _clock + BOARD_DELAY
 	var s := _seats[color]
-	if not s.present or s.stage == &"condemned" or s.stage == &"left" or s.stage == &"doomed":
+	if not s.present or s.stage == &"condemned" or s.stage == &"left" or s.stage == &"doomed" or s.stage == &"lent":
 		return
 	_sequence(color)
 
@@ -325,10 +427,14 @@ func _same_job(color: int, gen: int, stage: StringName) -> bool:
 ## La partida terminó: el ganador se queda quieto y aliviado; el perdedor espera su suerte.
 func on_game_over(winner: int) -> void:
 	_game_over = true
+	if bg != null and bg.server.end_reason == MatchServer.REASON_TIMEOUT:
+		var clock_pos := global_position + Vector3(0.0, 0.8, 0.0)
+		_play_sound(&"flag", clock_pos, -2.0)
+		Distraction.broadcast(self, &"flag", clock_pos, table_index)
 	_board_due = _clock + 0.3
 	for color in 2:
 		var s := _seats[color]
-		if not s.present or s.stage == &"condemned" or s.stage == &"left":
+		if not s.present or s.stage == &"condemned" or s.stage == &"left" or s.stage == &"lent":
 			continue
 		s.gen += 1
 		var f := figures[color]

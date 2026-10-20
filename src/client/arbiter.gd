@@ -278,7 +278,7 @@ func _do_execution(e: Dictionary) -> void:
 		var dt := get_process_delta_time()
 		t += dt
 		_face_toward(_victim_head(cond, seat_pos), dt)
-	_fire()
+	_fire(table)
 	if cond != null:
 		var kind := &"slump"
 		if cond.standing:
@@ -295,8 +295,11 @@ func _do_execution(e: Dictionary) -> void:
 
 
 ## Disparo: animación, estampido 3D, fogonazo y chispas.
-func _fire() -> void:
+## `table` = mesa del condenado (-1 si no importa): el disparo avisa a todo el salón (`gunshot`).
+func _fire(table: int = -1) -> void:
 	_play_at(SFX + "gunshot.wav", figure.muzzle().global_position, 3.0, 12.0, 70.0)
+	if table >= 0:
+		Distraction.broadcast(self, &"gunshot", figure.muzzle().global_position, table)
 	_muzzle_flash()
 
 
@@ -330,6 +333,7 @@ func _condemn(table: int, seat: int) -> Condemned:
 	var rich := table / HallLayout.COLS <= 2
 	var c := Condemned.new()
 	_cond[k] = c
+	c.table = table
 	c.start(fig, _preset.get(k, Condemned.pick_mode(rich, _rng)), rich, ArbiterRoutes.seat_sign(table, seat, root.human_color), self)
 	return c
 

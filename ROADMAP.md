@@ -18,33 +18,12 @@ Es lo que el jugador ve todo el tiempo: debe ser lo más pulido del juego.
 - [ ] Gestos de trampa continuos: hoy los tramos de `_cmove` paran entre sí (los gestos normales ya son una sola curva).
 - [ ] Si la trampa interrumpe la anotación del humano hay ~0,25 s de retraso por dejar la pluma; el rival (que escribe con la otra mano) podría empezarla a la vez.
 
-### Frente B — Poses de espera naturales
-- [ ] Mientras espera el turno rival: brazos cruzados sobre la mesa, una mano en la mesa y la otra en la cabeza o el mentón, codos apoyados; varias poses que alternan con transiciones suaves (rival, jugador y mesas de fondo).
-- [ ] Hoy `sit_idle/sit_think/sit_nervous` dejan las manos sobre el propio tablero (a z = ±0,30 con la silla a 0,80) y los brazos van por IK en reposo, así que no se ven sus gestos. Reanimar las poses en Blender con las manos fuera del tablero (o acercar las sillas) y que el IK solo entre al mover.
-- [ ] Transición de la pose de espera al brazo que va a mover (sin saltos).
-
-### Frente C — Animaciones con el modelo actual
-- [ ] Inventario de lo que aún usa visuales del modelo anterior (tos, pieza caída, acusación ajena que se levanta y señala, guardias de la eliminación, banqueta, figura temporal del condenado, etc.).
-- [ ] Maniquíes sin rasgos: la nariz y las orejas son geometría de `Skin` en `player.glb` y quedan como relieve; hace falta una variante sin rasgos (o separar esa geometría) en Blender.
-- [ ] Rehacer cada una con `CharacterFigure` (animaciones nuevas en Blender si hace falta: toser, levantarse y señalar, ser arrastrado). No tienen que ser 1:1 con las antiguas, solo coherentes con la acción.
-
-### Frente D — El rival voltea ante distracciones
-Hoy `BotController.notice_event` hace voltear con `turn_to_event_chance × intensity`. Eventos elegidos por el usuario (2026-10-19), con su probabilidad de voltear:
-
-| Evento | Probabilidad |
-| --- | --- |
-| Disparo de una ejecución en otra mesa | Muy alta |
-| Grito de "¡Trampa!" en otra mesa (acusación ajena) | Alta |
-| Apagón o parpadeo de lámparas | Alta |
-| El árbitro pasa cerca o detrás | Media (de reojo, rápido) |
-| Llanto o súplica de un condenado | Media |
-| Pieza que cae en una mesa vecina | Baja |
-| Reloj vecino que pita al caer la bandera | Baja |
-
-Descartados: lámpara a media luz tras una ejecución, guardias arrastrando a un eliminado, alguien que huye corriendo, banqueta o golpe detrás, puerta, tos o ruido del jugador.
-
-- [ ] Probabilidad por evento (en `EventDef` o en la personalidad) multiplicada por `turn_to_event_chance`; giro de cabeza hacia el origen y regreso natural al tablero.
-- [ ] Emitir el aviso a los bots desde los eventos que hoy no lo hacen (disparo de la ejecución, llanto/súplica del condenado, pieza que cae y bandera en mesas de fondo).
+### Frente B — Pulido de animaciones
+- [ ] Poses de espera también para el cuerpo del jugador en primera persona (hoy solo el rival y las mesas de fondo usan `sit_wait`).
+- [ ] Maniquíes sin rasgos: la nariz y las orejas son geometría de `Skin` en `player.glb` y quedan como relieve; hace falta una variante sin rasgos (o separar esa geometría) en `build_player.py`.
+- [ ] `dragged`: las manos quedan en puño hacia fuera; los guardias se ven casi negros fuera del cono de luz (ropa más clara o algo de emisión).
+- [ ] `sit_move_piece` (1,5 cm) y `sit_beg` (2,4 cm) atraviesan el canto de la mesa; `sit_press_clock` queda 3 cm fuera de alcance en 4 fotogramas.
+- [ ] Revisar en el juego la tos (`sit_cough`) y recoger la pieza caída (`sit_pick_up`): funcionan sin errores, pero sin captura revisada.
 
 ### Frente E — Escenificación según lo que ve el jugador
 - [ ] Calcular qué mesas están en la línea de visión directa del jugador (cono de la cámara en reposo, sin oclusión) y llevar ahí las reacciones más dramáticas (huidas, súplicas, ejecuciones con más preparación); las mesas fuera de cuadro usan reacciones discretas.

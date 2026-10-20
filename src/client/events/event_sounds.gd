@@ -39,6 +39,8 @@ static func _generate(key: StringName) -> PackedFloat32Array:
 			return _steps()
 		&"swoosh":
 			return _swoosh()
+		&"flag":
+			return _flag()
 	return _thud()
 
 
@@ -225,4 +227,14 @@ static func _swoosh() -> PackedFloat32Array:
 		var t := float(i) / RATE
 		y += (r.randf_range(-1.0, 1.0) - y) * (0.05 + 0.25 * sin(PI * t / seconds))
 		b[i] = y * sin(PI * t / seconds)
+	return b
+
+
+## Pitido de reloj de ajedrez cuando cae la bandera: tres pitidos agudos y secos.
+static func _flag() -> PackedFloat32Array:
+	var b := _buffer(0.1)
+	for k in 3:
+		var beep := _tone(0.11, 2350.0, 6.0)
+		beep = _mix(beep, _tone(0.11, 4700.0, 9.0), 0.0, 0.25)
+		b = _mix(b, beep, k * 0.2, 0.8)
 	return b

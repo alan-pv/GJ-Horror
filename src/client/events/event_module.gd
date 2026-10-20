@@ -2,8 +2,9 @@ class_name EventModule
 extends Node
 ## Módulo de eventos y director de tensión (Hito 3). Es dueño de un
 ## `TensionDirector`, lo avanza cada fotograma, muestra cada evento con
-## `EventStage` (luces, figuras, sonido espacial) y avisa a los bots para que
-## volteen (`notice_event`). También anima los eventos del rival que confirma
+## `EventStage` (luces, figuras, sonido espacial) y reparte las distracciones
+## (`Distraction`, grupo `distraction_listeners`) a los bots (`notice_event`) y a las
+## mesas de fondo (`BackgroundTable.notice_event`). También anima los eventos del rival que confirma
 ## el servidor (`rival_event`) y maneja el disuasivo: el árbitro que pasa por
 ## detrás, durante lo cual el servidor marca las trampas como vistas.
 ##
@@ -54,7 +55,9 @@ func install(p_root: GameRoot) -> void:
 
 	stage = EventStage.new()
 	root.add_child(stage)
+	stage.root = root
 	stage.setup(root.hall, root.get_node_or_null("Entorno"))
+	add_to_group(Distraction.GROUP)
 
 	root.server.rival_event.connect(_on_rival_event)
 	root.players_remaining_changed.connect(set_players_remaining)
@@ -107,7 +110,6 @@ func _run_demo(id: StringName) -> void:
 
 func _on_event(id: StringName, origin: Vector3, duration: float) -> void:
 	var def := director.get_def(id)
-	var intensity := def.intensity if def != null else 0.5
 	var notice_pos := origin
 	if root.get_args().has("verbose") or root.get_args().has("autoplay"):
 		print("[evento %.1f] %s en %s (%.1f s)" % [_time, id, origin, duration])
@@ -118,7 +120,6 @@ func _on_event(id: StringName, origin: Vector3, duration: float) -> void:
 			notice_pos = Vector3(0.0, 1.95, 0.0)
 		&"ruido_detras":
 			stage.fall_behind(origin)
-			notice_pos = origin + Vector3(0.0, 0.5, 0.0)
 		&"acusacion_ajena":
 			stage.accuser(origin, duration, root.player.global_position)
 			root.hud.show_subtitle("Cheater!", 2.2)
@@ -126,20 +127,45 @@ func _on_event(id: StringName, origin: Vector3, duration: float) -> void:
 		&"eliminacion":
 			stage.drag_away(origin, duration, _drag_seat)
 			_drag_seat = -1
-			notice_pos = origin + Vector3(0.0, 1.0, 0.0)
 		&"arbitro_pasa":
-			if not _start_arbiter_pass(duration):
-				return
-			intensity = 0.0
-	if intensity > 0.0:
-		_notify_bots(notice_pos, intensity)
+			# El aviso lo da `ArbiterModule` cuando el árbitro llega de verdad cerca de la mesa.
+			_start_arbiter_pass(duration)
+			return
+	# Solo los eventos con `turn_chance` hacen voltear (banqueta, guardias... no).
+	if def != null and def.turn_chance > 0.0 and def.distraction != &"":
+		on_distraction(def.distraction, notice_pos, _table_of(origin), def.turn_chance)
 
 
-func _notify_bots(pos: Vector3, intensity: float) -> void:
-	if root.rival_bot != null:
-		root.rival_bot.notice_event(pos, intensity)
-	if root.auto_bot != null:
-		root.auto_bot.notice_event(pos, intensity)
+## Mesa del hall más cercana a `pos` (-1 si ninguna a menos de 1,5 m).
+func _table_of(pos: Vector3) -> int:
+	var best := -1
+	var best_d := 1.5
+	for i in root.hall.table_count():
+		var p := root.hall.table_position(i)
+		var d := Vector2(p.x - pos.x, p.z - pos.z).length()
+		if d < best_d:
+			best_d = d
+			best = i
+	return best
+
+
+## Reparte una distracción (ver `Distraction`) a bots y mesas de fondo. `table` = mesa de origen
+## (-1 ninguna): los bots de la mesa del humano la ignoran si ocurre en su propia mesa, y en
+## `piece_drop` / `flag` la mesa de origen no reacciona (ya lo sabe). `chance` < 0 = la de la tabla.
+func on_distraction(kind: StringName, pos: Vector3, table: int = -1, chance: float = -1.0) -> void:
+	if not Distraction.has(kind) or root == null:
+		return
+	if table != HallLayout.HUMAN_TABLE:
+		for bot in [root.rival_bot, root.auto_bot]:
+			var b := bot as BotController
+			if b != null and Distraction.in_range(kind, b.eye_position, pos):
+				b.notice_event(pos, chance, kind)
+	for t in root.bg_tables:
+		if t == table and (kind == &"piece_drop" or kind == &"flag"):
+			continue
+		var bt: BackgroundTable = root.bg_tables[t]
+		if Distraction.in_range(kind, bt.global_position + Vector3(0.0, 1.1, 0.0), pos):
+			bt.notice_event(pos, kind, chance)
 
 
 # --- El árbitro pasa detrás --------------------------------------------------------------------
@@ -156,24 +182,19 @@ func _start_arbiter_pass(duration: float) -> bool:
 
 ## El servidor confirmó que `color` tosió o tiró una pieza.
 func _on_rival_event(color: int, event_id: StringName) -> void:
-	var def := director.get_def(event_id)
-	var intensity := def.intensity if def != null else 0.5
 	var is_rival := color == root.rival_color
 	var pos: Vector3 = root.avatar.head.global_position if is_rival else root.player.global_position
 	match event_id:
 		&"cough":
-			stage.play_sound(&"cough", pos, 2.0)
 			if is_rival:
 				root.avatar.play_cough()
+				# Los espasmos de `sit_cough` empiezan ~0,55 s tras el inicio del clip.
+				await get_tree().create_timer(OpponentAvatar.COUGH_SOUND_DELAY).timeout
+			stage.play_sound(&"cough", pos, 2.0)
 		&"drop_piece":
 			if is_rival:
-				root.avatar.play_drop_piece()
-				stage.drop_piece(color)
-				pos = Vector3(0.6, 0.5, -0.1)
+				var piece := stage.drop_piece(color, -1.0)
+				root.avatar.play_drop_piece(piece)
 			else:
 				stage.play_sound(&"clack", Vector3(0.4, 0.0, 0.7), 2.0)
-				pos = Vector3(0.4, 0.0, 0.7)
-	# Lo oye (y ve) el otro lado: su bot puede voltear.
-	var other_bot: BotController = root.auto_bot if is_rival else root.rival_bot
-	if other_bot != null:
-		other_bot.notice_event(pos, intensity)
+	# Tos y ruidos del jugador no hacen voltear (descartados): no hay aviso a los bots.

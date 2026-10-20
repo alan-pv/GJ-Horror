@@ -274,6 +274,7 @@ func _build_actors(rng: RandomNumberGenerator) -> void:
 	ra.setup(avatar.hand_rig, board_view, clock_view, rival_color, rival_rest)
 	ra.sheet = sheet_view
 	ra.set_write_rig(avatar.idle_rig, Vector3(-0.34, BoardView.TABLE_TOP + 0.03, -0.40))
+	avatar.bind_animator(ra)
 	animators[human_color] = ha
 	animators[rival_color] = ra
 	player.animator = ha
@@ -553,12 +554,9 @@ func _on_background_finished(g: TournamentGame, bg: BackgroundMatch) -> void:
 func _on_executed(table: int, _seat: int) -> void:
 	if not is_inside_tree():
 		return
-	var pos := hall.table_position(table)
+	# Las demás mesas reaccionan al disparo por `Distraction` (aviso `gunshot` de `Arbiter`).
 	if table != HallLayout.HUMAN_TABLE:
 		hall.set_table_level(table, 0.4, true, true)
-	for t in bg_tables:
-		if t != table:
-			(bg_tables[t] as BackgroundTable).notice_noise(pos)
 
 
 ## Figura sentada en (`table`, `seat`); `seat` = color (0 blancas, 1 negras). En la

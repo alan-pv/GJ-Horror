@@ -33,3 +33,12 @@ extends Resource
 @export_range(0.0, 1.0) var abort_chance: float = 0.4
 ## Apetito de riesgo: 0 = prudente (solo trampas sutiles), 1 = audaz (se atreve a robar).
 @export_range(0.0, 1.0) var risk_appetite: float = 0.4
+
+
+## Referencia de `turn_to_event_chance` que equivale a factor 1 (media de las personalidades).
+const TURN_REFERENCE := 0.55
+
+
+## Factor que multiplica la probabilidad base de voltear de cada evento (media ~1).
+func turn_factor() -> float:
+	return turn_to_event_chance / TURN_REFERENCE

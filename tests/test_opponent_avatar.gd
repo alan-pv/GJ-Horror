@@ -10,7 +10,7 @@ func test_condemned_avatar_stays_still() -> void:
 	av.figure.play(&"death_slump_table", 0.0)
 	av.condemn()
 	check(av.condemned, "queda marcado como condenado")
-	av._idle_timer = 0.0
+	av._role_age = 99.0
 	av._process(1.0)
 	check_eq(av.figure.current(), &"death_slump_table", "no cambia de pose")
 	av.play_cough()

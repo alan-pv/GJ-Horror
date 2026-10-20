@@ -7,6 +7,8 @@ extends Node
 ## punto del salón un rato). Al pensar, la vista vuelve al tablero.
 
 signal looked(yaw: float, pitch: float)
+## Se sobresalta ante un evento fuerte en `world_pos` (la figura hace `sit_startle`).
+signal startled(world_pos: Vector3)
 
 enum Attention { WATCH, DISTRACTED }
 
@@ -41,6 +43,9 @@ var look_pitch: float = 0.0
 var attention: Attention = Attention.WATCH
 
 var _target_dir: Vector3
+var _distract_strength: float = 0.0
+## Multiplicador de la velocidad de giro (de reojo / eventos fuertes).
+var _turn_mult: float = 1.0
 var _distracted_until: float = 0.0
 var _thinking: bool = false
 var _gaze_timer: float = 0.0
@@ -103,19 +108,29 @@ func _my_turn() -> bool:
 
 # --- Atención ----------------------------------------------------------------
 
-## Un evento ruidoso en `world_pos`. `intensity` 0..1 escala la probabilidad.
-func notice_event(world_pos: Vector3, intensity: float = 1.0) -> void:
-	if _rng.randf() > personality.turn_to_event_chance * intensity:
+## Un evento en `world_pos` de tipo `kind` (ver `Distraction`). `chance` es la probabilidad base de
+## voltear (< 0 = la de la tabla); se multiplica por el factor de la personalidad. Si voltea, tarda
+## un retardo de reacción, mira el origen un rato (de reojo y rápido si es leve) y vuelve al tablero.
+func notice_event(world_pos: Vector3, chance: float = -1.0, kind: StringName = &"") -> void:
+	var plan := Distraction.plan(kind, chance, personality.turn_factor(), _rng)
+	if not plan.turn:
 		return
 	# Tarda un instante en reaccionar, como una persona.
-	if not await _wait(_rng.randf_range(0.15, 0.45)):
+	if not await _wait(plan.delay):
 		return
-	_look_at_point(world_pos, _rng.randf_range(personality.look_away_seconds.x, personality.look_away_seconds.y))
+	if plan.startle:
+		startled.emit(world_pos)
+	_look_at_point(world_pos, plan.seconds, plan.speed, Distraction.strength_of(kind))
 
 
-func _look_at_point(world_pos: Vector3, seconds: float) -> void:
+func _look_at_point(world_pos: Vector3, seconds: float, speed: float = 1.0, strength: float = 0.0) -> void:
+	# Una distracción leve no interrumpe otra más fuerte que aún dura.
+	if attention == Attention.DISTRACTED and _time < _distracted_until and strength < _distract_strength:
+		return
 	attention = Attention.DISTRACTED
 	_distracted_until = _time + seconds
+	_distract_strength = strength
+	_turn_mult = speed
 	_target_dir = (world_pos - eye_position).normalized()
 
 
@@ -123,6 +138,7 @@ func _update_attention() -> void:
 	if attention == Attention.DISTRACTED:
 		if _time >= _distracted_until:
 			attention = Attention.WATCH
+			_distract_strength = 0.0
 			_target_dir = (board_center - eye_position).normalized()
 		return
 	# Vistazos espontáneos al salón, menos frecuentes mientras piensa.
@@ -143,7 +159,7 @@ func _set_angles_from_dir(dir: Vector3) -> void:
 func _turn_head(delta: float) -> void:
 	var target_yaw := atan2(-_target_dir.x, -_target_dir.z)
 	var target_pitch := asin(clampf(_target_dir.y, -1.0, 1.0))
-	var step := personality.head_turn_speed * delta
+	var step := personality.head_turn_speed * _turn_mult * delta
 	look_yaw += clampf(wrapf(target_yaw - look_yaw, -PI, PI), -step, step)
 	look_pitch += clampf(target_pitch - look_pitch, -step, step)
 	looked.emit(look_yaw, look_pitch)

@@ -16,11 +16,17 @@ extends Node
 
 ## Radio (m) desde el centro de la mesa del humano en que el árbitro cuenta como "cerca".
 const NEAR_RADIUS := 2.0
+## Distancia (m) al centro de la mesa del humano a la que el rival lo ve pasar de reojo, y
+## espera mínima (s) entre dos avisos (`Distraction` tipo `arbiter_pass`).
+const GLANCE_RADIUS := 3.6
+const GLANCE_COOLDOWN := 18.0
 
 var root: GameRoot
 var arbiter: Arbiter
 
 var _near: bool = false
+var _glance_in: bool = false
+var _glance_ready: float = 0.0
 var _time: float = 0.0
 var _forced: Array[Dictionary] = []
 var _force_at: float = 3.0
@@ -62,6 +68,7 @@ func _process(delta: float) -> void:
 		return
 	_time += delta
 	_update_near(server)
+	_update_glance(server)
 	if _time >= _force_at:
 		for f in _forced:
 			_run_forced(f)
@@ -94,3 +101,14 @@ func _update_near(server: MatchServer) -> void:
 	server.set_arbiter_near(near)
 	if root.get_args().has("verbose") or root.get_args().has("autoplay"):
 		print("[arbitro %.1f] %s de la mesa (pos=%s)" % [_time, "cerca" if near else "lejos", arbiter.position])
+
+
+## Aviso `arbiter_pass`: cuando el árbitro entra a `GLANCE_RADIUS` de la mesa del humano (cerca o
+## por detrás) quien está sentado puede mirarlo de reojo. No avisa durante su acusación.
+func _update_glance(server: MatchServer) -> void:
+	var inside := not server.is_over() and not arbiter.accusation_active() \
+			and arbiter.is_near(Vector3.ZERO, GLANCE_RADIUS)
+	if inside and not _glance_in and _time >= _glance_ready:
+		_glance_ready = _time + GLANCE_COOLDOWN
+		Distraction.broadcast(self, &"arbiter_pass", arbiter.global_position + Vector3(0.0, 1.5, 0.0))
+	_glance_in = inside

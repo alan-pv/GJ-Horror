@@ -14,3 +14,5 @@ cooldown = 25.0
 sound = &"slam"
 intensity = 1.0
 min_tension = 0.0
+turn_chance = 0.0
+distraction = &""

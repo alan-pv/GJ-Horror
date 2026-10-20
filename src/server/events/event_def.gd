@@ -34,3 +34,9 @@ enum Origin {
 ## Tensión mínima (0 = salón lleno, 1 = quedan los últimos) para que el director
 ## pueda sortear este evento. Sirve para reservar los más duros para el final.
 @export_range(0.0, 1.0) var min_tension: float = 0.0
+## Probabilidad base (0..1) de que un bot o una figura sentada voltee hacia el evento, antes del
+## factor de personalidad. 0 = no hace voltear (banqueta, guardias, puerta...).
+@export_range(0.0, 1.0) var turn_chance: float = 0.0
+## Tipo de distracción (ver `Distraction.SPECS`): define cómo mira (de reojo o de frente), cuánto
+## tiempo y si sobresalta. Vacío = no es una distracción.
+@export var distraction: StringName = &""

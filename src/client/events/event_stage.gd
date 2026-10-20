@@ -1,15 +1,15 @@
 class_name EventStage
 extends Node3D
-## Escenografía de los eventos: apagón, objeto que cae a las espaldas del
-## jugador, figura que acusa en otra mesa, guardias que se llevan a alguien y la
-## pieza que se le cae al rival. Todo con primitivas (renderer Compatibility) y
-## animado con tweens. Los sonidos son espaciales (`AudioStreamPlayer3D`) y
+## Escenografía de los eventos: apagón, banqueta que cae a las espaldas del jugador (único objeto
+## de primitivas), figura que acusa en otra mesa, guardias que se llevan a alguien y la pieza que
+## se le cae al rival. Las personas son `CharacterFigure` con roles de animación. Los sonidos son espaciales (`AudioStreamPlayer3D`) y
 ## salen de `EventSounds`.
 
 const ROOM_MARGIN := 0.8
-const SKIN := Color(0.50, 0.38, 0.31)
 
 var hall: Hall
+## Raíz del juego: da acceso a las mesas de fondo (`bg_tables`) para prestar sus figuras.
+var root: GameRoot
 
 # Estado del apagón.
 var _blackout_running: bool = false
@@ -151,197 +151,231 @@ func fall_behind(origin: Vector3) -> void:
 	tw.tween_callback(stool.queue_free)
 
 
-# --- Figuras de pie ------------------------------------------------------------------
-
-## Figura de pie con brazos articulados en el hombro. Mira hacia -Z local.
-## Devuelve {root, head, arm_l, arm_r}.
-static func standing_figure(cloth: Color, skin: Color, height_scale: float = 1.0, cap: bool = false, glow: float = 0.5) -> Dictionary:
-	var root := Node3D.new()
-	var cloth_mat := StandardMaterial3D.new()
-	cloth_mat.albedo_color = cloth
-	cloth_mat.roughness = 0.9
-	# Un poco de brillo propio para que la silueta se lea aun fuera de la luz.
-	cloth_mat.emission_enabled = true
-	cloth_mat.emission = cloth
-	cloth_mat.emission_energy_multiplier = glow
-	var skin_mat := StandardMaterial3D.new()
-	skin_mat.albedo_color = skin
-	skin_mat.roughness = 0.7
-	skin_mat.emission_enabled = true
-	skin_mat.emission = skin
-	skin_mat.emission_energy_multiplier = glow * 0.6
-	var body := Node3D.new()
-	body.scale = Vector3(1.0, height_scale, 1.0)
-	root.add_child(body)
-	var torso := _capsule(0.19, 0.82, cloth_mat, Vector3(0.0, 1.13, 0.0))
-	body.add_child(torso)
-	for s in [-1.0, 1.0]:
-		body.add_child(_capsule(0.08, 0.8, cloth_mat, Vector3(s * 0.1, 0.42, 0.0)))
-	var head := Node3D.new()
-	head.name = "Cabeza"
-	head.position = Vector3(0.0, 1.70, 0.0)
-	body.add_child(head)
-	var skull := MeshInstance3D.new()
-	var sm := SphereMesh.new()
-	sm.radius = 0.105
-	sm.height = 0.23
-	skull.mesh = sm
-	skull.material_override = skin_mat
-	head.add_child(skull)
-	var nose := MeshInstance3D.new()
-	var nm := SphereMesh.new()
-	nm.radius = 0.016
-	nm.height = 0.032
-	nose.mesh = nm
-	nose.material_override = skin_mat
-	nose.position = Vector3(0.0, -0.01, -0.105)
-	head.add_child(nose)
-	if cap:
-		var hat := MeshInstance3D.new()
-		var cm := CylinderMesh.new()
-		cm.top_radius = 0.1
-		cm.bottom_radius = 0.115
-		cm.height = 0.07
-		hat.mesh = cm
-		hat.material_override = cloth_mat
-		hat.position = Vector3(0.0, 0.1, 0.0)
-		head.add_child(hat)
-	var arms := []
-	for s in [-1.0, 1.0]:
-		var pivot := Node3D.new()
-		pivot.position = Vector3(s * 0.27, 1.46 * height_scale, 0.0)
-		root.add_child(pivot)
-		pivot.add_child(_capsule(0.045, 0.6, cloth_mat, Vector3(0.0, -0.28, 0.0)))
-		arms.append(pivot)
-	return {"root": root, "head": head, "arm_l": arms[0], "arm_r": arms[1]}
-
-
-static func _capsule(radius: float, height: float, mat: Material, pos: Vector3) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
-	var cm := CapsuleMesh.new()
-	cm.radius = radius
-	cm.height = height
-	cm.radial_segments = 12
-	cm.rings = 3
-	mi.mesh = cm
-	mi.material_override = mat
-	mi.position = pos
-	return mi
-
+# --- Figuras --------------------------------------------------------------------------
 
 ## Yaw para que un nodo que mira a -Z quede de frente a `to` viendo desde `from`.
 static func yaw_to(from: Vector3, to: Vector3) -> float:
 	return atan2(-(to.x - from.x), -(to.z - from.z))
 
 
-## Mesa decorativa más cercana a `origin` (en XZ), o null.
-func _table_near(origin: Vector3) -> Node3D:
-	var best: Node3D = null
+## Yaw de una `CharacterFigure` (mira a +Z) para que mire a `to` desde `from`.
+static func figure_yaw(from: Vector3, to: Vector3) -> float:
+	return atan2(to.x - from.x, to.z - from.z)
+
+
+## Índice de la mesa más cercana a `origin` (en XZ), o -1.
+func _table_index(origin: Vector3) -> int:
+	var best := -1
 	var best_d := 0.6
-	for c in hall.get_children():
-		var t := c as Node3D
-		if t == null or t.get_node_or_null("Silla") == null:
-			continue
-		var d := Vector2(t.global_position.x - origin.x, t.global_position.z - origin.z).length()
+	for i in hall.table_count():
+		var p := hall.table_position(i)
+		var d := Vector2(p.x - origin.x, p.z - origin.z).length()
 		if d < best_d:
 			best_d = d
-			best = t
+			best = i
 	return best
 
 
-## Asiento de esa mesa: {pos (mundo), seated (figura sentada o null)}. `seat` = 0/1
-## elige ese asiento (p. ej. el del perdedor); -1 toma el primero visible.
-func _seat_at(origin: Vector3, seat: int = -1) -> Dictionary:
-	var table := _table_near(origin)
-	if table == null:
-		return {"pos": Vector3(origin.x, 0.0, origin.z), "seated": null}
-	var figs: Array[Node3D] = []
-	for c in table.get_children():
-		if c is Node3D and c.get_node_or_null("Cabeza") != null:
-			figs.append(c)
-	var chosen: Node3D = null
-	if seat >= 0 and seat < figs.size():
-		chosen = figs[seat]
-	else:
-		for f in figs:
-			if f.visible:
-				chosen = f
-				break
-		if chosen == null and not figs.is_empty():
-			chosen = figs[0]
-	if chosen != null:
-		var p := chosen.global_position
-		# Se levanta un poco hacia atrás de la silla, no dentro de la mesa.
-		var away := Vector3(p.x - table.global_position.x, 0.0, p.z - table.global_position.z).normalized()
-		return {"pos": Vector3(p.x, 0.0, p.z) + away * 0.05, "seated": chosen}
-	return {"pos": table.to_global(Vector3(0.0, 0.0, 0.8)), "seated": null}
+## Presta la figura de un asiento libre de la mesa `table` (`seat` -1 = cualquiera, al azar).
+## Devuelve {fig, seat, bt} o un diccionario vacío si no hay figura disponible.
+func _borrow(table: int, seat: int = -1) -> Dictionary:
+	var bt: BackgroundTable = root.bg_tables.get(table) if root != null else null
+	if bt == null:
+		return {}
+	var order: Array = [seat] if seat >= 0 else ([0, 1] if randf() < 0.5 else [1, 0])
+	for sd in order:
+		var f := bt.lend(sd)
+		if f != null:
+			return {"fig": f, "seat": sd, "bt": bt}
+	return {}
+
+
+## Dirección "hacia atrás" de una figura sentada (opuesta a su frente, que es +Z local).
+static func back_of(f: Node3D) -> Vector3:
+	var b := -f.global_basis.z
+	b.y = 0.0
+	return b.normalized()
+
+
+## Mueve `node` en el mundo a `to` en `seconds` (tween en este escenario).
+func _slide(node: Node3D, to: Vector3, seconds: float, delay: float = 0.0) -> void:
+	var tw := create_tween()
+	if delay > 0.0:
+		tw.tween_interval(delay)
+	tw.tween_property(node, "global_position", to, seconds).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+
+## Gira `f` hasta `yaw` (rad) en `seconds`, tras `delay`.
+func _turn_figure(f: Node3D, yaw: float, seconds: float, delay: float = 0.0) -> void:
+	var from := f.rotation.y
+	var tw := create_tween()
+	if delay > 0.0:
+		tw.tween_interval(delay)
+	tw.tween_method(func(u: float) -> void:
+		if is_instance_valid(f):
+			f.rotation.y = lerp_angle(from, yaw, u), 0.0, 1.0, seconds).set_trans(Tween.TRANS_SINE)
+
+
+## Pausa en este escenario (sobrevive a recargas: devuelve false si ya no está en el árbol).
+func _pause(seconds: float) -> bool:
+	if not is_inside_tree():
+		return false
+	await get_tree().create_timer(seconds).timeout
+	return is_inside_tree()
 
 
 # --- Acusación ajena ---------------------------------------------------------------------
 
-## Alguien de otra mesa se levanta, señala hacia el jugador y grita "¡trampa!".
+## Distancia (m) que se retira la silla al levantarse (los clips suponen >= 0,40).
+const CHAIR_BACK := 0.5
+
+## Alguien de otra mesa (una figura real, prestada por su `BackgroundTable`) retira la silla,
+## se levanta (`stand_accuse`), señala hacia el jugador, grita, aguanta señalando
+## (`stand_accuse_hold`) y se sienta de nuevo (`sit_down`) devolviendo la silla.
 func accuser(origin: Vector3, duration: float, toward: Vector3) -> void:
-	var seat := _seat_at(origin)
-	var seated: Node3D = seat.seated
-	var pos: Vector3 = seat.pos
-	var fig := standing_figure(Color(0.46, 0.20, 0.18), SKIN)
-	var root: Node3D = fig.root
-	add_child(root)
-	root.global_position = pos
-	root.rotation.y = yaw_to(pos, toward)
-	if seated != null:
-		seated.visible = false
-	root.scale = Vector3(1.0, 0.7, 1.0)
-	var tw := create_tween()
-	tw.tween_property(root, "scale:y", 1.0, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tw.tween_property(fig.arm_r, "rotation:x", deg_to_rad(105.0), 0.18)
-	tw.tween_callback(play_sound.bind(&"shout", pos + Vector3(0.0, 1.5, 0.0), 6.0))
-	var hold := maxf(duration - 1.2, 0.5)
-	tw.tween_method(_shake_arm.bind(fig.arm_r, root), 0.0, 1.0, hold)
-	tw.tween_property(fig.arm_r, "rotation:x", 0.0, 0.3)
-	tw.tween_property(root, "scale:y", 0.7, 0.25)
-	tw.tween_callback(func() -> void:
-		if seated != null and is_instance_valid(seated):
-			seated.visible = true
-		root.queue_free())
-
-
-func _shake_arm(u: float, arm: Node3D, body: Node3D) -> void:
-	arm.rotation.x = deg_to_rad(105.0 + sin(u * 40.0) * 12.0)
-	body.rotation.z = sin(u * 31.0) * 0.04
+	var table := _table_index(origin)
+	var loan := _borrow(table)
+	if loan.is_empty():
+		# Sin figura libre en esa mesa: solo se oye el grito.
+		play_sound(&"shout", origin + Vector3(0.0, 1.5, 0.0), 6.0)
+		return
+	var f: CharacterFigure = loan.fig
+	var seat: int = loan.seat
+	var bt: BackgroundTable = loan.bt
+	var chair := hall.chair(table, seat)
+	var back := back_of(f)
+	var chair_home := chair.global_position
+	var yaw0 := f.rotation.y
+	var yaw := figure_yaw(f.global_position, toward)
+	f.set_look(0.0, 0.0)
+	# La silla sale hacia atrás mientras sube la pelvis; el cuerpo se vuelve hacia el jugador.
+	_slide(chair, chair_home + back * CHAIR_BACK, 0.9, 0.2)
+	_turn_figure(f, yaw, 1.0, 0.9)
+	get_tree().create_timer(1.7).timeout.connect(func() -> void:
+		if is_instance_valid(f):
+			play_sound(&"shout", f.head_global_position(), 6.0))
+	await f.play_role_once(&"stand_accuse")
+	f.play_role(&"stand_accuse_hold")
+	if not await _pause(maxf(duration - 1.5, 1.2)):
+		return
+	# Vuelve a su silla: gira hacia la mesa, la silla entra y se sienta.
+	_turn_figure(f, yaw0, 0.7)
+	_slide(chair, chair_home, 0.9, 0.6)
+	await f.play_role_once(&"sit_down")
+	if is_instance_valid(f):
+		f.rotation.y = yaw0
+		f.play_role(&"sit_wait")
+	chair.global_position = chair_home
+	bt.give_back(seat)
 
 
 # --- Eliminación en otra mesa -----------------------------------------------------------
 
-## Dos guardias llegan, sujetan a la figura de la mesa y se la llevan a rastras hacia la oscuridad.
-## Es la salida de los eliminados del torneo (la figura no camina sola). `seat_index`: asiento
-## del eliminado (-1 = el primero visible).
-func drag_away(origin: Vector3, duration: float, seat_index: int = -1) -> void:
-	var seat := _seat_at(origin, seat_index)
-	var seated: Node3D = seat.seated
-	var v_pos: Vector3 = seat.pos
-	if seated != null:
-		# Quien se llevan ya no vuelve a su silla.
-		seated.visible = false
-	var out_dir := Vector3(v_pos.x, 0.0, v_pos.z)
-	out_dir = out_dir.normalized() if out_dir.length() > 0.5 else Vector3(1.0, 0.0, 0.0)
-	var start := _clamp_room(v_pos - out_dir * 5.5)
-	var exit := _clamp_room(v_pos + out_dir * 40.0)
-	var victim := standing_figure(Color(0.46, 0.20, 0.18), SKIN)
-	var guard_a := standing_figure(Color(0.035, 0.035, 0.045), Color(0.60, 0.55, 0.50), 1.12, true, 1.6)
-	var guard_b := standing_figure(Color(0.035, 0.035, 0.045), Color(0.60, 0.55, 0.50), 1.12, true, 1.6)
-	for f in [victim, guard_a, guard_b]:
-		add_child(f.root)
-	var st := {
-		"v": v_pos, "start": start, "exit": exit, "victim": victim,
-		"a": guard_a, "b": guard_b, "duration": duration, "grabbed": false,
-	}
-	_drag_step(0.0, st)
+## Aspecto de los guardias: ropa oscura (algo más clara que negro para que se lea en la penumbra), maniquí gris.
+static func guard_look(rng: RandomNumberGenerator) -> Dictionary:
+	var dark := Color(0.11, 0.11, 0.14)
+	return CharacterFigure.bot_look(rng, {
+		"skin": CharacterFigure.BOT_SKIN, "shirt": Color(0.16, 0.16, 0.18), "jacket": dark,
+		"pants": dark, "shoes": Color(0.05, 0.05, 0.05), "hair": CharacterFigure.BOT_SKIN, "hair_style": "bald",
+	})
+
+
+## Dos guardias (`CharacterFigure` oscuras con `walk`) llegan a la mesa, la figura se levanta
+## (`stand_up`, con la silla hacia atrás) y se la llevan entre los dos (`dragged`) hacia la salida
+## por los pasillos. Es la salida de los eliminados que no ejecuta el árbitro. `seat_index`: asiento
+## del eliminado (-1 = cualquiera).
+func drag_away(origin: Vector3, _duration: float, seat_index: int = -1) -> void:
+	var table := _table_index(origin)
+	var loan := _borrow(table, seat_index)
+	if loan.is_empty():
+		return
+	var victim: CharacterFigure = loan.fig
+	var seat: int = loan.seat
+	var bt: BackgroundTable = loan.bt
+	var chair := hall.chair(table, seat)
+	var back := back_of(victim)
+	var side := Vector3(back.z, 0.0, -back.x)
+	var seat_pos := victim.global_position
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	var guards: Array[CharacterFigure] = []
+	for i in 2:
+		var g := CharacterFigure.new()
+		g.name = "Guardia%d" % i
+		add_child(g)
+		g.setup(guard_look(rng))
+		guards.append(g)
+	# Llegan por el pasillo de detrás de la silla: A al flanco +, B rodea la silla hacia el flanco -.
+	var start := _clamp_room(seat_pos + back * 1.1 + side * 3.2)
+	var spot_a := seat_pos + side * 0.62
+	var spot_b := seat_pos - side * 0.62
+	var behind := seat_pos + back * 0.95
+	var dur_a := _walk(guards[0], [start, spot_a])
+	var dur_b := _walk(guards[1], [start + side * 0.3, behind, spot_b])
+	if not await _pause(maxf(dur_a, dur_b) + 0.1):
+		return
+	for g in guards:
+		g.play(&"walk", 0.2, 0.0)
+		g.animation_player().seek(0.0, true)
+		g.rotation.y = figure_yaw(g.global_position, seat_pos)
+	victim.set_look(0.0, 0.0)
+	play_sound(&"struggle", seat_pos, 8.0, victim)
+	_slide(chair, chair.global_position + back * CHAIR_BACK, 0.7, 0.1)
+	await victim.play_role_once(&"stand_up")
+	# Por los pasillos hasta el perímetro, entre los dos guardias.
+	var out := Vector3(seat_pos.x, 0.0, seat_pos.z)
+	out = out.normalized() if out.length() > 0.5 else Vector3.RIGHT
+	var exit := _clamp_room(seat_pos + out * 40.0)
+	var path: Array[Vector3] = [seat_pos]
+	path.append_array(ArbiterRoutes.route(seat_pos + back * 0.9, exit))
+	if path.size() < 2:
+		path.append(exit)
+	victim.play_role(&"dragged")
+	for g in guards:
+		g.play_role(&"walk")
+	var dur := _walk(victim, path, 0.0)
+	_walk(guards[0], path, 0.62)
+	_walk(guards[1], path, -0.62)
+	play_sound(&"shout", seat_pos, 2.0, victim)
+	if not await _pause(dur + 0.2):
+		return
+	# La silla vuelve vacía; los tres desaparecen en la oscuridad. Quien se llevan no regresa.
+	chair.global_position = chair.global_position - back * CHAIR_BACK
+	for f in [victim, guards[0], guards[1]]:
+		if is_instance_valid(f):
+			f.visible = false
+	for g in guards:
+		g.queue_free()
+	bt.take_away(seat)
+
+
+## Hace caminar a `fig` por `pts` a la velocidad del modelo, con `lateral` m de desvío a la derecha
+## del camino. Mira hacia donde avanza. Devuelve la duración (s).
+func _walk(fig: CharacterFigure, pts: Array, lateral: float = 0.0) -> float:
+	var pos: Array[Vector3] = []
+	for p in pts:
+		pos.append(Vector3(p.x, 0.0, p.z))
+	var lens: Array[float] = [0.0]
+	for i in range(1, pos.size()):
+		lens.append(lens[i - 1] + pos[i].distance_to(pos[i - 1]))
+	var total: float = maxf(lens[lens.size() - 1], 0.01)
+	var dur := total / CharacterFigure.WALK_SPEED
+	fig.global_position = pos[0]
 	var tw := create_tween()
-	tw.tween_method(_drag_step.bind(st), 0.0, 1.0, duration)
-	tw.tween_callback(func() -> void:
-		for f in [victim, guard_a, guard_b]:
-			f.root.queue_free())
+	tw.tween_method(func(u: float) -> void:
+		if not is_instance_valid(fig):
+			return
+		var d := u * total
+		var i := 1
+		while i < pos.size() - 1 and lens[i] < d:
+			i += 1
+		var seg := maxf(lens[i] - lens[i - 1], 0.001)
+		var k := clampf((d - lens[i - 1]) / seg, 0.0, 1.0)
+		var dir := (pos[i] - pos[i - 1]).normalized()
+		var right := Vector3(-dir.z, 0.0, dir.x)
+		fig.global_position = pos[i - 1].lerp(pos[i], k) + right * lateral
+		fig.rotation.y = figure_yaw(Vector3.ZERO, dir), 0.0, 1.0, dur)
+	return dur
 
 
 func _clamp_room(p: Vector3) -> Vector3:
@@ -351,71 +385,20 @@ func _clamp_room(p: Vector3) -> Vector3:
 		clampf(p.z, -Hall.ROOM_HALF_Z + ROOM_MARGIN, Hall.ROOM_HALF_Z - ROOM_MARGIN))
 
 
-func _drag_step(u: float, st: Dictionary) -> void:
-	const WALK_END := 0.3
-	const GRAB_END := 0.36
-	var v: Vector3 = st.v
-	var start: Vector3 = st.start
-	var exit: Vector3 = st.exit
-	var t: float = u * st.duration
-	var walking := u < WALK_END
-	var center: Vector3
-	var dir: Vector3
-	if walking:
-		center = start.lerp(v, smoothstep(0.0, 1.0, u / WALK_END))
-		dir = (v - start).normalized()
-	elif u < GRAB_END:
-		center = v
-		dir = (v - start).normalized()
-	else:
-		center = v.lerp(exit, (u - GRAB_END) / (1.0 - GRAB_END))
-		dir = (exit - v).normalized()
-	var side := Vector3(-dir.z, 0.0, dir.x)
-	var victim: Dictionary = st.victim
-	var ga: Dictionary = st.a
-	var gb: Dictionary = st.b
-	var moving := walking or u >= GRAB_END
-	var bob := absf(sin(t * 6.5)) * 0.045 if moving else 0.0
-
-	if walking:
-		# Los guardias avanzan; la víctima sigue de pie, sin enterarse.
-		ga.root.global_position = center + side * 0.4 - dir * 0.2 + Vector3(0.0, bob, 0.0)
-		gb.root.global_position = center - side * 0.4 - dir * 0.2 + Vector3(0.0, bob, 0.0)
-		victim.root.global_position = v
-		victim.root.rotation.y = yaw_to(v, start)
-	else:
-		if not st.grabbed:
-			st.grabbed = true
-			play_sound(&"struggle", v, 8.0, victim.root)
-			play_sound(&"shout", v, 2.0, victim.root)
-		ga.root.global_position = center + side * 0.42 + Vector3(0.0, bob, 0.0)
-		gb.root.global_position = center - side * 0.42 + Vector3(0.0, bob, 0.0)
-		victim.root.global_position = center + Vector3(0.0, bob * 0.4, 0.0)
-		# La víctima va de espaldas al camino, echada hacia atrás y forcejeando.
-		victim.root.rotation = Vector3(0.0, yaw_to(center, center - dir), sin(t * 14.0) * 0.18)
-		victim.arm_l.rotation.x = 2.3 + sin(t * 17.0) * 0.5
-		victim.arm_r.rotation.x = 2.3 + sin(t * 13.0 + 1.0) * 0.5
-	var yaw := yaw_to(Vector3.ZERO, dir)
-	ga.root.rotation.y = yaw
-	gb.root.rotation.y = yaw
-	var grip := 0.0 if walking else 1.2
-	ga.arm_l.rotation.x = grip
-	gb.arm_r.rotation.x = grip
-
-
 # --- Pieza que se cae --------------------------------------------------------------------------
 
 ## Una pieza se le escapa al rival: cae sobre la mesa junto al tablero, rueda hasta
 ## el borde y cae al suelo, con un golpe en cada contacto.
-func drop_piece(color: int) -> void:
+func drop_piece(color: int, side: float = -1.0) -> Node3D:
 	var piece := PieceFactory.build(ChessPiece.make(color, ChessPiece.BISHOP))
 	piece.name = "PiezaCaida"
 	add_child(piece)
 	var lying := BoardView.TABLE_TOP + 0.018
-	var start := Vector3(0.27, BoardView.BOARD_TOP + 0.09, -0.33)
-	var on_table := Vector3(0.37, lying, -0.14)
-	var edge := Vector3(0.62, lying, -0.10)
-	var land := Vector3(0.74, 0.02, -0.06)
+	# `side` = -1: cae a la derecha del rival (-X; allí se inclina `sit_pick_up`); +1 a su izquierda.
+	var start := Vector3(side * 0.27, BoardView.BOARD_TOP + 0.09, -0.33)
+	var on_table := Vector3(side * 0.37, lying, -0.14)
+	var edge := Vector3(side * 0.62, lying, -0.10)
+	var land := Vector3(side * 0.74, 0.02, -0.06)
 	piece.position = start
 	var tw := create_tween()
 	tw.tween_property(piece, "position", on_table, 0.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
@@ -429,4 +412,7 @@ func drop_piece(color: int) -> void:
 	tw.tween_property(piece, "position:y", land.y + 0.04, 0.08).set_ease(Tween.EASE_OUT)
 	tw.tween_property(piece, "position:y", land.y, 0.08).set_ease(Tween.EASE_IN)
 	tw.tween_interval(40.0)
-	tw.tween_callback(piece.queue_free)
+	tw.tween_callback(func() -> void:
+		if is_instance_valid(piece):
+			piece.queue_free())
+	return piece
