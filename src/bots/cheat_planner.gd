@@ -19,39 +19,65 @@ const RISK_MULT_CAUTIOUS := 1.6
 const RISK_MULT_BOLD := 0.6
 ## Temperatura del muestreo (mayor = más aleatorio).
 const PICK_TEMPERATURE := 1.2
-## Máximo de candidatas válidas por tipo de trampa (acota el costo).
+## Máximo de candidatas válidas por clase de trampa (acota el costo).
 const MAX_PER_DEF := 24
+## Máximo de destinos que se toman de una misma pieza (uno por nivel de sospecha),
+## para que las candidatas no salgan todas de la misma pieza.
+const PER_PIECE := 3
 ## Escala de `cheat_chance` (por oportunidad) a probabilidad por evaluación (~0.5 s).
 const TICK_SCALE := 0.2
+## Mover una pieza propia en el turno propio REEMPLAZA la jugada: solo vale la pena
+## si gana más (centipeones) que la mejor jugada legal, y además pesa un castigo. La
+## evaluación estática solo ve material y casillas, así que un margen de 30 cp ya es
+## raro: ocurre sobre todo cuando las jugadas legales son pobres (pieza encerrada).
+const AS_MOVE_MARGIN := 30.0
+const AS_MOVE_PENALTY := 0.8
 
-const _DIRS := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1),
-		Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1)]
 
-
-## Candidatas válidas: [{def, from, to, duration, gain, score}].
-static func candidates(board: BoardState, color: int, defs: Array, rng: RandomNumberGenerator, risk_appetite: float = 0.5) -> Array[Dictionary]:
+## Candidatas válidas: [{def, from, to, level, evidence, distance, duration, gain,
+## raw_gain, as_move, score}]. Por clase se muestrean destinos de piezas barajadas,
+## uno por nivel de sospecha. `turn_ready`: ver `CheatRules.context` (-1 = deducirlo).
+static func candidates(board: BoardState, color: int, defs: Array, rng: RandomNumberGenerator, risk_appetite: float = 0.5, turn_ready: int = -1) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var base_eval := FallbackBrain.evaluate(board, color)
+	var best_legal := NAN  # se calcula solo si hace falta (trampa propia en mi turno)
 	for def: CheatDef in defs:
-		var raw := _raw_moves(board, color, def)
-		_shuffle(raw, rng)
+		var pieces := _pieces_for(board, color, def)
+		_shuffle(pieces, rng)
 		var found := 0
-		for pair: Vector2i in raw:
-			var v := CheatRules.validate(board, color, def, pair.x, pair.y)
-			if not v.ok:
+		for from: int in pieces:
+			var ctx := CheatRules.context(board, color, from, turn_ready)
+			if ctx.is_empty():
 				continue
-			var after := board.clone()
-			CheatRules.apply(after, color, def, pair.x, pair.y, rng)
-			var gain := FallbackBrain.evaluate(after, color) - base_eval
-			# Llevarse una pieza grande a la vista de todos se nota mucho más.
-			var noticeable := 0.0
-			if def.kind == CheatDef.Kind.STEAL:
-				noticeable = ChessPiece.value_of(board.squares[pair.x]) / 100.0
-			out.append({
-				"def": def, "from": pair.x, "to": pair.y, "duration": v.duration,
-				"gain": gain, "score": score(gain, v.duration, def.evidence, risk_appetite, noticeable),
-			})
-			found += 1
+			for to: int in _sample_destinations(ctx, def, rng):
+				var level: int = CheatRules.PILE_LEVEL if to == CheatRules.TO_PILE else CheatRules.dest_level(ctx, to)
+				var distance := 0 if to == CheatRules.TO_PILE else CheatRules.king_distance(from, to)
+				var after := board.clone()
+				CheatRules.apply(after, color, def, from, to, rng)
+				var raw_gain := FallbackBrain.evaluate(after, color) - base_eval
+				var as_move: bool = def.kind == CheatDef.Kind.OWN_MOVE and ctx.in_turn
+				var gain := raw_gain
+				if as_move:
+					if is_nan(best_legal):
+						best_legal = _best_legal_gain(board, color, base_eval)
+					gain = raw_gain - best_legal
+					if gain < AS_MOVE_MARGIN:
+						continue
+				# Llevarse una pieza grande a la vista de todos se nota mucho más.
+				var noticeable := 0.0
+				if def.kind == CheatDef.Kind.STEAL:
+					noticeable = ChessPiece.value_of(board.squares[from]) / 100.0
+				var evidence := def.evidence_for(level)
+				var duration := def.duration_for(distance)
+				var sc := score(gain, duration, evidence, risk_appetite, noticeable)
+				if as_move:
+					sc -= AS_MOVE_PENALTY
+				out.append({
+					"def": def, "from": from, "to": to, "level": level, "evidence": evidence,
+					"distance": distance, "duration": duration, "gain": gain, "raw_gain": raw_gain,
+					"as_move": as_move, "score": sc,
+				})
+				found += 1
 			if found >= MAX_PER_DEF:
 				break
 	return out
@@ -107,8 +133,8 @@ static func _weighted_index(weights: Array[float], rng: RandomNumberGenerator) -
 
 
 ## Atajo: enumera y elige.
-static func plan(board: BoardState, color: int, defs: Array, rng: RandomNumberGenerator, risk_appetite: float = 0.5) -> Dictionary:
-	return pick(candidates(board, color, defs, rng, risk_appetite), rng)
+static func plan(board: BoardState, color: int, defs: Array, rng: RandomNumberGenerator, risk_appetite: float = 0.5, turn_ready: int = -1) -> Dictionary:
+	return pick(candidates(board, color, defs, rng, risk_appetite, turn_ready), rng)
 
 
 ## Probabilidad de intentar una trampa en esta evaluación (~cada 0.5 s).
@@ -131,48 +157,46 @@ static func abort_probability(personality: BotPersonality, evidence: float) -> f
 
 # --- Enumeración -----------------------------------------------------------
 
-static func _raw_moves(b: BoardState, color: int, def: CheatDef) -> Array[Vector2i]:
-	var res: Array[Vector2i] = []
+## Casillas con piezas que esta clase puede tocar (nunca reyes).
+static func _pieces_for(b: BoardState, color: int, def: CheatDef) -> Array:
+	var res: Array = []
 	for sq in 64:
 		var p := b.squares[sq]
 		if p == ChessPiece.NONE or ChessPiece.type_of(p) == ChessPiece.KING:
 			continue
-		var own := ChessPiece.color_of(p) == color
-		match def.kind:
-			CheatDef.Kind.NUDGE:
-				if own:
-					var to := sq + 8 * ChessRules.pawn_dir(color)
-					if to >= 0 and to <= 63:
-						res.append(Vector2i(sq, to))
-			CheatDef.Kind.SLIDE:
-				if own:
-					var reach := def.max_distance if def.max_distance > 0 else 7
-					for d: Vector2i in _DIRS:
-						for i in range(1, reach + 1):
-							var f := ChessPiece.file_of(sq) + d.x * i
-							var r := ChessPiece.rank_of(sq) + d.y * i
-							if f < 0 or f > 7 or r < 0 or r > 7:
-								break
-							var to := ChessPiece.square(f, r)
-							if b.squares[to] != ChessPiece.NONE:
-								break
-							res.append(Vector2i(sq, to))
-			CheatDef.Kind.STEAL:
-				if not own:
-					res.append(Vector2i(sq, -1))
-			CheatDef.Kind.MOVE_ENEMY:
-				if not own:
-					var reach := def.max_distance if def.max_distance > 0 else 3
-					for df in range(-reach, reach + 1):
-						for dr in range(-reach, reach + 1):
-							var f := ChessPiece.file_of(sq) + df
-							var r := ChessPiece.rank_of(sq) + dr
-							if (df == 0 and dr == 0) or f < 0 or f > 7 or r < 0 or r > 7:
-								continue
-							var to := ChessPiece.square(f, r)
-							if b.squares[to] == ChessPiece.NONE:
-								res.append(Vector2i(sq, to))
+		if (ChessPiece.color_of(p) == color) == (def.kind == CheatDef.Kind.OWN_MOVE):
+			res.append(sq)
 	return res
+
+
+## Hasta `PER_PIECE` destinos válidos de la pieza del contexto, de niveles distintos.
+static func _sample_destinations(ctx: Dictionary, def: CheatDef, rng: RandomNumberGenerator) -> Array:
+	if def.kind == CheatDef.Kind.STEAL:
+		return [CheatRules.TO_PILE] if CheatRules.dest_level(ctx, CheatRules.TO_PILE) >= 0 else []
+	var by_level := {}
+	for to in 64:
+		var lv := CheatRules.dest_level(ctx, to)
+		if lv < 1:  # inválido (-1) o jugada legal (0): no es trampa
+			continue
+		if not by_level.has(lv):
+			by_level[lv] = []
+		by_level[lv].append(to)
+	var picks: Array = []
+	for lv in by_level:
+		var list: Array = by_level[lv]
+		picks.append(list[rng.randi() % list.size()])
+	_shuffle(picks, rng)
+	return picks.slice(0, PER_PIECE)
+
+
+## Mejor ganancia de evaluación entre las jugadas legales de `color` (le toca). 0 sin jugadas.
+static func _best_legal_gain(board: BoardState, color: int, base_eval: float) -> float:
+	var best := -INF
+	for m in ChessRules.legal_moves(board):
+		var after := board.clone()
+		ChessRules.apply_move(after, m)
+		best = maxf(best, FallbackBrain.evaluate(after, color) - base_eval)
+	return 0.0 if best == -INF else best
 
 
 static func _shuffle(arr: Array, rng: RandomNumberGenerator) -> void:

@@ -49,7 +49,7 @@ func _ready() -> void:
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_hint.position = Vector2(20, 40)
 	_hint.size = Vector2(700, 24)
-	_hint.text = "Click: pick and move · 1-4: cheat · A: accuse · Esc: pause"
+	_hint.text = "Click: pick up any piece · A: accuse · X: abort · Esc: pause"
 	_crosshair = ColorRect.new()
 	_crosshair.color = Color(1, 1, 1, 0.55)
 	_crosshair.anchor_left = 0.5

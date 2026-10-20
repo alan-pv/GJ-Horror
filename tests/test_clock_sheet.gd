@@ -9,7 +9,7 @@ func _make(press: bool, fen: String = BoardState.START_FEN) -> MatchServer:
 	cfg.beginner_help = false
 	cfg.arbiter_delay = 1.0
 	cfg.require_clock_press = press
-	for id in ["nudge", "slide", "steal", "move_enemy"]:
+	for id in ["own", "enemy", "steal"]:
 		cfg.cheats.append(load("res://data/cheats/%s.tres" % id))
 	var m := MatchServer.new(cfg, PlayerSession.new(1, "White"), PlayerSession.new(2, "Black", true), fen, 1)
 	m.start()
@@ -91,7 +91,7 @@ func test_mate_without_press() -> void:
 func test_cheats_allowed_while_press_pending() -> void:
 	var m := _make(true)
 	m.submit_move(W, "e2e4")
-	check(m.start_cheat(B, &"nudge", _sq("a7"), _sq("a6")).ok, "trampa del rival permitida")
+	check(m.start_cheat(B, _sq("a7"), _sq("a6")).ok, "trampa del rival permitida")
 
 
 func test_accusation_window_starts_at_submit() -> void:
@@ -100,7 +100,7 @@ func test_accusation_window_starts_at_submit() -> void:
 	m.submit_move(W, "e2e4")
 	m.tick(1.0)
 	m.press_clock(W)
-	m.start_cheat(B, &"nudge", _sq("a7"), _sq("a6"))
+	m.start_cheat(B, _sq("a2"), _sq("a3"))
 	m.tick(1.0)
 	check(m.accuse(W).ok)
 	m.tick(2.0)
@@ -114,7 +114,7 @@ func test_scoresheet_records_on_press_and_skips_cheats() -> void:
 	m.submit_move(W, "e2e4")
 	check(m.scoresheet(W).is_empty(), "aún no se pulsó")
 	m.press_clock(W)
-	m.start_cheat(B, &"nudge", _sq("a7"), _sq("a6"))
+	m.start_cheat(B, _sq("a2"), _sq("a3"))
 	m.tick(10.0)
 	m.submit_move(B, "e7e5")
 	m.press_clock(B)
@@ -156,7 +156,7 @@ func test_san_en_passant() -> void:
 func test_press_clock_rejected_while_hand_busy() -> void:
 	var m := _make(true)
 	check(m.submit_move(W, "e2e4").ok)
-	var r := m.start_cheat(W, &"nudge", _sq("h2"), _sq("h3"))
+	var r := m.start_cheat(W, _sq("h2"), _sq("h3"))
 	check(r.ok, "trampa con pulsación pendiente: " + str(r))
 	var p := m.press_clock(W)
 	check(not p.ok, "no se pulsa con la mano en una trampa")

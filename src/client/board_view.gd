@@ -2,7 +2,7 @@ class_name BoardView
 extends Node3D
 ## Vista 3D del tablero físico: 64 casillas, marco de madera, piezas con su
 ## desplazamiento fino (descentrado), pilas de captura junto a cada jugador y
-## resaltado de casilla seleccionada y destinos legales.
+## mapa de calor de la pieza elegida (casillas por nivel de sospecha y zona de la pila propia).
 ##
 ## Escala: metros (ver PieceFactory). Se espera que este nodo esté en el
 ## origen del mundo; el centro del tablero queda a la altura de la mesa.
@@ -26,6 +26,23 @@ const PILE_X := 0.42
 const PILE_Z := 0.22
 const PILE_COLUMNS := 4
 const PILE_SPACING := 0.04
+## Zona de la pila propia donde se suelta una pieza rival para robarla: ancho (X), fondo (Z) y
+## centro en Z (el signo depende del lado). Cubre las 4 columnas y unas 4 filas de la pila.
+const PILE_ZONE_SIZE := Vector2(0.19, 0.17)
+const PILE_ZONE_Z := 0.25
+## Margen extra (m) al apuntar con el rayo a la zona de la pila.
+const PILE_ZONE_MARGIN := 0.015
+
+## Colores del mapa de calor por nivel de sospecha (0 = jugada legal, 1 sutil, 2+ rojo cada vez
+## más oscuro) y su opacidad, que baja con el nivel para no ensuciar el tablero.
+const HEAT_COLORS := [
+	Color(0.25, 0.85, 0.35), Color(1.0, 0.58, 0.12), Color(0.96, 0.08, 0.08),
+	Color(0.76, 0.04, 0.10), Color(0.52, 0.0, 0.12),
+]
+const HEAT_ALPHAS := [0.55, 0.45, 0.30, 0.12, 0.04]
+## Rojo tenue de la zona de la pila.
+const PILE_ZONE_COLOR := Color(0.85, 0.12, 0.1, 0.22)
+const PILE_ZONE_HOVER_COLOR := Color(0.95, 0.2, 0.15, 0.42)
 
 ## true cuando el humano juega con negras (el tablero se gira para tenerlas cerca).
 var flipped: bool = false
@@ -44,9 +61,14 @@ var _synced_once: bool = false
 var _tiles_root: Node3D
 var _pieces_root: Node3D
 var _hl_root: Node3D
-var _sel_marker: MeshInstance3D
-var _hover_marker: MeshInstance3D
-var _target_markers: Array[Node3D] = []
+var _sel_marker: Node3D
+var _hover_marker: Node3D
+## Casillas del mapa de calor (una por casilla, se crean al usarlas) y anillos de captura.
+var _heat_tiles: Dictionary = {}
+var _capture_rings: Array[MeshInstance3D] = []
+## Zona de la pila de capturas propia (rectángulo en la mesa) y su material.
+var _pile_zone: MeshInstance3D
+var _pile_zone_mat: StandardMaterial3D
 var _holds: int = 0
 var _pending_sync: BoardState = null
 var _motion_busy: bool = false
@@ -108,6 +130,43 @@ func ray_to_board_point(origin: Vector3, dir: Vector3) -> Vector3:
 	if t < 0.0:
 		return Vector3.INF
 	return origin + dir * t
+
+
+## Centro local de la zona de la pila de capturas de `by_color` (a la altura de la mesa).
+func pile_zone_center(by_color: int) -> Vector3:
+	var sgn := 1.0 if by_color == near_color else -1.0
+	return Vector3(PILE_X, TABLE_TOP, sgn * PILE_ZONE_Z)
+
+
+## ¿El punto del mundo cae dentro de la zona de la pila de capturas de `by_color`?
+func pile_zone_contains(p: Vector3, by_color: int) -> bool:
+	return zone_hit(to_local(p), by_color == near_color)
+
+
+## Función pura: ¿el punto local (con su Z) cae en la zona de la pila del lado cercano o lejano?
+static func zone_hit(local: Vector3, near: bool) -> bool:
+	var l := local - Vector3(PILE_X, 0.0, (1.0 if near else -1.0) * PILE_ZONE_Z)
+	var half := PILE_ZONE_SIZE * 0.5 + Vector2.ONE * PILE_ZONE_MARGIN
+	return absf(l.x) <= half.x and absf(l.z) <= half.y
+
+
+## ¿El rayo apunta a la zona de la pila de capturas de `by_color`? (corta el plano de la mesa).
+func ray_to_pile(origin: Vector3, dir: Vector3, by_color: int) -> bool:
+	if absf(dir.y) < 0.0001:
+		return false
+	var t := (TABLE_TOP - origin.y) / dir.y
+	if t < 0.0:
+		return false
+	return pile_zone_contains(origin + dir * t, by_color)
+
+
+## Color con opacidad del mapa de calor para un nivel (0 verde, 1 naranja, 2 rojo, 3+ más oscuro).
+## Función pura: niveles negativos se tratan como 0 y los altos como el último.
+static func heat_color(level: int) -> Color:
+	var i := clampi(level, 0, HEAT_COLORS.size() - 1)
+	var c: Color = HEAT_COLORS[i]
+	c.a = HEAT_ALPHAS[i]
+	return c
 
 
 ## Posición global del hueco `index` de la pila de capturas hecha por `by_color`.
@@ -276,42 +335,68 @@ func release_motion() -> void:
 
 # --- Resaltado -----------------------------------------------------------------
 
-## `targets`: Array de {sq:int, capture:bool}.
-func set_highlights(selected: int, targets: Array) -> void:
+## Mapa de calor de la pieza elegida: colorea cada casilla de `levels` ({casilla: nivel}) según
+## `heat_color`, contornea la seleccionada y marca con un anillo las capturas legales (`captures`).
+## Si `levels` trae `CheatRules.TO_PILE` (pieza rival) ilumina la zona de la pila propia.
+func set_heatmap(selected: int, levels: Dictionary, captures: Array = []) -> void:
 	clear_highlights()
 	if selected >= 0:
-		_sel_marker.global_position = square_to_world(selected) + Vector3(0, 0.0012, 0)
+		_sel_marker.global_position = square_to_world(selected) + Vector3(0, 0.0016, 0)
 		_sel_marker.visible = true
-	for i in targets.size():
-		var m := _get_target_marker(i)
-		m.get_child(0).visible = not targets[i].capture
-		m.get_child(1).visible = targets[i].capture
-		m.global_position = square_to_world(targets[i].sq) + Vector3(0, 0.0015, 0)
-		m.visible = true
+	for key in levels.keys():
+		var sq := int(key)
+		if sq < 0 or sq > 63:
+			continue
+		var tile := _heat_tile(sq)
+		(tile.material_override as StandardMaterial3D).albedo_color = heat_color(int(levels[key]))
+		tile.global_position = square_to_world(sq) + Vector3(0, 0.0012, 0)
+		tile.visible = true
+	for i in captures.size():
+		var ring := _capture_ring(i)
+		ring.global_position = square_to_world(int(captures[i])) + Vector3(0, 0.0018, 0)
+		ring.visible = true
+	if levels.has(CheatRules.TO_PILE):
+		_pile_zone_mat.albedo_color = PILE_ZONE_COLOR
+		_pile_zone.visible = true
 
 
 func clear_highlights() -> void:
 	_sel_marker.visible = false
-	for m in _target_markers:
-		m.visible = false
+	for tile in _heat_tiles.values():
+		tile.visible = false
+	for r in _capture_rings:
+		r.visible = false
+	_pile_zone.visible = false
 
 
 func set_hover(sq: int) -> void:
 	_hover_marker.visible = sq >= 0
 	if sq >= 0:
-		_hover_marker.global_position = square_to_world(sq) + Vector3(0, 0.001, 0)
+		_hover_marker.global_position = square_to_world(sq) + Vector3(0, 0.0020, 0)
 
 
-func _get_target_marker(i: int) -> Node3D:
-	while _target_markers.size() <= i:
-		var holder := Node3D.new()
-		var dot := MeshInstance3D.new()
-		var cyl := CylinderMesh.new()
-		cyl.top_radius = 0.0105
-		cyl.bottom_radius = 0.0105
-		cyl.height = 0.0012
-		dot.mesh = cyl
-		dot.material_override = _flat_material(Color(0.35, 1.0, 0.45, 0.85))
+## Resalta la zona de la pila (el rayo del jugador apunta a ella) si está iluminada.
+func set_pile_hover(on: bool) -> void:
+	if _pile_zone.visible:
+		_pile_zone_mat.albedo_color = PILE_ZONE_HOVER_COLOR if on else PILE_ZONE_COLOR
+
+
+func _heat_tile(sq: int) -> MeshInstance3D:
+	var t: MeshInstance3D = _heat_tiles.get(sq)
+	if t == null:
+		t = MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(SQUARE * 0.98, 0.0008, SQUARE * 0.98)
+		t.mesh = bm
+		t.material_override = _flat_material(Color.WHITE)
+		t.visible = false
+		_hl_root.add_child(t)
+		_heat_tiles[sq] = t
+	return t
+
+
+func _capture_ring(i: int) -> MeshInstance3D:
+	while _capture_rings.size() <= i:
 		var ring := MeshInstance3D.new()
 		var tor := TorusMesh.new()
 		tor.inner_radius = 0.019
@@ -321,12 +406,10 @@ func _get_target_marker(i: int) -> Node3D:
 		ring.mesh = tor
 		ring.scale = Vector3(1, 0.2, 1)
 		ring.material_override = _flat_material(Color(1.0, 0.25, 0.2, 0.9))
-		holder.add_child(dot)
-		holder.add_child(ring)
-		holder.visible = false
-		_hl_root.add_child(holder)
-		_target_markers.append(holder)
-	return _target_markers[i]
+		ring.visible = false
+		_hl_root.add_child(ring)
+		_capture_rings.append(ring)
+	return _capture_rings[i]
 
 
 func _flat_material(c: Color) -> StandardMaterial3D:
@@ -389,19 +472,39 @@ func _build_highlights() -> void:
 	_hl_root = Node3D.new()
 	_hl_root.name = "Resaltado"
 	add_child(_hl_root)
-	_sel_marker = _flat_square(Color(1.0, 0.85, 0.2, 0.55))
-	_hover_marker = _flat_square(Color(1.0, 1.0, 1.0, 0.2))
-
-
-func _flat_square(c: Color) -> MeshInstance3D:
-	var mi := MeshInstance3D.new()
+	_sel_marker = _outline(Color(1.0, 0.88, 0.3, 0.95), 0.0035)
+	_hover_marker = _outline(Color(1.0, 1.0, 1.0, 0.8), 0.0022)
+	# Zona de la pila propia: rectángulo plano sobre la mesa (oculto hasta que se roba).
+	_pile_zone = MeshInstance3D.new()
 	var bm := BoxMesh.new()
-	bm.size = Vector3(SQUARE * 0.96, 0.0008, SQUARE * 0.96)
-	mi.mesh = bm
-	mi.material_override = _flat_material(c)
-	mi.visible = false
-	_hl_root.add_child(mi)
-	return mi
+	bm.size = Vector3(PILE_ZONE_SIZE.x, 0.0008, PILE_ZONE_SIZE.y)
+	_pile_zone.mesh = bm
+	_pile_zone_mat = _flat_material(PILE_ZONE_COLOR)
+	_pile_zone.material_override = _pile_zone_mat
+	_pile_zone.position = pile_zone_center(near_color) + Vector3(0, 0.0012, 0)
+	_pile_zone.visible = false
+	_hl_root.add_child(_pile_zone)
+
+
+## Contorno claro de una casilla (cuatro barras finas); se mueve con `global_position`.
+func _outline(c: Color, thickness: float) -> Node3D:
+	var holder := Node3D.new()
+	var mat := _flat_material(c)
+	var half := SQUARE * 0.5
+	for side in 4:
+		var bar := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		var horizontal := side < 2
+		bm.size = Vector3(SQUARE if horizontal else thickness, 0.0008, thickness if horizontal else SQUARE)
+		bar.mesh = bm
+		bar.material_override = mat
+		var sgn := -1.0 if side % 2 == 0 else 1.0
+		bar.position = Vector3(0.0, 0.0, sgn * (half - thickness * 0.5)) if horizontal \
+				else Vector3(sgn * (half - thickness * 0.5), 0.0, 0.0)
+		holder.add_child(bar)
+	holder.visible = false
+	_hl_root.add_child(holder)
+	return holder
 
 
 func _lit_material(c: Color, rough: float) -> StandardMaterial3D:

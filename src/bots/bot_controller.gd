@@ -263,8 +263,7 @@ func _update_cheating(delta: float) -> void:
 	var active: Variant = server.active_cheat(color)
 	if active != null:
 		if just_looked and _abort_at < 0.0:
-			var def := server.get_cheat(active.cheat_id)
-			if _rng.randf() < CheatPlanner.abort_probability(personality, def.evidence):
+			if _rng.randf() < CheatPlanner.abort_probability(personality, active.evidence):
 				_abort_at = _time + _rng.randf_range(0.2, 0.6)
 		if _abort_at >= 0.0 and _time >= _abort_at:
 			_abort_at = -1.0
@@ -293,7 +292,7 @@ func _consider_cheating(opp_looking: bool) -> void:
 		return
 	if _rng.randf() >= p:
 		return
-	var plan := CheatPlanner.plan(server.board, color, server.config.cheats, _rng, personality.risk_appetite)
+	var plan := CheatPlanner.plan(server.board, color, server.config.cheats, _rng, personality.risk_appetite, server.turn_ready_for(color))
 	if plan.is_empty():
 		return
 	# En mi turno, no empezar algo que ocupe la mano cuando ya debo entregar la jugada.
@@ -301,11 +300,11 @@ func _consider_cheating(opp_looking: bool) -> void:
 		if not _thinking or _think_deadline - _time < plan.duration + CHEAT_MOVE_MARGIN:
 			return
 	var def: CheatDef = plan.def
-	var res := server.start_cheat(color, def.id, plan.from, plan.to)
+	var res := server.start_cheat(color, plan.from, plan.to)
 	if res.ok:
 		_cheats_made += 1
 		_next_cheat_ok = server.time + res.duration + _rng.randf_range(CHEAT_COOLDOWN_BETWEEN.x, CHEAT_COOLDOWN_BETWEEN.y)
-		_log("hace trampa %s %s->%s (ganancia %.0f, dura %.1fs)" % [def.id, ChessPiece.square_name(plan.from), ChessPiece.square_name(plan.to) if plan.to >= 0 else "mano", plan.gain, res.duration])
+		_log("hace trampa %s %s->%s (nivel %d, ganancia %.0f, dura %.1fs%s)" % [def.id, ChessPiece.square_name(plan.from), ChessPiece.square_name(plan.to) if plan.to >= 0 else "pila", res.level, plan.gain, res.duration, ", como jugada" if res.as_move else ""])
 
 
 ## Si el rival no deja de mirar y quiere hacer trampa, intenta distraerlo con un evento.
@@ -318,7 +317,7 @@ func _maybe_distract_rival() -> void:
 	if _rng.randf() >= minf(want * 4.0, 0.4):
 		return
 	# Con propósito: solo si tendría una trampa que valga la pena en cuanto el rival aparte la vista.
-	if CheatPlanner.plan(server.board, color, server.config.cheats, _rng, personality.risk_appetite).is_empty():
+	if CheatPlanner.plan(server.board, color, server.config.cheats, _rng, personality.risk_appetite, server.turn_ready_for(color)).is_empty():
 		return
 	_next_event_ok = server.time + CheatPlanner.event_cooldown(personality.risk_appetite, _rng)
 	var event_id: StringName = &"cough" if _rng.randf() < 0.6 else &"drop_piece"
@@ -345,8 +344,7 @@ func _watch_for_cheats() -> void:
 	if _judged.has(key):
 		return
 	_judged[key] = true
-	var def := server.get_cheat(entry.cheat_id)
-	if _rng.randf() < personality.detect_chance * def.evidence:
+	if _rng.randf() < personality.detect_chance * entry.evidence:
 		if not await _wait(_rng.randf_range(0.3, 1.0)):
 			return
 		# Solo acusa si de verdad la vio y el rival no abortó (ya no habría qué probar).
@@ -366,8 +364,7 @@ func _on_cheat_finished(cheater: int, _cheat_id: StringName, _from: int, _to: in
 	if entry == null or not entry.seen or _judged.has(_entry_key(entry)):
 		return
 	_judged[_entry_key(entry)] = true
-	var def := server.get_cheat(entry.cheat_id)
-	var p := personality.detect_chance * lerpf(0.5, 1.0, def.evidence)
+	var p := personality.detect_chance * lerpf(0.5, 1.0, entry.evidence)
 	if _rng.randf() < p:
 		if not await _wait(_rng.randf_range(0.5, 1.5)):
 			return

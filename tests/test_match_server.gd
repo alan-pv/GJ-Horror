@@ -5,7 +5,7 @@ func _make(fen: String = BoardState.START_FEN, help: bool = false) -> MatchServe
 	var cfg := MatchConfig.new()
 	cfg.beginner_help = help
 	cfg.arbiter_delay = 1.0
-	for id in ["nudge", "slide", "steal", "move_enemy"]:
+	for id in ["own", "enemy", "steal"]:
 		cfg.cheats.append(load("res://data/cheats/%s.tres" % id))
 	var m := MatchServer.new(cfg, PlayerSession.new(1, "Blancas"), PlayerSession.new(2, "Negras", true), fen, 1)
 	m.start()

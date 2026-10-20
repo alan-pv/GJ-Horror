@@ -20,7 +20,8 @@ signal game_over(winner: int, reason: String)
 signal rival_event(color: int, event_id: StringName)
 ## `color` pulsó el reloj: su turno terminó (con `require_clock_press` pasa después de mover).
 signal clock_pressed(color: int)
-## Se anotó una jugada legal en la planilla de `color`. Las trampas nunca se anotan.
+## Se anotó una jugada legal en la planilla de `color`. Las trampas nunca se anotan
+## (tampoco las que cuentan como jugada: no dejan entrada en la planilla).
 signal sheet_entry(color: int, move_number: int, san: String)
 
 ## Eventos que un jugador puede provocar sobre sí mismo.
@@ -48,8 +49,9 @@ var started: bool = false
 var winner: int = -1
 var end_reason: String = ""
 
-## Historial de trampas: {color, cheat_id, from, to, start, end, ply, seen, status}.
-## status: "active", "done" o "aborted". Sirve para resolver acusaciones.
+## Historial de trampas: {color, cheat_id, from, to, start, end, ply, seen, status,
+## level, evidence, as_move}. status: "active", "done" o "aborted". Sirve para
+## resolver acusaciones. `to` es `CheatRules.TO_PILE` en un robo.
 var cheat_log: Array[Dictionary] = []
 var move_log: Array[Dictionary] = []
 var ply: int = 0
@@ -68,6 +70,7 @@ var _pending_accusation: Dictionary = {}
 var _position_counts: Dictionary = {}
 var _warned: Dictionary = {}
 var _cheats_by_id: Dictionary = {}
+var _cheats_by_kind: Dictionary = {}
 var _rng := RandomNumberGenerator.new()
 ## Cuándo (tiempo de servidor) puede repetir cada color cada evento: "color:id" -> segundos.
 var _rival_event_ready: Dictionary = {}
@@ -86,6 +89,7 @@ func _init(p_config: MatchConfig, white: PlayerSession, black: PlayerSession, st
 	clock.flagged.connect(_on_flag)
 	for c in config.cheats:
 		_cheats_by_id[c.id] = c
+		_cheats_by_kind[c.kind] = c
 	if seed_value >= 0:
 		_rng.seed = seed_value
 	_record_position()
@@ -145,6 +149,14 @@ func accusation_pending() -> bool:
 
 func get_cheat(id: StringName) -> CheatDef:
 	return _cheats_by_id.get(id)
+
+
+## Destinos válidos de la pieza de `from` para `color` y su nivel de sospecha:
+## {casilla: nivel} (el nivel 0 es una jugada legal, solo en tu turno) y, si la
+## pieza es rival, también `CheatRules.TO_PILE`. {} si no hay pieza o es un rey.
+## No mira si la mano está ocupada: eso lo decide el cliente.
+func cheat_preview(color: int, from: int) -> Dictionary:
+	return CheatRules.preview(board, color, from, turn_ready_for(color))
 
 
 func _can_act(color: int) -> String:
@@ -248,29 +260,48 @@ func set_gaze(color: int, eye: Vector3, forward: Vector3) -> void:
 	_looking[color] = Gaze.is_looking(eye, forward, config.board_center, config.gaze_cos_threshold)
 
 
-## Empieza una trampa. Se puede hacer en cualquier turno; en el propio, el
-## reloj sigue corriendo mientras la mano trabaja. Devuelve {ok, reason, duration}.
-func start_cheat(color: int, cheat_id: StringName, from: int, to: int = -1) -> Dictionary:
+## 1 si `color` puede jugar ahora (le toca y el rival ya pulsó el reloj), 0 si no.
+## Define si mover una pieza propia es "en tu turno" para el nivel de sospecha.
+func turn_ready_for(color: int) -> int:
+	return 1 if board.side_to_move == color and pending_press < 0 else 0
+
+
+## Empieza una trampa: el jugador agarró la pieza de `from` y la pone en `to`
+## (o en `CheatRules.TO_PILE`). El servidor clasifica la clase y el nivel de
+## sospecha (ver `CheatRules`). Se puede hacer en cualquier turno; el reloj sigue
+## corriendo mientras la mano trabaja. Una pieza propia a una casilla no legal en
+## tu turno cuenta como tu jugada (`as_move`): al terminar pasa el turno.
+## Devuelve {ok, reason, duration, level, kind_id, as_move}.
+func start_cheat(color: int, from: int, to: int) -> Dictionary:
+	var fail := {"ok": false, "reason": "", "duration": 0.0, "level": -1, "kind_id": &"", "as_move": false}
 	var err := _can_act(color)
 	if err == "" and is_hand_busy(color):
 		err = "your hand is busy"
-	var def := get_cheat(cheat_id)
-	if err == "" and def == null:
-		err = "cheat not available"
+	var v := {}
+	if err == "":
+		v = CheatRules.validate(board, color, from, to, false, turn_ready_for(color))
+		if not v.ok:
+			err = v.reason
+	var def: CheatDef = null
+	if err == "":
+		def = _cheats_by_kind.get(v.kind)
+		if def == null:
+			err = "cheat not available"
 	if err != "":
-		return {"ok": false, "reason": err, "duration": 0.0}
-	var v := CheatRules.validate(board, color, def, from, to)
-	if not v.ok:
-		return {"ok": false, "reason": v.reason, "duration": 0.0}
+		fail.reason = err
+		return fail
+	var duration := def.duration_for(v.distance)
+	var evidence := def.evidence_for(v.level)
 	var entry := {
-		"color": color, "cheat_id": cheat_id, "from": from, "to": to,
-		"start": time, "end": time + v.duration, "ply": ply,
+		"color": color, "cheat_id": def.id, "from": from, "to": to,
+		"start": time, "end": time + duration, "ply": ply,
 		"seen": _looking[ChessPiece.opposite(color)] or _arbiter_near, "status": "active",
+		"level": v.level, "evidence": evidence, "as_move": v.as_move,
 	}
 	cheat_log.append(entry)
 	_active_cheat[color] = entry
-	cheat_started.emit(color, cheat_id, from, to, v.duration)
-	return {"ok": true, "reason": "", "duration": v.duration}
+	cheat_started.emit(color, def.id, from, to, duration)
+	return {"ok": true, "reason": "", "duration": duration, "level": v.level, "kind_id": def.id, "as_move": v.as_move}
 
 
 ## Abortar a mitad de la trampa: el tablero no cambia y no cuenta como trampa
@@ -382,18 +413,42 @@ func _finish_cheat(color: int, entry: Dictionary) -> void:
 	_active_cheat[color] = null
 	var def := get_cheat(entry.cheat_id)
 	# El tablero pudo cambiar mientras la mano trabajaba: se valida de nuevo.
-	var v := CheatRules.validate(board, color, def, entry.from, entry.to)
-	if not v.ok:
+	# Una trampa fuera de turno puede haberse vuelto legal porque el turno cambió.
+	var v := CheatRules.validate(board, color, entry.from, entry.to, not entry.as_move, turn_ready_for(color))
+	if not v.ok or (entry.as_move and not v.as_move):
 		entry.status = "aborted"
 		cheat_aborted.emit(color, entry.cheat_id)
 		return
 	CheatRules.apply(board, color, def, entry.from, entry.to, _rng)
-	_invalidate_legal()
 	entry.status = "done"
+	if entry.as_move:
+		_pass_turn_after_cheat(color)
+	_invalidate_legal()
 	_record_position()
 	cheat_finished.emit(color, entry.cheat_id, entry.from, entry.to)
 	_check_board_end()
+	# Si la trampa-jugada terminó la partida no se espera la pulsación.
+	if is_over() and pending_press == color:
+		_flush_pending_sheet()
 	state_changed.emit()
+
+
+## La trampa de una pieza propia en tu turno fue tu jugada: pasa el turno como
+## en `submit_move` (sin planilla: no hay SAN que anotar) y deja el reloj por pulsar.
+func _pass_turn_after_cheat(color: int) -> void:
+	var number := board.fullmove_number
+	board.side_to_move = ChessPiece.opposite(color)
+	board.ep_square = -1
+	if color == ChessPiece.BLACK:
+		board.fullmove_number += 1
+	ply += 1
+	move_log.append({"color": color, "uci": "", "time": time, "cheat": true})
+	if config.require_clock_press:
+		pending_press = color
+		_pending_san = ""
+		_pending_number = number
+	else:
+		_press(color, "", number)
 
 
 func _resolve_accusation() -> void:

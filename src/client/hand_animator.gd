@@ -26,9 +26,10 @@ extends Node
 ## Variación humana: velocidad distinta en cada jugada, más rápida con estrés,
 ## y el temblor del `HandRig` crece con el estrés.
 ##
-## Trampas: `enqueue_cheat` pone en cola un movimiento propio de cada trampa
-## (empujón, arrastre, robo, pieza enemiga) con la duración que dicta el
-## servidor. No pide el cerrojo de movimiento (las trampas pueden coincidir
+## Trampas: `enqueue_cheat` pone en cola el gesto de cada clase (pieza propia o rival a distancia
+## 1: empujón sin levantarla; a distancia 2 o más: se levanta y se lleva en arco; robo: pinza,
+## levanta y la deja en la pila propia) con la duración que dicta el
+## servidor. Si la trampa fue la jugada del turno, `enqueue_press` encola la pulsación del reloj. No pide el cerrojo de movimiento (las trampas pueden coincidir
 ## con la jugada de la otra mano) y espera a `resolve_cheat` para soltar la
 ## pieza con el descentrado definitivo, o para deshacer el gesto si se aborta.
 
@@ -138,14 +139,21 @@ func _process(delta: float) -> void:
 		write_rig.stress = rig.stress
 
 
-## Pone en cola el gesto de una trampa. `kind` es `CheatDef.Kind`; `to_sq` es -1
-## en el robo. `duration` es la del servidor: el tablero cambia al terminar.
+## Pone en cola el gesto de una trampa. `kind` es `CheatDef.Kind`; `to_sq` es
+## `CheatRules.TO_PILE` en el robo. `duration` es la del servidor: el tablero cambia al terminar.
 func enqueue_cheat(kind: int, from_sq: int, to_sq: int, duration: float) -> void:
+	var dist := CheatRules.king_distance(from_sq, to_sq) if to_sq >= 0 else 0
 	_push({
-		"kind": "cheat", "cheat_kind": kind, "from": from_sq, "to": to_sq,
+		"kind": "cheat", "cheat_kind": kind, "from": from_sq, "to": to_sq, "distance": dist,
 		"duration": duration, "deadline": _clock + duration,
 		"resolved": false, "applied": false, "offset": Vector2.ZERO,
 	})
+
+
+## Encola solo la pulsación del reloj (tras una trampa que fue la jugada del turno): la mano pulsa
+## y vuelve al reposo, sin escribir en la planilla (no hay SAN que anotar).
+func enqueue_press() -> void:
+	_push({"kind": "press"})
 
 
 ## El servidor terminó (`applied`, con el descentrado final de la pieza) o abortó la trampa.
@@ -190,8 +198,10 @@ func _pump() -> void:
 			continue
 		var is_cheat: bool = job.kind == "cheat"
 		var is_write: bool = job.kind == "write"
+		# Las trampas, la escritura y la pulsación suelta no mueven piezas: no piden el cerrojo.
+		var locks: bool = not (is_cheat or is_write or job.kind == "press")
 		_current_job = job
-		if not is_cheat and not is_write:
+		if locks:
 			await board.acquire_motion()
 			if not is_inside_tree():
 				_queue.clear()
@@ -206,13 +216,15 @@ func _pump() -> void:
 				await _run_hesitate(job)
 			"write":
 				await _run_write(job)
+			"press":
+				await _run_press()
 			"cheat":
 				await _run_cheat(job)
 		_current_job = {}
 		if not is_inside_tree() or not is_instance_valid(board):
 			_queue.clear()
 			break
-		if not is_cheat and not is_write:
+		if locks:
 			board.release_motion()
 		if not is_write:
 			board.release_sync()
@@ -256,6 +268,13 @@ func _run_move(job: Dictionary) -> void:
 		_push({"kind": "write"})
 	else:
 		await _return_home()
+
+
+## Pulsación suelta del reloj (tras una trampa-jugada): va al botón, pulsa y vuelve al reposo.
+func _run_press() -> void:
+	await _pause(_rng.randf_range(0.05, 0.2))
+	await _press_clock()
+	await _return_home()
 
 
 func _run_hesitate(job: Dictionary) -> void:
@@ -350,22 +369,19 @@ func _run_cheat(job: Dictionary) -> void:
 		return
 	# El gesto debe acabar cuando el servidor aplica el cambio: se ajusta al tiempo que queda.
 	var total := maxf(job.deadline - _clock, CHEAT_MIN_TIME)
-	var ok := false
 	match int(job.cheat_kind):
-		CheatDef.Kind.NUDGE:
-			ok = await _cheat_nudge(job, total)
-		CheatDef.Kind.SLIDE:
-			ok = await _cheat_drag(job, total, false)
-		CheatDef.Kind.MOVE_ENEMY:
-			ok = await _cheat_drag(job, total, true)
 		CheatDef.Kind.STEAL:
-			ok = await _cheat_steal(job, total)
-	# Regreso visible, con el puño cerrado si se llevó una pieza.
-	var fist: bool = ok and int(job.cheat_kind) == CheatDef.Kind.STEAL
-	await _return_home_cheat(fist)
+			await _cheat_steal(job, total)
+		_:
+			# Pieza propia o rival: a distancia 1 se empuja sin levantarla; si no, se lleva en arco.
+			if int(job.distance) <= 1:
+				await _cheat_nudge(job, total)
+			else:
+				await _cheat_drag(job, total)
+	await _return_home_cheat()
 
 
-## Empujoncito: la mano empuja la pieza una casilla, sin levantarla.
+## Empujón: la mano empuja la pieza una casilla (también en diagonal), sin levantarla.
 func _cheat_nudge(job: Dictionary, total: float) -> bool:
 	var node: Node3D = board.take_piece(job.from)
 	if node == null:
@@ -396,8 +412,8 @@ func _cheat_nudge(job: Dictionary, total: float) -> bool:
 	return true
 
 
-## Deslizar (arrastre bajo sobre el tablero) o mover pieza enemiga (se levanta y se lleva en arco).
-func _cheat_drag(job: Dictionary, total: float, lifted: bool) -> bool:
+## Pieza a distancia 2 o más: pinza, se levanta, cruza en arco y se posa en el destino.
+func _cheat_drag(job: Dictionary, total: float) -> bool:
 	var node: Node3D = board.take_piece(job.from)
 	if node == null:
 		return false
@@ -416,22 +432,12 @@ func _cheat_drag(job: Dictionary, total: float, lifted: bool) -> bool:
 	rig.attach_piece(node, gh)
 	_set_phase(&"cheat")
 	var drop_y := dest.y + gh + 0.004
-	if lifted:
-		if not await _cmove(job, Vector3(grip_a.x, clear_y, grip_a.z), total * 0.12, 0.0, 58.0):
-			return await _cheat_return_piece(job)
-		if not await _cmove(job, Vector3(dest.x, clear_y, dest.z), total * 0.30, 0.025, 58.0):
-			return await _cheat_return_piece(job)
-		if not await _cmove(job, Vector3(dest.x, drop_y, dest.z), total * 0.20, 0.0, 62.0):
-			return await _cheat_return_piece(job)
-	else:
-		# Arrastre pegado a la mesa: la pieza apenas se despega.
-		var low_a := Vector3(grip_a.x, grip_a.y + 0.006, grip_a.z)
-		if not await _cmove(job, low_a, total * 0.05, 0.0, 62.0):
-			return await _cheat_return_piece(job)
-		if not await _cmove(job, Vector3(dest.x, drop_y + 0.004, dest.z), total * 0.52, 0.0, 62.0):
-			return await _cheat_return_piece(job)
-		if not await _cmove(job, Vector3(dest.x, drop_y, dest.z), total * 0.05, 0.0, 62.0):
-			return await _cheat_return_piece(job)
+	if not await _cmove(job, Vector3(grip_a.x, clear_y, grip_a.z), total * 0.12, 0.0, 58.0):
+		return await _cheat_return_piece(job)
+	if not await _cmove(job, Vector3(dest.x, clear_y, dest.z), total * 0.30, 0.025, 58.0):
+		return await _cheat_return_piece(job)
+	if not await _cmove(job, Vector3(dest.x, drop_y, dest.z), total * 0.20, 0.0, 62.0):
+		return await _cheat_return_piece(job)
 	if not await _wait_resolved(job):
 		return await _cheat_return_piece(job)
 	var held := rig.release_piece()
@@ -441,7 +447,7 @@ func _cheat_drag(job: Dictionary, total: float, lifted: bool) -> bool:
 	return true
 
 
-## Robar: pinza, levanta y la lleva al regazo, fuera de la vista; la pieza queda escondida en la mano.
+## Robar: pinza, levanta la pieza rival y la lleva a la pila de capturas propia, donde queda.
 func _cheat_steal(job: Dictionary, total: float) -> bool:
 	var node: Node3D = board.take_piece(job.from)
 	if node == null:
@@ -449,9 +455,7 @@ func _cheat_steal(job: Dictionary, total: float) -> bool:
 	var gh := PieceFactory.grip_height(int(node.get_meta("code")))
 	var grip_a := node.global_position + Vector3(0, gh, 0)
 	var clear_y := BoardView.BOARD_TOP + KING_HEIGHT + CARRY_CLEARANCE + gh
-	var sgn := 1.0 if color == board.near_color else -1.0
-	var lap := Vector3(0.12, BoardView.TABLE_TOP - 0.12, sgn * 0.58)
-	var edge := Vector3(0.16, BoardView.TABLE_TOP + 0.06, sgn * 0.44)
+	var slot := board.pile_slot(color, board.piles[color].size())
 	_set_phase(&"reach")
 	rig.set_pose(HandRig.Pose.OPEN, 0.2)
 	if not await _cmove(job, grip_a + Vector3(0, 0.06, 0), total * 0.28, 0.08, 58.0):
@@ -464,18 +468,16 @@ func _cheat_steal(job: Dictionary, total: float) -> bool:
 	_set_phase(&"cheat")
 	if not await _cmove(job, Vector3(grip_a.x, clear_y, grip_a.z), total * 0.12, 0.0, 58.0):
 		return await _cheat_return_piece(job)
-	# Hacia el borde de la mesa y por debajo, al regazo.
-	if not await _cmove(job, edge, total * 0.22, 0.03, 70.0):
+	if not await _cmove(job, Vector3(slot.x, clear_y, slot.z), total * 0.30, 0.025, 58.0):
 		return await _cheat_return_piece(job)
-	if not await _cmove(job, lap, total * 0.18, 0.0, 80.0):
+	if not await _cmove(job, Vector3(slot.x, slot.y + gh + 0.004, slot.z), total * 0.15, 0.0, 62.0):
 		return await _cheat_return_piece(job)
 	if not await _wait_resolved(job):
 		return await _cheat_return_piece(job)
-	# La pieza queda escondida en la mano: se cierra el puño y desaparece.
 	var held := rig.release_piece()
-	if held != null:
-		held.queue_free()
-	rig.set_pose(HandRig.Pose.GRIP, 0.12)
+	board.add_to_pile(held, color)
+	rig.set_pose(HandRig.Pose.OPEN, 0.12)
+	await _cmove(null, Vector3(slot.x, slot.y + gh + 0.07, slot.z), total * 0.08, 0.0, 55.0)
 	return true
 
 
@@ -529,9 +531,9 @@ func _cmove(job: Variant, dest: Vector3, duration: float, lift: float = 0.0, pit
 	return await _flow(rig, wps, duration, opts)
 
 
-func _return_home_cheat(fist: bool) -> void:
+func _return_home_cheat() -> void:
 	_set_phase(&"return")
-	rig.set_pose(HandRig.Pose.GRIP if fist else HandRig.Pose.OPEN, 0.2)
+	rig.set_pose(HandRig.Pose.OPEN, 0.2)
 	await _cmove(null, rest_grip, 0.6, 0.05, rest_pitch)
 	rig.set_pose(HandRig.Pose.OPEN, 0.25)
 

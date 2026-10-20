@@ -13,7 +13,7 @@ func _make() -> MatchServer:
 	cfg.beginner_help = false
 	cfg.arbiter_delay = 1.0
 	cfg.rival_event_cooldown = 5.0
-	for id in ["nudge", "slide", "steal", "move_enemy"]:
+	for id in ["own", "enemy", "steal"]:
 		cfg.cheats.append(load("res://data/cheats/%s.tres" % id))
 	var m := MatchServer.new(cfg, PlayerSession.new(1, "Blancas"), PlayerSession.new(2, "Negras", true), BoardState.START_FEN, 7)
 	m.start()
@@ -58,7 +58,7 @@ func test_rejected_during_accusation() -> void:
 
 func test_drop_piece_needs_free_hand() -> void:
 	var m := _make()
-	var r := m.start_cheat(B, &"nudge", _sq("e7"), _sq("e6"))
+	var r := m.start_cheat(B, _sq("e7"), _sq("e6"))
 	check(r.ok, "empieza la trampa")
 	check(not m.trigger_rival_event(B, &"drop_piece").ok, "mano ocupada")
 	check(m.trigger_rival_event(B, &"cough").ok, "toser no usa la mano")
@@ -67,7 +67,7 @@ func test_drop_piece_needs_free_hand() -> void:
 func test_arbiter_near_marks_cheats_seen() -> void:
 	var m := _make()
 	m._looking[B] = false
-	var r := m.start_cheat(W, &"nudge", _sq("e2"), _sq("e3"))
+	var r := m.start_cheat(W, _sq("a7"), _sq("a6"))
 	check(r.ok)
 	m.tick(0.1)
 	check(not m.cheat_log[0].seen, "sin árbitro ni mirada no se ve")
@@ -81,9 +81,9 @@ func test_arbiter_near_before_cheat_starts() -> void:
 	var m := _make()
 	m._looking[B] = false
 	m.set_arbiter_near(true)
-	m.start_cheat(W, &"nudge", _sq("e2"), _sq("e3"))
+	m.start_cheat(W, _sq("a7"), _sq("a6"))
 	check(m.cheat_log[0].seen, "nace vista")
 	m.set_arbiter_near(false)
 	m._looking[W] = false
-	m.start_cheat(B, &"nudge", _sq("e7"), _sq("e6"))
+	m.start_cheat(B, _sq("e7"), _sq("e6"))
 	check(not m.cheat_log[1].seen, "sin árbitro no se ve")

@@ -24,7 +24,7 @@ extends Node3D
 ## Sin argumentos el juego arranca en el menú principal (`src/ui/main_menu.tscn`);
 ## con cualquier argumento de usuario el menú salta directo a `main.tscn`.
 ##   --fen="..."          posición inicial distinta (pruebas)
-##   --shot-select=e2     selecciona esa casilla antes de capturar
+##   --shot-select=e2     elige esa pieza (propia o rival) antes de capturar: muestra su mapa de calor
 ##   --no-shadows         desactiva las sombras de la lámpara
 ##   --aerial[=x,y,z,tx,ty,tz]  cámara aérea del salón entero, sin techo (capturas)
 ##   --no-arbiter-exec    las eliminaciones de fondo usan el respaldo sin árbitro (pruebas)
@@ -50,7 +50,7 @@ const MODULES: Array[String] = [
 
 ## Tope de jugadas de las mesas de fondo por fotograma (reparte el costo).
 const BG_MOVES_PER_FRAME := 1
-const CHEAT_IDS := ["nudge", "slide", "steal", "move_enemy"]
+const CHEAT_IDS := ["own", "enemy", "steal"]
 const PERSONALITY_IDS := ["honesto", "paranoico", "tramposo_nervioso"]
 ## Suelo bajo el centro del asiento del rival (la silla del salón está a 0,80 m; se avanza para llegar al tablero).
 const RIVAL_SEAT := Vector3(0.0, 0.0, -PlayerController.SEAT.z)
@@ -151,6 +151,7 @@ func _ready() -> void:
 	hud = Hud.new()
 	hud.name = "Interfaz"
 	add_child(hud)
+	player.hud = hud
 	hud.show_capture_prompt = not _args.has("screenshot")
 	hud.set_mouse_captured(false)
 	player.mouse_capture_changed.connect(hud.set_mouse_captured)

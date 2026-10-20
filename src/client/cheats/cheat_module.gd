@@ -2,21 +2,22 @@ class_name CheatModule
 extends Node
 ## Módulo de gameplay "trampas y árbitro" (Hito 2A). `GameRoot` lo instancia y
 ## llama a `install`. Conecta las señales de trampas del servidor con las
-## animaciones de AMBAS manos y crea la entrada del jugador (teclas 1-4) y el
-## panel de trampas. (El árbitro lo crea `ArbiterModule`.) No decide nada: solo
-## dibuja lo que el servidor confirma.
+## animaciones de AMBAS manos (humano y bots). La entrada del jugador vive en
+## `PlayerController`/`PieceInteraction`. (El árbitro lo crea `ArbiterModule`.)
+## No decide nada: solo dibuja lo que el servidor confirma. Si la trampa fue la
+## jugada del turno (`awaiting_press`), la mano va después a pulsar el reloj.
 ##
 ## Depuración (argumentos tras `--`):
-##   --cheat-demo=NOMBRE   guion automático de trampas: steal, slide, nudge,
-##                         move, abort, accuse o all (ver `_demo_steps`).
-##                         Conviene `--fen=...` con líneas abiertas y `--human=white`.
+##   --cheat-demo=NOMBRE   guion automático de trampas: own, ownlong, enemy, steal, abort,
+##                         accuse, asmove, input o all (ver `_demo_steps`).
+##                         Usar `--human=white` y `--fen="r3k3/p7/2n1p3/8/8/8/PPPP1PPP/R3K2R w - - 0 1"`.
 
 signal installed
 
+const TO_PILE := CheatRules.TO_PILE
+
 var root: GameRoot
 var server: MatchServer
-var input: CheatInput
-var panel: CheatPanel
 
 var _demo: Array[Dictionary] = []
 var _demo_time: float = 0.0
@@ -34,19 +35,6 @@ func install(p_root: GameRoot) -> void:
 	server.cheat_aborted.connect(_on_cheat_aborted)
 	for a in root.animators:
 		a.job_done.connect(_on_job_done)
-
-	if not root.get_args().has("autoplay"):
-		panel = CheatPanel.new()
-		panel.name = "PanelTrampas"
-		add_child(panel)
-		var names: Array[String] = []
-		for def in server.config.cheats.slice(0, 4):
-			names.append(def.display_name)
-		panel.setup(names)
-		input = CheatInput.new()
-		input.name = "EntradaTrampas"
-		add_child(input)
-		input.setup(root, panel)
 
 	var demo := str(root.get_args().get("cheat-demo", ""))
 	if demo != "":
@@ -66,6 +54,9 @@ func _on_cheat_started(color: int, cheat_id: StringName, from: int, to: int, dur
 func _on_cheat_finished(color: int, _cheat_id: StringName, _from: int, to: int) -> void:
 	var offset := server.board.offsets[to] if to >= 0 else Vector2.ZERO
 	root.animators[color].resolve_cheat(true, offset)
+	# Trampa-jugada: el turno ya pasó en el servidor y falta pulsar el reloj.
+	if server.awaiting_press(color):
+		root.animators[color].enqueue_press()
 
 
 func _on_cheat_aborted(color: int, _cheat_id: StringName) -> void:
@@ -115,6 +106,11 @@ func _verify_demo(delta: float) -> void:
 			var want := root.board_view.square_to_world(sq, true, server.board.offsets[sq])
 			if int(node.get_meta("code")) != code or node.global_position.distance_to(want) > 0.002:
 				bad += 1
+	# Las pilas de capturas (también las de robos) deben coincidir con las del servidor.
+	for c in 2:
+		var pile: Array = root.board_view.piles[c]
+		if pile.size() != server.board.captured[c].size():
+			bad += 1
 	print("[trampas] vista == servidor: %s (casillas distintas: %d, mano.carga=%s)" % [bad == 0, bad, root.animators.map(func(a: HandAnimator) -> bool: return a.rig.carried != null)])
 
 
@@ -122,62 +118,66 @@ func _run_step(s: Dictionary) -> void:
 	var color: int = root.human_color if s.get("who", "human") == "human" else root.rival_color
 	match s.kind:
 		"cheat":
-			var r := server.start_cheat(color, s.id, ChessPiece.square_from_name(s.from), ChessPiece.square_from_name(s.get("to", "a1")) if s.has("to") else -1)
-			print("[trampas %.1f] %s %s %s->%s: %s %s" % [_demo_time, s.who, s.id, s.from, s.get("to", "-"), "ok" if r.ok else "RECHAZADA", r.reason])
+			var to: int = TO_PILE if s.get("to", "") == "pile" else ChessPiece.square_from_name(s.to)
+			var r := server.start_cheat(color, ChessPiece.square_from_name(s.from), to)
+			print("[trampas %.1f] %s %s->%s: %s %s (clase %s, nivel %d, jugada %s)" % [_demo_time, s.who, s.from, s.to, "ok" if r.ok else "RECHAZADA", r.reason, r.kind_id, r.level, r.as_move])
 		"abort":
 			print("[trampas %.1f] %s aborta: %s" % [_demo_time, s.who, server.abort_cheat(color)])
-		"arm":
-			if input != null:
-				input.arm(int(s.idx))
 		"click":
-			if input != null:
-				input.click_square(ChessPiece.square_from_name(s.sq))
-				print("[trampas %.1f] clic en %s (fase %d)" % [_demo_time, s.sq, input.state.phase])
+			# Entrada del jugador: "pile" es la zona de la pila propia.
+			var t: int = TO_PILE if s.sq == "pile" else ChessPiece.square_from_name(s.sq)
+			var action := root.player.interaction.click(t)
+			print("[trampas %.1f] clic en %s: %s" % [_demo_time, s.sq, action])
 		"accuse":
 			var r := server.accuse(color)
 			print("[trampas %.1f] %s acusa: %s %s" % [_demo_time, s.who, r.ok, r.reason])
 
 
-## Guiones por nombre (el humano debe ser blancas). Tiempos en segundos desde el inicio.
+## Guiones por nombre (el humano debe ser blancas y empezar en la FEN recomendada: blancas
+## mueven). Tiempos en segundos desde el inicio.
 func _demo_steps(name_: String) -> Array[Dictionary]:
-	var steal := {"t": 1.0, "who": "human", "kind": "cheat", "id": &"steal", "from": "a7"}
-	var slide := {"t": 1.0, "who": "rival", "kind": "cheat", "id": &"slide", "from": "a8", "to": "d8"}
-	var nudge := {"t": 1.0, "who": "human", "kind": "cheat", "id": &"nudge", "from": "h2", "to": "h3"}
-	var move := {"t": 1.0, "who": "human", "kind": "cheat", "id": &"move_enemy", "from": "c6", "to": "b4"}
+	# Propia corta (a distancia 1, en tu turno: es tu jugada) y larga (en arco).
+	var own := {"t": 1.0, "who": "human", "kind": "cheat", "from": "d2", "to": "e3"}
+	var own_long := {"t": 1.0, "who": "human", "kind": "cheat", "from": "a1", "to": "a4"}
+	var enemy := {"t": 1.0, "who": "human", "kind": "cheat", "from": "e6", "to": "e5"}
+	var enemy_far := {"t": 1.0, "who": "human", "kind": "cheat", "from": "c6", "to": "b4"}
+	var steal := {"t": 1.0, "who": "human", "kind": "cheat", "from": "a7", "to": "pile"}
+	# El rival mueve una pieza propia fuera de su turno (no es jugada).
+	var rival_own := {"t": 1.0, "who": "rival", "kind": "cheat", "from": "a8", "to": "d8"}
 	match name_:
+		"own":
+			return [own]
+		"ownlong", "asmove":
+			return [own_long]
+		"enemy":
+			return [enemy, {"t": 3.5, "who": "human", "kind": "cheat", "from": "c6", "to": "a5"}]
 		"steal":
 			return [steal]
-		"slide":
-			return [slide]
-		"nudge":
-			return [nudge]
-		"move":
-			return [move]
 		"abort":
-			return [move, {"t": 1.7, "who": "human", "kind": "abort"}]
+			return [enemy_far, {"t": 1.7, "who": "human", "kind": "abort"}]
 		"accuse":
-			return [slide, {"t": 3.6, "who": "human", "kind": "accuse"}]
-		"both":
-			return [steal, slide]
+			return [rival_own, {"t": 3.6, "who": "human", "kind": "accuse"}]
 		"input":
-			# Recorre la entrada del jugador: armar, elegir pieza y destino.
+			# Recorre la entrada del jugador: pieza rival a la pila, rey, pieza propia a destino legal.
 			return [
-				{"t": 1.0, "kind": "arm", "idx": 2},
-				{"t": 1.1, "kind": "click", "sq": "a7"},
-				{"t": 3.5, "kind": "arm", "idx": 3},
-				{"t": 3.6, "kind": "click", "sq": "a2"},
-				{"t": 3.7, "kind": "click", "sq": "c6"},
-				{"t": 3.8, "kind": "click", "sq": "b4"},
+				{"t": 1.0, "kind": "click", "sq": "e1"},
+				{"t": 1.2, "kind": "click", "sq": "a7"},
+				{"t": 1.4, "kind": "click", "sq": "pile"},
+				{"t": 4.5, "kind": "click", "sq": "d2"},
+				{"t": 4.6, "kind": "click", "sq": "d4"},
 			]
-	# all: todo en secuencia, con las dos manos coincidiendo al principio.
-	var out: Array[Dictionary] = [steal, slide]
-	var n := nudge.duplicate()
-	n.t = 4.5
-	out.append(n)
-	var m := move.duplicate()
-	m.t = 6.0
-	out.append(m)
-	var m2 := {"t": 9.5, "who": "human", "kind": "cheat", "id": &"move_enemy", "from": "e6", "to": "f5"}
-	out.append(m2)
-	out.append({"t": 10.4, "who": "human", "kind": "abort"})
+	# all: todo en secuencia; la última es una jugada hecha con trampa (pasa el turno).
+	var out: Array[Dictionary] = [steal, rival_own]
+	var e1 := enemy.duplicate()
+	e1.t = 3.2
+	out.append(e1)
+	var e2 := enemy_far.duplicate()
+	e2.t = 5.2
+	out.append(e2)
+	out.append({"t": 5.9, "who": "human", "kind": "abort"})
+	var e3 := {"t": 7.0, "who": "human", "kind": "cheat", "from": "c6", "to": "a5"}
+	out.append(e3)
+	var o := own_long.duplicate()
+	o.t = 9.6
+	out.append(o)
 	return out

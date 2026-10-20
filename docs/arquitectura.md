@@ -20,7 +20,7 @@ Juego de Godot 4.6+ (GDScript) para un humano contra bots: torneo de ajedrez por
 
 ```mermaid
 flowchart LR
-    Humano[PlayerController + CheatInput] -- intenciones --> S
+    Humano[PlayerController + PieceInteraction] -- intenciones --> S
     Bot[BotController + cerebro] -- intenciones --> S
     S[MatchServer<br/>BoardState, ChessClock, CheatRules] -- señales --> Vista[GameRoot: BoardView, HandAnimator, Hud, Arbiter]
     T[TournamentManager] --> G[GameRoot]
@@ -81,7 +81,7 @@ flowchart LR
 | `Arbiter` | `src/client/arbiter.gd` | Figura del árbitro: camina, mira el tablero, gesto de veredicto, `pass_behind`. |
 | `Hud` | `src/client/hud.gd` | Subtítulos, mensajes del árbitro, advertencias, ronda, cuadro, pantallas, viñeta. |
 | `CheatModule` | `src/client/cheats/cheat_module.gd` | Módulo: conecta las señales de trampas con las manos; crea entrada, panel y árbitro; guiones de demostración. |
-| `CheatInput`, `CheatArmState`, `CheatTargeting`, `CheatPanel` | `src/client/cheats/` | Entrada del jugador (teclas 1-4), máquina de estados, destinos válidos y panel. |
+| `PieceInteraction` | `src/client/cheats/piece_interaction.gd` | Selección de cualquier pieza, mapa de calor y enrutado del clic (jugada o trampa). |
 | `EventModule` | `src/client/events/event_module.gd` | Módulo: dueño del `TensionDirector`, avisa a los bots, maneja al árbitro disuasivo. |
 | `EventStage` | `src/client/events/event_stage.gd` | Escenografía de eventos (apagón, banqueta, acusador, guardias, pieza caída). |
 | `EventSounds` | `src/client/events/event_sounds.gd` | Sonidos sintetizados por código. |
@@ -114,7 +114,7 @@ Cada módulo es un script cuyo `new()` da un `Node` con `install(root)`; `GameRo
 
 | Módulo | Instala |
 | --- | --- |
-| `cheat_module.gd` | `Arbiter`, `CheatPanel` y `CheatInput` (no se crean con `--autoplay`), conexión de señales de trampas con las manos. |
+| `cheat_module.gd` | Conexión de señales de trampas con las manos (también la pulsación tras una trampa-jugada) y guiones `--cheat-demo`. |
 | `event_module.gd` | `TensionDirector`, `EventStage`, disuasivo del árbitro, eventos del rival, aviso a los bots. |
 
 ### Señales principales
@@ -124,9 +124,9 @@ Cada módulo es un script cuyo `new()` da un `Node` con `install(root)`; `GameRo
 | `MatchServer` | `move_made(color, uci, info)` | `GameRoot` → `HandAnimator.enqueue_move` |
 | | `state_changed` | `GameRoot` → `BoardView.sync` |
 | | `beginner_warning(color, uci, text)` | `GameRoot` → subtítulo y titubeo de la mano |
-| | `cheat_started / cheat_finished / cheat_aborted` | `CheatModule` → animación de trampa; `CheatInput`; |
+| | `cheat_started / cheat_finished / cheat_aborted` | `CheatModule` → animación de trampa; `PieceInteraction` |
 | | `accusation_started / accusation_resolved(accuser, correct, warnings)` | `GameRoot` (HUD), `Arbiter`, `BotController` |
-| | `game_over(winner, reason)` | `GameRoot`, `CheatInput` |
+| | `game_over(winner, reason)` | `GameRoot` |
 | | `rival_event(color, event_id)` | `EventModule` |
 | `GameRoot` | `match_started(server)` | módulos |
 | | `table_eliminated(table, position, seat)` | `EventModule` (guardias) |
@@ -182,41 +182,39 @@ Detalles en la sección 4.12.
 
 ### 4.3 Tablero físico y desplazamientos finos (`board_state.gd`, `board_view.gd`)
 
-- `squares` (64 casillas, a1 = 0), `offsets` (desplazamiento fino por pieza, en fracciones de casilla), `captured[color]` (pila de lo capturado POR ese color) y `hand[color]` (piezas escondidas por trampas de robo).
+- `squares` (64 casillas, a1 = 0), `offsets` (desplazamiento fino por pieza, en fracciones de casilla), `captured[color]` (pila de lo capturado POR ese color; también recibe los robos) y `hand[color]` (sin uso desde que el robo va a la pila).
 - Cuando una trampa mueve o empuja una pieza, queda **descentrada** en una dirección aleatoria (`offset_amount` de la trampa). Es la evidencia visual. Una pieza que se mueve normalmente vuelve a su centro.
 - `BoardView.sync(state)` reconcilia nodos con el tablero físico; mientras hay animaciones en curso solo anota el estado pendiente y lo aplica al terminar la última (`hold_sync` / `release_sync`). `sync_fixes` cuenta correcciones (en una partida sin trampas debe quedar en 0).
 - Un cerrojo de movimiento (`acquire_motion` / `release_motion`) impide que las dos manos muevan piezas normales a la vez; las trampas no lo piden.
 - Escala real: casilla 5,5 cm, tablero de 44 cm, mesa a 0,72 m; piezas de 4,5 cm (peón) a 9,5 cm (rey). Pilas de captura a +X (4 columnas).
 - El tablero se gira para que el humano tenga sus piezas cerca.
 
-### 4.4 Trampas (`data/cheats/`, `cheat_rules.gd`)
+### 4.4 Trampas (`data/cheats/`, `cheat_rules.gd`, `piece_interaction.gd`)
 
-Hay **cuatro** trampas. Duración = `base_time + time_per_square × distancia`.
+No se elige la trampa: el jugador agarra **cualquier pieza que no sea rey**, propia o rival, en cualquier turno, y la suelta donde quiera. El **servidor clasifica** la acción y su nivel de sospecha (`CheatRules`). Hay tres clases (`CheatDef.Kind`, un `.tres` cada una):
 
-| Id | Tipo | Tecla | Qué hace | `base_time` | `time_per_square` | `max_distance` | `evidence` | `offset_amount` |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `nudge` Empujoncito | `NUDGE` | 1 | Avanza una pieza **propia** una casilla (hacia adelante) | 0,8 | 0,0 | 1 | 0,2 | 0,18 |
-| `slide` Deslizar | `SLIDE` | 2 | Mueve una pieza **propia** en línea (recta o diagonal) sin piezas en medio | 1,0 | 0,35 | 4 | 0,5 | 0,12 |
-| `steal` Robar | `STEAL` | 3 | Quita una pieza **enemiga** y la esconde en la mano (`hand[color]`) | 1,6 | 0,0 | sin límite | 0,9 | 0,0 |
-| `move_enemy` Mover pieza enemiga | `MOVE_ENEMY` | 4 | Mueve una pieza **enemiga** a una casilla vacía (distancia de rey ≤ 3) | 1,2 | 0,4 | 3 | 0,5 | 0,12 |
+| Id | Kind | Qué hace | `base_time` | `time_per_square` | `evidence_by_level` (índice = nivel) | `offset_amount` |
+| --- | --- | --- | --- | --- | --- | --- |
+| `own` | `OWN_MOVE` | Pieza **propia** a una casilla vacía que no es jugada legal | 0,8 | 0,3 | 0 / 0,2 / 0,45 / 0,65 / 0,8 | 0,15 |
+| `enemy` | `MOVE_ENEMY` | Pieza **rival** a otra casilla vacía | 1,2 | 0,3 | 0 / 0,3 / 0,55 / 0,75 / 0,9 | 0,12 |
+| `steal` | `STEAL` | Quita una pieza rival y la deja en la **pila de capturas propia** (`captured[color]`, visible) | 1,6 | 0,0 | 0 / 0,9 | 0 |
 
-Reglas de validación (`CheatRules.validate`, el mismo código para el servidor, los bots y la entrada del jugador):
+Duración = `base_time + time_per_square × distancia de rey recorrida` (el robo cuenta 0). La evidencia sale de la curva de la clase según el nivel (los niveles altos usan el último valor) y es la que usan los bots para acusar.
 
-- Nunca se toca un rey. La casilla de origen debe tener pieza; el destino debe estar vacío.
-- Un peón no puede quedar en la primera ni en la última fila.
-- No se permite una trampa que deje en jaque al rey del tramposo, ni al bando al que no le toca mover (posición imposible).
-- Si el servidor encuentra el tablero distinto al terminar el tiempo, la valida de nuevo; si ya no es válida se aborta (`cheat_aborted`).
-- La trampa se puede hacer en cualquier turno (propio o ajeno). **Una sola mano**: mientras hay una trampa activa no se puede jugar, acusar ni empezar otra; un evento `drop_piece` también se rechaza. El reloj de quien mueve sigue corriendo mientras tanto.
-- Cada trampa se registra en `cheat_log` con `{color, cheat_id, from, to, start, end, ply, seen, status}`; `status` es `active`, `done` o `aborted`.
-- Al aplicarse se actualizan los derechos de enroque de las casillas tocadas.
-- Si la partida termina con una trampa en curso, el servidor la marca `aborted` y emite `cheat_aborted` para que la vista suelte la mano.
+**Nivel de sospecha** (`CheatRules.level`, estática y pura; -1 si es inválido):
+- **Pieza propia:** S = destinos legales de esa pieza como si fuera el turno de su color; d = distancia de rey mínima del destino a S (si S está vacío, a la casilla de origen). **En tu turno** nivel = d, y d = 0 es una jugada legal (no es trampa: va por `submit_move`; `start_cheat` la rechaza). **Fuera de tu turno** nivel = d + 1. Mientras el rival no ha pulsado el reloj tampoco te toca (`turn_ready_for`).
+- **Pieza rival:** distancia de rey entre origen y destino.
+- **A la pila** (`CheatRules.TO_PILE = -2`): `CheatRules.PILE_LEVEL` (5).
 
-**Entrada del jugador** (`CheatInput` + `CheatArmState`):
+**Validación** (`CheatRules.validate`, el mismo código para servidor, bots y jugador): nunca se toca un rey; destino vacío; un peón no queda en la primera ni en la última fila; no puede dejar en jaque al rey del tramposo ni al bando al que no le toca (posición imposible); la pila solo admite piezas rivales. Motivos de rechazo en inglés.
 
-- Teclas `1`-`4` arman una trampa (otra vez la misma la desarma). Clic en la pieza y luego en el destino (el robo solo necesita la pieza). Los destinos válidos se resaltan en el tablero. Clic derecho: un paso atrás; `Esc`: cancelar; `X`: abortar la trampa en curso.
-- Mientras hay una trampa armada, los clics del tablero se consumen allí y no disparan una jugada normal.
-- Rechazos con subtítulo ("...no, eso no: motivo"). Si la mano está ocupada: "...tengo la mano ocupada".
-- `CheatPanel` ("Bajo la mesa", abajo a la derecha) lista las cuatro con su tecla.
+**Trampa como jugada (`as_move`):** una pieza propia a una casilla no legal **en tu turno** cuenta como tu jugada. Al terminar la trampa el turno pasa como en `submit_move` (`side_to_move`, al paso, `fullmove_number`, `ply`, `move_log` con `{color, uci: "", time, cheat: true}`, que cuenta para la ventana de acusación) y, con `require_clock_press`, queda `pending_press = color`: la mano pulsa después. No hay entrada de planilla. Se comprueba el fin de partida (puede dar mate; aquí sí se permite dar jaque al rival). Las trampas sobre piezas rivales, a la pila o con pieza propia fuera de turno **nunca** pasan el turno. Si mientras dura deja de ser válida, se aborta.
+
+**API del servidor:** `cheat_preview(color, from) -> {casilla: nivel}` (+ `TO_PILE` si es rival; `{}` si es rey o vacía; una copia del tablero y las 64 casillas, 0,4-3 ms); `start_cheat(color, from, to) -> {ok, reason, duration, level, kind_id, as_move}`; señales `cheat_started(color, cheat_id, from, to, duration)` (`cheat_id` = `own|enemy|steal`, `to = TO_PILE` en el robo), `cheat_finished`, `cheat_aborted`.
+
+**Reglas que se mantienen:** una sola mano (con una trampa activa no se juega, ni acusa, ni empieza otra; un `drop_piece` se rechaza); el reloj de quien mueve sigue corriendo; se actualizan los derechos de enroque y se reinicia la regla de 50 jugadas; el servidor revalida al terminar y aborta si ya no vale; la pieza queda **descentrada** (`offset_amount`, evidencia visual); si la partida termina con una trampa en curso, se marca `aborted`. `cheat_log` guarda `{color, cheat_id, from, to, start, end, ply, seen, status, level, evidence, as_move}`.
+
+**Entrada del jugador** (`PlayerController` + `PieceInteraction`): no hay teclas de trampa ni panel. Clic izquierdo sobre cualquier pieza que no sea rey la selecciona si la mano está libre (anotar no cuenta); `PieceInteraction` pide `cheat_preview` y le suma como nivel 0 las jugadas legales. `BoardView.set_heatmap` pinta cada casilla por nivel: 0 verde, 1 naranja, 2 rojo, 3+ rojo cada vez más oscuro, con opacidad 0,55 / 0,45 / 0,30 / 0,12 / 0,04 para que lo lejano casi desaparezca; contorno claro en la casilla elegida y en la del cursor; anillo en las capturas legales. Con una pieza rival elegida se ilumina la zona de la pila propia y el clic sobre ella es `TO_PILE`. Clic en destino: nivel 0 → `submit_move`; otro → `start_cheat`. Otra pieza cambia la selección; la misma pieza, clic derecho o `Esc` la sueltan; un rey muestra "...not the king"; un destino rechazado, "...no, not that: motivo". `X` aborta la trampa en curso; `A` acusa.
 
 ### 4.5 Exposición y mirada (`gaze.gd`, `match_server.gd`)
 
@@ -228,7 +226,7 @@ Reglas de validación (`CheatRules.validate`, el mismo código para el servidor,
 
 ### 4.6 Abortar
 
-- `abort_cheat(color)`: el tablero no cambia, la trampa pasa a `aborted` y **no cuenta** para una acusación posterior. La animación de regreso es visible y toma tiempo.
+- `abort_cheat(color)`: el tablero no cambia, la trampa pasa a `aborted` y **no cuenta** para una acusación posterior; una trampa-jugada abortada no pasa el turno. La animación de regreso es visible y toma tiempo.
 - El humano aborta con `X`; el bot decide por `CheatPlanner.abort_probability` cuando el rival empieza a mirar (ver 4.11).
 - La vista deshace el gesto: si la mano llevaba la pieza en el aire, la devuelve a su casilla (`_cheat_return_piece`).
 
@@ -316,16 +314,17 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (1, 3) s, `
 
 **Planificador de trampas** (`CheatPlanner`):
 
-- Enumera con `CheatRules.validate` todas las trampas posibles (máx. 24 candidatas por tipo, barajadas) y puntúa: `1,6·ln(1 + ganancia/100)` menos riesgo; el riesgo es `3·evidencia + 0,5·duración + 0,45·(valor de la pieza robada en peones)`, multiplicado entre 1,6 (prudente) y 0,6 (audaz) según `risk_appetite`. La ganancia es la diferencia de `FallbackBrain.evaluate`, con mínimo de 15 cp.
-- Elige en dos pasos: primero el **tipo** de trampa (ponderado por su mejor puntaje, sin que pese cuántas variantes tenga) y luego la candidata dentro del tipo (softmax, temperatura 1,2). Así hay variedad y no solo robar.
+- Candidatas por clase (`own`, `enemy`, `steal`): baraja las piezas que la clase puede tocar y toma de cada una hasta 3 destinos válidos de niveles distintos, hasta 24 por clase; cada una trae nivel, evidencia, duración y ganancia. Puntúa: `1,6·ln(1 + ganancia/100)` menos riesgo; el riesgo es `3·evidencia + 0,5·duración + 0,45·(valor de la pieza robada en peones)`, multiplicado entre 1,6 (prudente) y 0,6 (audaz) según `risk_appetite`. La ganancia es la diferencia de `FallbackBrain.evaluate`, con mínimo de 15 cp.
+- Elige en dos pasos: primero la **clase** (ponderada por su mejor puntaje) y luego la candidata (softmax, temperatura 1,2).
+- **Trampa como jugada:** un `own` en su turno solo es candidato si supera en `AS_MOVE_MARGIN` (30 cp) a su mejor jugada legal, con un castigo de 0,8 al puntaje; es raro y por defecto prefiere trampas fuera de turno.
 - Probabilidad de intentar por evaluación (cada 0,5 s): `cheat_chance × 0,2`, más cuanto más pierde (hasta ×3) y con poco reloj (<40 s, hasta ×2), limitada a 0,5. Es 0 si el rival mira el tablero.
 - Reglas del bot: no hace trampa en los primeros 6 s ni antes de su espera (8-16 s tras una trampa, 12 s tras ser descubierto). En su turno solo empieza una trampa si le sobra tiempo antes de entregar la jugada (duración + 0,4 s). Si el rival deja de mirar, adelanta su próxima evaluación (0,15-0,4 s).
-- **Abortar:** si el rival empieza a mirar a mitad de una trampa, aborta con probabilidad `abort_chance × lerp(0,7; 1,0; evidencia)` tras 0,2-0,6 s.
+- **Abortar:** si el rival empieza a mirar a mitad de una trampa, aborta con probabilidad `abort_chance × lerp(0,7; 1,0; evidencia de esa trampa)` tras 0,2-0,6 s.
 - **Distracciones con intención:** si el rival lleva ≥ 10 s mirando, el bot quiere hacer trampa y tendría una que valga la pena, usa `cough` (60 %) o `drop_piece`. Primer uso entre 40 y 80 s; espera entre usos de 55 a 100 s (según `risk_appetite`) × 1,0-1,4.
 
 **Vigilancia y acusaciones:**
 
-- Si el bot mira el tablero durante una trampa rival en curso, la juzga una vez: acusa con probabilidad `detect_chance × evidencia` tras 0,3-1,0 s, solo si la vio (`seen`) y el rival no abortó.
+- Si el bot mira el tablero durante una trampa rival en curso, la juzga una vez: acusa con probabilidad `detect_chance × evidencia` (la de la entrada del `cheat_log`, según su nivel) tras 0,3-1,0 s, solo si la vio (`seen`) y el rival no abortó.
 - Al terminar una trampa que fue vista y no juzgada: acusa con probabilidad `detect_chance × lerp(0,5; 1,0; evidencia)` tras 0,5-1,5 s.
 - Acusación a ciegas tras cada jugada rival: `false_accuse_chance × 0,25^advertencias` (0 con 2 o más advertencias), tras 0,8-2,0 s.
 - Tras una acusación correcta contra otro, espera 12 s antes de volver a intentar.
@@ -373,12 +372,12 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (1, 3) s, `
 - **Temblor** que crece con el **estrés** (0 a 1 según el tiempo restante: `1 − restante/45`); además, más estrés = animaciones hasta 40 % más rápidas.
 - **Cola de animaciones** por mano y **fases** (`phase`): `idle`, `reach`, `grab`, `carry`, `release`, `press`, `write`, `return`, `hesitate` y `cheat`. Cada gesto (alcanzar y agarrar, trasladar y soltar, pulsar el reloj, tomar/escribir/dejar la pluma, volver, titubeo) es **una sola curva** (`_flow`): puntos de paso (`_wp`) unidos por una spline Catmull-Rom centrípeta, recorrida por longitud de arco con perfil de mínimo jerk (`s = 10t³ − 15t⁴ + 6t⁵`). La mano solo se detiene donde hay contacto (pieza, botón, pluma, reposo); la aproximación final es vertical y más lenta y la salida rápida (pesos por tramo); el pitch sigue la misma curva y los dedos se abren y cierran antes del contacto. Holgura sobre el rey al trasladar. Cada jugada varía de velocidad (×0,85-1,25), se acorta en trayectos cortos y se acelera si hay animaciones atrasadas. Las trampas (`_cmove`) usan la misma curva con la duración exacta del servidor (sus tramos aún paran entre sí).
 - **Jugada normal:** alcanzar, agarrar, trasladar, soltar, pulsar el reloj y volver. **Captura:** primero la pieza rival va a la pila propia. **Enroque:** rey y luego torre. **Coronación:** se cambia la pieza al llegar. **Titubeo:** ver 4.10.
-- **Trampas** (con la duración exacta del servidor; no piden el cerrojo de movimiento): empujoncito (la mano empuja la pieza sin levantarla), deslizar (arrastre bajo sobre el tablero), mover pieza enemiga (se levanta y se lleva en arco), robar (pinza, levanta, la lleva al borde y al regazo bajo la mesa, y la pieza desaparece en el puño cerrado). La mano espera a que el servidor cierre la trampa para soltar la pieza con su descentrado definitivo; si se aborta, deshace el gesto. La vuelta al reposo es visible (con el puño cerrado tras un robo).
+- **Trampas** (duración exacta del servidor; no piden el cerrojo de movimiento): `own`/`enemy` a distancia 1 → empujón sin levantar la pieza (también en diagonal); a distancia ≥ 2 → pinza, se levanta y se lleva en arco; `steal` → pinza, levanta y la deja en la pila de capturas propia (`add_to_pile`). La mano espera a que el servidor cierre la trampa para soltar con el descentrado definitivo; si se aborta, deshace el gesto. Tras `cheat_finished`, si `awaiting_press(color)` (trampa-jugada), `CheatModule` encola para esa mano (humano o bot) un trabajo `press` que pulsa el reloj y vuelve, sin planilla.
 - Al terminar la trampa, la vista se reconcilia con el tablero físico del servidor.
 
 **Rival (`OpponentAvatar`):** figura sentada (maniquí gris, ver 4.18); la cabeza gira con la cámara virtual del bot para que el jugador lea hacia dónde mira. Animaciones de tos y de pieza caída.
 
-**HUD (`Hud`):** subtítulos del personaje (abajo), mensajes del árbitro (arriba), contador de advertencias, pista de controles, aviso para capturar el ratón, ronda ("Round N / M" o "Final"), estado de espera, pantallas completas y viñeta oscura. El panel de trampas es aparte (`CheatPanel`).
+**HUD (`Hud`):** subtítulos del personaje (abajo), mensajes del árbitro (arriba), contador de advertencias, pista de controles, aviso para capturar el ratón, ronda ("Round N / M" o "Final"), estado de espera, pantallas completas y viñeta oscura. Pista de controles: "Click: pick up any piece · A: accuse · X: abort · Esc: pause".
 
 **Sonidos:** solo sintetizados (ver 4.9). No hay audio ambiente ni música.
 
@@ -439,7 +438,7 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (1, 3) s, `
 - **Luz de la mesa del humano:** foco principal de 0,8 de energía, color (1, 0,9, 0,78) y relleno de 0,2; el tablero (`BoardView._dim_materials`) usa casillas hueso `SQUARE_LIGHT`, madera `SQUARE_DARK` y marco oscuro para no quemarse bajo la lámpara.
 - `tools/check_arm_clearance.gd` recorre 1064 posturas: ninguna atraviesa la mesa (holgura mínima 2,7 cm) y reporta métricas de naturalidad (altura del codo respecto del hombro y de la mesa, desplazamiento hacia fuera y hacia atrás) y la postura de reposo de las animaciones `sit_*`.
 - Utilería de Blender: `BoardView` (board.glb), `PieceFactory` (pieces/*.glb recoloreadas), `ClockView` (chess_clock.glb con dígitos de 7 segmentos en el LCD y balancín animado).
-- **Jugada física:** `HandAnimator` mueve la pieza, golpea el botón (`clock_hit(color)` → `server.press_clock`; `require_clock_press = true`) y anota ~2 s con la pluma en la planilla. La anotación es un trabajo aparte (`write`) que se encola al pulsar: no toma el cerrojo de movimiento ni retiene la sincronía del tablero, así que el rival puede mover mientras el otro anota. Es interrumpible: si llega una jugada, un titubeo o una trampa a la cola de esa mano, deja la pluma con un gesto de 0,25 s, borra lo escrito a medias (`ScoresheetView.clear_partial`) y la entrada se reescribe después (un `write` nunca pasa por delante de una acción en espera). `HandAnimator.is_busy_for_action()` ignora la escritura: la usan `PlayerController._can_play` y `CheatInput`, así el humano puede jugar y hacer trampa mientras anota. `ScoresheetView` muestra cada `sheet_entry` en SAN (11 líneas por columna). Si la mano está en una trampa al pulsar, el servidor rechaza y `GameRoot` reintenta al terminar o abortar. Los bots no piensan ni mueven hasta que el rival pulsa.
+- **Jugada física:** `HandAnimator` mueve la pieza, golpea el botón (`clock_hit(color)` → `server.press_clock`; `require_clock_press = true`) y anota ~2 s con la pluma en la planilla. La anotación es un trabajo aparte (`write`) que se encola al pulsar: no toma el cerrojo de movimiento ni retiene la sincronía del tablero, así que el rival puede mover mientras el otro anota. Es interrumpible: si llega una jugada, un titubeo o una trampa a la cola de esa mano, deja la pluma con un gesto de 0,25 s, borra lo escrito a medias (`ScoresheetView.clear_partial`) y la entrada se reescribe después (un `write` nunca pasa por delante de una acción en espera). `HandAnimator.is_busy_for_action()` ignora la escritura: la usan `PlayerController` y `PieceInteraction`, así el humano puede jugar y hacer trampa mientras anota. `ScoresheetView` muestra cada `sheet_entry` en SAN (11 líneas por columna). Si la mano está en una trampa al pulsar, el servidor rechaza y `GameRoot` reintenta al terminar o abortar. Los bots no piensan ni mueven hasta que el rival pulsa.
 - La ayuda para principiantes se precalcula al empezar si el humano mueve primero y tras cada trampa en su turno.
 - Depuración: `--shot-cam=side|sidenear|sidefar|px,py,pz,tx,ty,tz[,fov]`.
 
@@ -483,11 +482,11 @@ Se leen como `--clave` o `--clave=valor` en `GameRoot._parse_args`; `get_args()`
 | `--verbose` | Imprime el desarrollo de la partida. |
 | `--screenshot=ruta`, `--shot-delay=S`, `--shot-look=yaw,pitch`, `--shot-when=rival_carry\|player_carry`, `--shot-after=S`, `--shot-select=e2` | Capturas de depuración. |
 | `--demo-screen=between\|champion\|eliminated` | Muestra esa pantalla al arrancar. |
-| `--cheat-demo=steal\|slide\|nudge\|move\|abort\|accuse\|both\|input\|all` | Guion automático de trampas (`CheatModule`); conviene `--fen` y `--human=white`. |
+| `--cheat-demo=own\|ownlong\|enemy\|steal\|abort\|accuse\|asmove\|input\|all` | Guion automático de trampas (`CheatModule`); usar `--human=white --fen="r3k3/p7/2n1p3/8/8/8/PPPP1PPP/R3K2R w - - 0 1"`. |
 | `--event=apagon\|ruido\|acusacion\|eliminacion\|arbitro\|toser\|pieza`, `--event-at=S`, `--event-table=N`, `--event-side=human` | Fuerza un evento (`EventModule`); en la demostración el director automático se desactiva. |
 | `--no-events` | Sin eventos automáticos. |
 
-Controles del jugador (`project.godot`): clic izquierdo (capturar ratón / elegir / mover), `A` acusar, `1`-`4` armar trampa, `X` abortar, clic derecho (atrás), `Esc` (soltar ratón o cancelar), `R` reiniciar torneo.
+Controles del jugador (`project.godot`): clic izquierdo (capturar ratón / elegir pieza / soltarla en un destino), clic derecho o `Esc` (soltar la pieza; `Esc` también suelta el ratón), `A` acusar, `X` abortar, `R` reiniciar torneo.
 
 ## 6. Pruebas y exportación web
 
@@ -508,7 +507,7 @@ godot --headless --path . --script res://tests/run_tests.gd -- --filter=cheats
 | `test_chess_rules.gd` | FEN, perft (inicial, Kiwipete, posiciones 3-5), al paso y pila de capturas, enroque (por jaque y sin torre), coronación a dama, material insuficiente, nunca capturar rey. |
 | `test_match_server.gd` | Turnos y reloj, tiempo agotado, mate, ahogado y repetición (ganan negras), material insuficiente, ayuda para principiantes (aviso y luego permitida; apagada para bots). |
 | `test_cheats.gd` | Reyes intocables, límites de cada trampa, jaques ilegales, robo y duración, mano ocupada, revalidación al final, acusaciones (correcta, ventana, tres falsas, trampa abortada), exposición, reinicio de 50 jugadas, `cheat_aborted` al terminar la partida, caché de jugadas legales. |
-| `test_cheat_input.gd` | Destinos válidos por trampa, motivos de rechazo, armar/desarmar, flujo de clics en dos pasos, cambio de selección, robo en un clic, trampa aceptada por el servidor, cercanía del árbitro. |
+| `test_cheat_input.gd` | Enrutado de clics (legal → jugada, otro nivel → trampa, pila → robo), pieza rival, rey ignorado, deselección, mano ocupada, colores y opacidades del mapa de calor, zona de la pila. |
 | `test_gaze.gd` | Cono de mirada y dirección desde ángulos. |
 | `test_bots.gd` | Muestreo de política, `FallbackBrain` (toma la dama colgada; el débil es más aleatorio), límites del tiempo de pensar. |
 | `test_bot_cheats.gd` | Candidatas siempre válidas (incluido fuzz), mezcla de tipos y robos grandes raros, puntaje, bot audaz vs prudente, acusación a ciegas por advertencias, espera de eventos, aleatoriedad, probabilidades de intentar y abortar, flujo servidor-planificador. |

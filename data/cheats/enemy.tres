@@ -4,12 +4,11 @@
 
 [resource]
 script = ExtResource("1")
-id = &"slide"
-display_name = "Slide"
+id = &"enemy"
+display_name = "Move enemy piece"
 kind = 1
-description = "Slide one of your pieces several squares in a line."
-base_time = 1.0
-time_per_square = 0.35
-max_distance = 4
-evidence = 0.5
+description = "Put an enemy piece on another square."
+base_time = 1.2
+time_per_square = 0.3
+evidence_by_level = PackedFloat32Array(0, 0.3, 0.55, 0.75, 0.9)
 offset_amount = 0.12

@@ -7,10 +7,12 @@ extends Node3D
 ## al servidor unas 10 veces por segundo y elige casillas con un rayo desde
 ## el centro de la pantalla contra el plano del tablero.
 ##
-## Clic en pieza propia → resalta los destinos legales → clic en destino →
-## `submit_move` (la coronación es siempre a dama). Solo se puede jugar si es
-## tu turno, miras el tablero y tu mano está libre (anotar en la planilla no cuenta: la
-## mano suelta la pluma y atiende la jugada).
+## Clic en cualquier pieza (menos reyes; propia o rival, en tu turno o fuera de él) → mapa de
+## calor de adónde puede ir → clic en destino. Nivel 0 = jugada normal (`submit_move`, coronación
+## siempre a dama); otro nivel = trampa (`start_cheat`); la pila propia = robo. Toda esa lógica
+## vive en `PieceInteraction`; aquí solo se convierte el rayo en destino. Solo se actúa con la
+## mano libre (anotar en la planilla no cuenta: la mano suelta la pluma y atiende el gesto).
+## `X` aborta la trampa en curso, clic derecho o `Esc` sueltan la pieza, `A` acusa.
 
 signal mouse_capture_changed(captured: bool)
 
@@ -43,10 +45,16 @@ var debug_camera: bool = false
 var input_locked: bool = false
 var yaw: float = 0.0
 var pitch: float = 0.0
-var selected: int = -1
+## Para los subtítulos (lo asigna `GameRoot` al crear el HUD).
+var hud: Hud
+## Selección de piezas, mapa de calor y envío de jugadas y trampas.
+var interaction: PieceInteraction
+## Casilla de la pieza elegida (-1 si ninguna).
+var selected: int:
+	get:
+		return interaction.selected if interaction != null else -1
 
 var _head: Node3D
-var _legal: Array[ChessMove] = []
 var _gaze_timer: float = 0.0
 var _headless: bool = false
 
@@ -92,6 +100,14 @@ func setup(p_server: MatchServer, p_board: BoardView, p_color: int, look: Dictio
 	idle_rig.setup(body, &"L")
 	idle_rig.rest_at(Vector3(-0.34, BoardView.TABLE_TOP + 0.03, 0.40), 20.0)
 	_apply_debug_camera()
+
+	interaction = PieceInteraction.new()
+	interaction.setup(server, board, color)
+	interaction.subtitle = func(text: String, seconds: float) -> void:
+		if hud != null:
+			hud.show_subtitle(text, seconds)
+	interaction.player_ok = func() -> bool:
+		return not input_locked and (animator == null or not animator.is_busy_for_action())
 
 
 ## Cámara de depuración para capturas: `--shot-cam=side|px,py,pz,tx,ty,tz[,fov]`.
@@ -145,8 +161,9 @@ func _apply_look() -> void:
 func set_input_locked(on: bool) -> void:
 	input_locked = on
 	if on:
-		_deselect()
+		interaction.deselect()
 		board.set_hover(-1)
+		board.set_pile_hover(false)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -159,9 +176,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not is_mouse_captured():
 			capture_mouse(true)
 		else:
-			_click()
+			interaction.click(pick_target())
+	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+		interaction.deselect()
 	elif event.is_action_pressed("ui_cancel"):
+		interaction.deselect()
 		capture_mouse(false)
+	elif event.is_action_pressed("cheat_abort"):
+		if server.started and server.abort_cheat(color) and hud != null:
+			hud.show_subtitle("...better not")
 	elif event.is_action_pressed("accuse"):
 		if server.started and not server.is_over():
 			server.accuse(color)
@@ -190,19 +213,9 @@ func _process(delta: float) -> void:
 			server.set_gaze(color, camera.global_position, -camera.global_basis.z)
 	if not _headless:
 		_update_hover()
-	# Si ya no es posible jugar (turno rival, fin), se limpia la selección.
-	if selected >= 0 and not _my_turn():
-		_deselect()
-
-
-func _my_turn() -> bool:
-	return server.started and not server.is_over() and server.board.side_to_move == color \
-			and server.pending_press < 0 \
-			and not server.accusation_pending() and not server.is_hand_busy(color)
-
-
-func _can_play() -> bool:
-	return not input_locked and _my_turn() and (animator == null or not animator.is_busy_for_action())
+	# Si ya no se puede actuar (mano ocupada, acusación, fin), se suelta la pieza.
+	if interaction.selected >= 0 and not interaction.can_act():
+		interaction.deselect()
 
 
 ## Casilla bajo el centro de la pantalla (o -1).
@@ -215,75 +228,31 @@ func pick_square() -> int:
 	return board.world_to_square(p)
 
 
+## Destino bajo el centro de la pantalla: una casilla, `TO_PILE` si apunta a la zona de la pila
+## propia con una pieza rival elegida, o -1.
+func pick_target() -> int:
+	var sq := pick_square()
+	if sq >= 0:
+		return sq
+	if interaction.levels.has(CheatRules.TO_PILE) \
+			and board.ray_to_pile(camera.global_position, -camera.global_basis.z, color):
+		return CheatRules.TO_PILE
+	return -1
+
+
 func _update_hover() -> void:
 	var sq := -1
-	if is_mouse_captured() and _can_play():
-		sq = pick_square()
+	var pile := false
+	if is_mouse_captured() and not input_locked and interaction.can_act():
+		var t := pick_target()
+		if t == CheatRules.TO_PILE:
+			pile = true
+		else:
+			sq = t
 	board.set_hover(sq)
+	board.set_pile_hover(pile)
 
 
-func _click() -> void:
-	if not _can_play():
-		return
-	var sq := pick_square()
-	if sq < 0:
-		_deselect()
-		return
-	if selected >= 0:
-		var move := _find_move(selected, sq)
-		if move != null:
-			_try_move(move)
-			return
-	var piece := server.board.squares[sq]
-	if piece != ChessPiece.NONE and ChessPiece.color_of(piece) == color and sq != selected:
-		_select(sq)
-	else:
-		_deselect()
-
-
-## Selecciona una casilla propia por código (pruebas y capturas de depuración).
+## Selecciona una pieza por código (pruebas y capturas de depuración).
 func select_square(sq: int) -> void:
-	_select(sq)
-
-
-func _select(sq: int) -> void:
-	_legal = server.legal_moves()
-	var targets: Array = []
-	var seen := {}
-	for m in _legal:
-		if m.from != sq or seen.has(m.to):
-			continue
-		seen[m.to] = true
-		targets.append({"sq": m.to, "capture": _is_capture(m)})
-	if targets.is_empty():
-		_deselect()
-		return
-	selected = sq
-	board.set_highlights(sq, targets)
-
-
-func _deselect() -> void:
-	selected = -1
-	board.clear_highlights()
-
-
-func _is_capture(m: ChessMove) -> bool:
-	if server.board.squares[m.to] != ChessPiece.NONE:
-		return true
-	# Al paso: un peón que cambia de columna a una casilla vacía.
-	return ChessPiece.type_of(server.board.squares[m.from]) == ChessPiece.PAWN \
-			and ChessPiece.file_of(m.from) != ChessPiece.file_of(m.to)
-
-
-## La jugada legal de `from` a `to`; si es coronación, a dama.
-func _find_move(from: int, to: int) -> ChessMove:
-	for m in _legal:
-		if m.from == from and m.to == to and (m.promotion == 0 or m.promotion == ChessPiece.QUEEN):
-			return m
-	return null
-
-
-func _try_move(move: ChessMove) -> void:
-	# El resultado (incluida la advertencia de principiante) llega por señales.
-	server.submit_move(color, move.uci())
-	_deselect()
+	interaction.select(sq)

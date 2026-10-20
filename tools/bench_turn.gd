@@ -21,7 +21,7 @@ func _init() -> void:
 	print("%-32s %7s %7s %7s %7s %9s %7s %7s %7s %7s" % ["posicion", "legal", "helper", "h.med", "h.cach", "cerebro", "trozo", "history", "maia", "trampa"])
 	var worst_frame := 0.0
 	var defs: Array = []
-	for id in ["nudge", "slide", "steal", "move_enemy"]:
+	for id in ["own", "enemy", "steal"]:
 		defs.append(load("res://data/cheats/%s.tres" % id))
 	for name in POSITIONS:
 		var b := BoardState.from_fen(POSITIONS[name])

@@ -6,7 +6,7 @@ const B := ChessPiece.BLACK
 
 func _defs() -> Array:
 	var defs: Array = []
-	for id in ["nudge", "slide", "steal", "move_enemy"]:
+	for id in ["own", "enemy", "steal"]:
 		defs.append(load("res://data/cheats/%s.tres" % id))
 	return defs
 
@@ -37,8 +37,12 @@ func test_candidates_are_all_valid() -> void:
 			var b := BoardState.from_fen(fen)
 			for c in CheatPlanner.candidates(b, color, _defs(), rng):
 				total += 1
-				var v := CheatRules.validate(b, color, c.def, c.from, c.to)
+				var v := CheatRules.validate(b, color, c.from, c.to)
 				check(v.ok, "candidata inválida: %s %d->%d" % [c.def.id, c.from, c.to])
+				check_eq(v.level, c.level, "nivel de la candidata")
+				check_eq(v.kind, c.def.kind, "clase de la candidata")
+				check_eq(v.as_move, c.as_move)
+				check_eq(c.evidence, c.def.evidence_for(c.level), "evidencia por nivel")
 				check(ChessPiece.type_of(b.squares[c.from]) != ChessPiece.KING, "tocó un rey")
 	check(total > 50, "debería haber candidatas: %d" % total)
 
@@ -57,7 +61,7 @@ func test_plan_never_proposes_invalid_fuzz() -> void:
 			var plan := CheatPlanner.plan(b, color, _defs(), rng)
 			if plan.is_empty():
 				continue
-			check(CheatRules.validate(b, color, plan.def, plan.from, plan.to).ok, "plan inválido en iteración %d" % i)
+			check(CheatRules.validate(b, color, plan.from, plan.to).ok, "plan inválido en iteración %d" % i)
 
 
 func test_kind_mix_and_rare_big_steals() -> void:
@@ -84,8 +88,8 @@ func test_kind_mix_and_rare_big_steals() -> void:
 				if t == ChessPiece.QUEEN or t == ChessPiece.ROOK:
 					big += 1
 	check(total > 40, "hay planes: %d" % total)
-	check(counts.size() >= 4, "salen los 4 tipos: %s" % str(counts))
-	check(counts.get(CheatDef.Kind.STEAL, 0) < total * 0.35, "robos <35%%: %s de %d" % [str(counts), total])
+	check(counts.size() >= 3, "salen las 3 clases: %s" % str(counts))
+	check(counts.get(CheatDef.Kind.STEAL, 0) < total * 0.45, "robos <45%%: %s de %d" % [str(counts), total])
 	check(big < total * 0.08, "dama/torre muy raras: %d de %d" % [big, total])
 
 
@@ -173,7 +177,7 @@ func test_simulated_server_flow() -> void:
 	var plan := CheatPlanner.plan(m.board, B, cfg.cheats, rng)
 	check(not plan.is_empty(), "hay plan")
 	var before := m.board.position_key()
-	var res := m.start_cheat(B, plan.def.id, plan.from, plan.to)
+	var res := m.start_cheat(B, plan.from, plan.to)
 	check(res.ok, "el servidor acepta el plan: " + str(res.reason))
 	check(m.is_hand_busy(B), "mano ocupada")
 	for i in int(res.duration / 0.1) + 5:
@@ -187,9 +191,90 @@ func test_simulated_server_flow() -> void:
 	m2.start()
 	var plan2 := CheatPlanner.plan(m2.board, W, cfg.cheats, rng)
 	var key2 := m2.board.position_key()
-	check(m2.start_cheat(W, plan2.def.id, plan2.from, plan2.to).ok, "empieza")
+	check(m2.start_cheat(W, plan2.from, plan2.to).ok, "empieza")
 	m2.tick(0.2)
 	check(m2.abort_cheat(W), "aborta")
 	for i in 40:
 		m2.tick(0.1)
 	check_eq(m2.board.position_key(), key2, "tablero intacto tras abortar")
+
+
+func test_candidates_cover_levels_and_never_legal_moves() -> void:
+	var b := BoardState.from_fen("r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 2 3")
+	var rng := _rng(8)
+	var levels := {}
+	for i in 10:
+		for c in CheatPlanner.candidates(b, B, _defs(), rng):
+			check(c.level >= 1, "el nivel 0 (jugada legal) no es candidata")
+			levels[c.level] = true
+			check_eq(c.duration, c.def.duration_for(c.distance), "duración de la clase")
+	check(levels.has(1) and levels.has(2) and levels.size() >= 3, "varios niveles: %s" % str(levels.keys()))
+
+
+func test_as_move_candidates_need_a_big_margin() -> void:
+	var rng := _rng(6)
+	var b := BoardState.start_position()
+	for i in 10:
+		for c in CheatPlanner.candidates(b, W, _defs(), rng):
+			if c.as_move:
+				check(c.gain >= CheatPlanner.AS_MOVE_MARGIN, "ganancia sobre la mejor jugada legal")
+				check_eq(c.def.kind, CheatDef.Kind.OWN_MOVE)
+	# Fuera de turno nunca hay candidatas como jugada.
+	for c in CheatPlanner.candidates(b, B, _defs(), rng):
+		check(not c.as_move, "negras no mueven: no es su jugada")
+	# Con las jugadas legales pobres (solo mueve el rey), saltar un peón a la 7.ª gana de sobra.
+	var big := BoardState.from_fen("4k3/8/8/8/8/p7/P7/4K3 w - - 0 1")
+	var any_as_move := false
+	for i in 20:
+		for c in CheatPlanner.candidates(big, W, [_defs()[0]], rng):
+			if c.as_move:
+				any_as_move = true
+				check(c.gain >= CheatPlanner.AS_MOVE_MARGIN)
+	check(any_as_move, "con jugadas legales pobres, a veces la usa como jugada")
+
+
+func _sq(n: String) -> int:
+	return ChessPiece.square_from_name(n)
+
+
+func test_bot_keeps_cheating_in_simulated_game() -> void:
+	# Partida simulada sin nodos: B hace trampa con el planificador cada ~0,5 s de servidor
+	# y W juega jugadas legales al azar. Todo plan debe ser aceptado por el servidor.
+	var cfg := MatchConfig.new()
+	cfg.beginner_help = false
+	for d in _defs():
+		cfg.cheats.append(d)
+	cfg.white_seconds = 5000.0
+	cfg.black_seconds = 5000.0
+	var m := MatchServer.new(cfg, PlayerSession.new(1, "Blancas"), PlayerSession.new(2, "Negras"), BoardState.START_FEN, 4)
+	m.start()
+	var rng := _rng(17)
+	var made := 0
+	var rejected := 0
+	var kinds := {}
+	for step in 400:
+		if m.is_over():
+			break
+		m.tick(0.5)
+		if m.board.side_to_move == W and not m.is_hand_busy(W) and m.pending_press < 0:
+			var moves := m.legal_moves()
+			if not moves.is_empty():
+				m.submit_move(W, moves[rng.randi() % moves.size()].uci())
+		elif m.board.side_to_move == B and not m.is_hand_busy(B) and step % 3 == 0:
+			var moves := m.legal_moves()
+			if not moves.is_empty():
+				m.submit_move(B, moves[rng.randi() % moves.size()].uci())
+		if m.is_hand_busy(B) or m.is_over():
+			continue
+		var plan := CheatPlanner.plan(m.board, B, cfg.cheats, rng, 0.7, m.turn_ready_for(B))
+		if plan.is_empty() or rng.randf() > 0.4:
+			continue
+		var res := m.start_cheat(B, plan.from, plan.to)
+		if res.ok:
+			made += 1
+			kinds[res.kind_id] = true
+		else:
+			rejected += 1
+	check_eq(rejected, 0, "el servidor acepta todo plan")
+	check(made >= 5, "el bot hace trampas: %d" % made)
+	check(kinds.size() >= 2, "varias clases: %s" % str(kinds.keys()))
