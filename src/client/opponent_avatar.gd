@@ -34,6 +34,8 @@ var _body_kick: float = 0.0
 var _event_tween: Tween
 var _idle_timer: float = 3.0
 var _rng := RandomNumberGenerator.new()
+## Condenado: ninguna animación ambiental, mirada ni evento lo mueve; el cadáver es del árbitro.
+var condemned: bool = false
 
 
 ## Posición global de los ojos (la usa el bot como cámara virtual). No sigue la animación:
@@ -76,6 +78,8 @@ func bind_bot(p_bot: BotController) -> void:
 ## El bot mira con la convención de la cámara (yaw 0 = hacia -Z del mundo); la figura mira a
 ## +Z y su yaw positivo es hacia su izquierda: hay medio giro de diferencia.
 func _on_looked(yaw: float, pitch: float) -> void:
+	if condemned:
+		return
 	_look_yaw = wrapf(yaw + PI - rotation.y, -PI, PI)
 	_look_pitch = pitch
 	_apply_head()
@@ -87,6 +91,8 @@ func _apply_head() -> void:
 
 
 func _process(delta: float) -> void:
+	if condemned:
+		return
 	# Mientras dura una sacudida se reaplica cada fotograma (el bot solo avisa al girar).
 	if _event_tween != null and _event_tween.is_valid():
 		_apply_head()
@@ -107,8 +113,28 @@ func _next_idle() -> void:
 	figure.play(options[_rng.randi() % options.size()], IDLE_BLEND)
 
 
+## El rival fue condenado: se detienen poses de reposo, mirada, eventos y brazos. A partir de
+## aquí la figura solo la mueve quien la ejecuta (`Condemned`) y luego queda quieta.
+func condemn() -> void:
+	if condemned:
+		return
+	condemned = true
+	if _event_tween != null and _event_tween.is_valid():
+		_event_tween.kill()
+	_head_kick = 0.0
+	_body_kick = 0.0
+	if bot != null and bot.looked.is_connected(_on_looked):
+		bot.looked.disconnect(_on_looked)
+	set_process(false)
+	for rig in [hand_rig, idle_rig]:
+		if rig != null:
+			rig.set_active(false, 0.2)
+
+
 ## Tos: dos espasmos, cabeza y torso se doblan hacia adelante.
 func play_cough() -> void:
+	if condemned:
+		return
 	_start_event_tween()
 	_event_tween.tween_method(_cough_step, 0.0, 1.0, 0.9)
 	_event_tween.tween_callback(_end_event)
@@ -122,6 +148,8 @@ func _cough_step(t: float) -> void:
 
 ## Se le escapa una pieza: mira hacia abajo, hacia el suelo, un momento.
 func play_drop_piece() -> void:
+	if condemned:
+		return
 	_start_event_tween()
 	_event_tween.tween_method(_dip_step, 0.0, 1.0, 0.25).set_ease(Tween.EASE_OUT)
 	_event_tween.tween_interval(0.7)

@@ -154,7 +154,6 @@ func _ready() -> void:
 	hud.show_capture_prompt = not _args.has("screenshot")
 	hud.set_mouse_captured(false)
 	player.mouse_capture_changed.connect(hud.set_mouse_captured)
-	hud.set_pace(_pace_text())
 	# Pausa con Esc: suelta el ratón al abrir y lo recaptura al reanudar.
 	pause_menu = PauseMenu.new()
 	pause_menu.name = "Pausa"
@@ -583,7 +582,21 @@ func condemn_seat(table: int, seat: int) -> CharacterFigure:
 	if table != HallLayout.HUMAN_TABLE:
 		var bt: BackgroundTable = bg_tables.get(table)
 		return bt.condemn(seat) if bt != null else null
+	if seat == rival_color:
+		_freeze_rival()
 	return figure_at(table, seat)
+
+
+## El rival de la mesa del humano muere: se apagan su avatar, su bot y su animador de manos
+## para que no vuelva a sentarse, mirar ni mover los brazos (ver `OpponentAvatar.condemn`).
+func _freeze_rival() -> void:
+	if avatar != null:
+		avatar.condemn()
+	if rival_bot != null:
+		rival_bot.set_process(false)
+	var ra: HandAnimator = animators[rival_color]
+	if ra != null:
+		ra.set_process(false)
 
 
 ## Jugadores que siguen vivos ahora: los de la ronda menos los perdedores ya conocidos.
@@ -620,14 +633,6 @@ func _round_title() -> String:
 		var no := manager.games[0].game_no if not manager.games.is_empty() else manager.final_games.size() + 1
 		return "Final · game %d of 2" % no
 	return "Round %d" % manager.round_no
-
-
-## Ritmo de juego para el HUD ("3+2"); "" si aún no hay incremento en la configuración.
-func _pace_text() -> String:
-	var inc: Variant = config.get("increment_seconds")
-	if inc == null:
-		return ""
-	return "%d+%d" % [int(round(config.white_seconds / 60.0)), int(inc)]
 
 
 func _human_eliminated(reason: String) -> void:
@@ -759,8 +764,6 @@ func _process(delta: float) -> void:
 	var c := server.clock
 	clock_view.set_times(c.remaining[ChessPiece.WHITE], c.remaining[ChessPiece.BLACK])
 	clock_view.set_running(c.running)
-	hud.set_clocks(c.remaining[human_color], c.remaining[rival_color],
-			c.running == human_color, c.running == rival_color)
 	# El estrés de cada mano crece cuando le queda poco tiempo en el reloj.
 	for color in 2:
 		animators[color].rig.stress = clampf(1.0 - c.remaining[color] / 45.0, 0.0, 1.0)

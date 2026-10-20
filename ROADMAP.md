@@ -6,6 +6,16 @@ Solo lo **pendiente**. Lo implementado se describe en [`docs/arquitectura.md`](d
 
 Pedidos del 2026-10-19 que no entran en la tanda de arreglos rápidos. Cada frente es delegable por separado salvo donde se indica la dependencia.
 
+El arte (modelado y animación) también lo hacen los agentes con scripts de Blender: el usuario no anima. El código pide **roles** de animación (`<rol>` o `<rol>__<variante>`) con respaldo, para que añadir variantes no exija tocar código.
+
+### Frente G — Trampas libres (sin elegir la trampa)
+- [ ] Una sola interacción: clic en cualquier pieza (no rey), propia o rival, en cualquier turno, y soltarla donde se quiera. El servidor clasifica: pieza propia (`own`), pieza rival (`enemy`) o pieza rival a la pila de capturas propia (`steal`).
+- [ ] Mapa de calor al seleccionar: verde = legal, naranja = adyacente a lo legal, rojo = siguiente anillo, cada vez más rojo y más transparente con la distancia. Pieza rival: por distancia a su casilla; al seleccionarla se ilumina la pila de capturas propia.
+- [ ] Pieza propia a casilla no legal en tu turno = tu jugada (pasa el turno y se pulsa el reloj); todo lo demás es trampa sin cambio de turno. Reyes intocables.
+- [ ] Evidencia (probabilidad de que el bot te cache) según el nivel de sospecha; los bots usan las mismas clases.
+- [ ] Quitar teclas 1-4 y el panel de trampas.
+
+
 ### Frente A — Mano del jugador con cinco dedos y agarre real
 Es lo que el jugador ve todo el tiempo: debe ser lo más pulido del juego.
 - [ ] Mano de 5 dedos en `player.glb` (Blender): índice, medio, anular y meñique con 3 falanges y pulgar con 3; pesos limpios en los nudillos. Actualizar `tools/check_characters.gd`.
@@ -81,7 +91,7 @@ Depende del Frente B solo para la animación de caminar del jugador.
 | ¿El reloj se pausa mientras llega el árbitro? | Sí |
 | ¿Una acusación correcta borra una advertencia? | No |
 | Ventana de acusación | Las 3 últimas jugadas del acusador (`accusation_window_moves`) |
-| Elo del rival del humano | De 1000 (ronda 1) a 1500 (final); ¿subir el techo a ~1700-1950 (promedio de jugadores con Elo FIDE)? |
+| Elo del rival del humano | De 1000 (ronda 1) a 1500 (final) |
 | Ritmo | 3 min + 2 s por jugada |
 | ¿Más tiempo para blancas? | No |
 | Jugadores por torneo | 32 en cuadrícula 4x4 (configurable con `--players`) |

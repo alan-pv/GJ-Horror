@@ -17,10 +17,6 @@ var _result_title: Label
 var _result_reason: Label
 var _result_restart: Label
 var _round_info: Label
-var _rounds_left: Label
-var _own_clock: Label
-var _rival_clock: Label
-var _pace: Label
 var _status: Label
 var _subtitle_tween: Tween
 var _arbiter_tween: Tween
@@ -76,7 +72,7 @@ func _ready() -> void:
 	_capture_prompt.offset_bottom = -160
 	_capture_prompt.text = "Click to take control of the mouse"
 	_capture_prompt.visible = false
-	# Torneo: ronda y jugadores restantes arriba a la derecha, cuadro de la ronda debajo.
+	# Torneo: solo la ronda arriba a la derecha (el tiempo se lee en el reloj 3D de la mesa).
 	_round_info = _label(22, Color(1.0, 0.82, 0.45))
 	_round_info.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_round_info.anchor_left = 1.0
@@ -85,15 +81,6 @@ func _ready() -> void:
 	_round_info.offset_right = -20
 	_round_info.offset_top = 12
 	_round_info.offset_bottom = 44
-	_rounds_left = _label(16, Color(0.78, 0.74, 0.66))
-	_rounds_left.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_rounds_left.anchor_left = 1.0
-	_rounds_left.anchor_right = 1.0
-	_rounds_left.offset_left = -420
-	_rounds_left.offset_right = -20
-	_rounds_left.offset_top = 44
-	_rounds_left.offset_bottom = 70
-	_build_clocks()
 	# Estado de espera ("Waiting for the other tables...") sin tapar el salón.
 	_status = _label(24, Color(0.93, 0.89, 0.80))
 	_status.anchor_left = 0.1
@@ -229,68 +216,9 @@ func is_screen_visible() -> bool:
 	return _result_panel.visible
 
 
-## Ronda en curso (arriba a la derecha): "Round 2 / 5", cuántas faltan
-## ("3 rounds left" / "Final") y los jugadores que quedan. Sin nombres.
-func set_round_info(round_no: int, total_rounds: int, is_final: bool, players_left: int) -> void:
-	if is_final:
-		_round_info.text = "Final"
-		_rounds_left.text = "%d players left" % players_left
-		return
-	_round_info.text = "Round %d / %d" % [round_no, total_rounds]
-	var left := maxi(total_rounds - round_no, 0)
-	var rounds := "Final next" if left <= 1 else "%d rounds left" % left
-	_rounds_left.text = "%s · %d players left" % [rounds, players_left]
-
-
-## Dos relojes arriba al centro: el propio y el del rival; resalta el que corre.
-func set_clocks(own_seconds: float, rival_seconds: float, own_running: bool, rival_running: bool) -> void:
-	_set_clock(_own_clock, "You", own_seconds, own_running)
-	_set_clock(_rival_clock, "Opponent", rival_seconds, rival_running)
-
-
-func _set_clock(l: Label, who: String, seconds: float, running: bool) -> void:
-	var t := "%s  %s" % [who, ClockView.format_time(seconds)]
-	if l.text != t:
-		l.text = t
-	var low := seconds < 20.0
-	if running:
-		l.add_theme_color_override("font_color", Color(1.0, 0.3, 0.22) if low else Color(1.0, 0.85, 0.5))
-	else:
-		l.add_theme_color_override("font_color", Color(0.55, 0.5, 0.42))
-
-
-## Ritmo de juego discreto bajo los relojes (p. ej. "3+2"); "" lo oculta.
-func set_pace(text: String) -> void:
-	_pace.text = text
-	_pace.visible = text != ""
-
-
-func _build_clocks() -> void:
-	var box := VBoxContainer.new()
-	box.anchor_left = 0.5
-	box.anchor_right = 0.5
-	box.offset_left = -170
-	box.offset_right = 170
-	box.offset_top = 10
-	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(box)
-	_rival_clock = _clock_label(box, 22)
-	_own_clock = _clock_label(box, 28)
-	_pace = _clock_label(box, 14)
-	_pace.add_theme_color_override("font_color", Color(0.5, 0.46, 0.4))
-	_pace.visible = false
-
-
-func _clock_label(parent: Control, size: int) -> Label:
-	var l := Label.new()
-	l.add_theme_font_size_override("font_size", size)
-	l.add_theme_color_override("font_color", Color(0.55, 0.5, 0.42))
-	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
-	l.add_theme_constant_override("outline_size", 6)
-	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	parent.add_child(l)
-	return l
+## Ronda en curso (arriba a la derecha): "Round 2 / 5" o "Final". Sin nombres ni conteos.
+func set_round_info(round_no: int, total_rounds: int, is_final: bool, _players_left: int = 0) -> void:
+	_round_info.text = "Final" if is_final else "Round %d / %d" % [round_no, total_rounds]
 
 
 ## Mensaje persistente bajo la barra superior; "" lo oculta.
