@@ -92,6 +92,73 @@ class Shape:
         return r * self.kx
 
 
+# ----------------------------------------------------------------------------
+# Mano de cinco dedos
+# ----------------------------------------------------------------------------
+FINGER_NAMES = ("Index", "Middle", "Ring", "Pinky")
+# nombre: (desplazamiento lateral hacia el menique, retraso del nudillo respecto a la linea de nudillos,
+#          abanico en reposo en grados, largo relativo al medio, radio del dedo)
+FINGER_DEFS = {
+    "Index": (-.030, .002, -4.0, .92, .0106),
+    "Middle": (-.010, 0.0, 0.0, 1.00, .0112),
+    "Ring": (.010, .003, 3.0, .93, .0105),
+    "Pinky": (.027, .009, 8.0, .78, .0088),
+}
+FINGER_SPLIT = (.46, .30, .24)        # largo de cada falange respecto al dedo completo
+THUMB_LEN = (.036, .029, .024)        # Thumb1 (metacarpiano), Thumb2, Thumb3
+THUMB_OPPOSE = (.5, .85)              # direccion de cierre del pulgar: (normal de la palma, hacia el menique)
+# La API de pose (curl, thumb_curl, en grados) se reparte entre las tres falanges.
+# FINGER_GAIN: el curl de los clips era el giro del bloque completo; ahora el total de la mano
+# (suma de las tres falanges) es curl * FINGER_GAIN, de modo que curl ~80 llega casi a puno cerrado.
+FINGER_GAIN = 2.4
+FINGER_FLEX_SPLIT = (.40, .35, .25)
+THUMB_FLEX_SPLIT = (.50, .30, .20)
+FINGER_CURL_FACTOR = {"Index": .92, "Middle": 1.0, "Ring": 1.05, "Pinky": 1.12}
+# Signo del abanico por dedo (spread > 0 separa los dedos): indice y medio hacia delante, anular y menique atras.
+FINGER_SPREAD_W = {"Index": -1.0, "Middle": -.3, "Ring": .5, "Pinky": 1.2}
+
+
+def hand_frame(hd, s):
+    """Marco de la mano: (hd hacia los dedos, w hacia el menique, n normal de la palma hacia el cuerpo)."""
+    hd = V(hd).normalized()
+    w = V((0, 1, 0))
+    w = (w - hd * w.dot(hd)).normalized()
+    n = hd.cross(w)
+    if n.dot(V((-s, 0, 0))) < 0:
+        n = -n
+    return hd, w, n
+
+
+def hand_bones(sd, s, wr, kn, d3, finger_len, sh):
+    """Huesos de los cinco dedos: lista de (nombre, cabeza, cola, eje Z deseado). La flexion hacia la palma
+    es girar +a (mano R) o -a (mano L) sobre el Z local de cada falange, con +Y a lo largo del hueso."""
+    hd, w, n = hand_frame(d3, s)
+    out = []
+    for nm, (off, back, splay, ratio, _rad) in FINGER_DEFS.items():
+        a = math.radians(splay)
+        fd = (hd * math.cos(a) + w * math.sin(a)).normalized()
+        zax = fd.cross(n).normalized() * (-s)
+        head = kn + w * (off * sh.kx) - hd * back
+        pos = head
+        for i, fr in enumerate(FINGER_SPLIT):
+            tail = pos + fd * (finger_len * ratio * fr)
+            out.append((f"{nm}{i + 1}.{sd}", pos, tail, zax))
+            pos = tail
+    # pulgar: nace en la base de la palma, por el lado del indice, y cruza hacia la palma al cerrarse
+    t = (hd * .80 - w * .38 + n * .28).normalized()
+    # el pulgar cierra hacia la palma y cruzando hacia los otros dedos (oposicion): eje perpendicular a t y a m
+    m = (n * THUMB_OPPOSE[0] + w * THUMB_OPPOSE[1]).normalized()
+    k = t.cross(m).normalized()
+    pos = wr + hd * .022 - w * (.028 * sh.kx) + n * .002
+    zax = k * (-s)
+    for i, ln in enumerate(THUMB_LEN):
+        tail = pos + t * ln
+        out.append((f"Thumb{i + 1}.{sd}", pos, tail, zax))
+        pos = tail
+        t = (t * math.cos(math.radians(8)) + k.cross(t) * math.sin(math.radians(8))).normalized()
+    return out
+
+
 def build_armature(sh, arm_len=(0.31, 0.28, 0.09, 0.08)):
     """Crea el Armature 'Armature' con la A-pose. Devuelve el objeto."""
     bpy.ops.object.armature_add(enter_editmode=True, location=(0, 0, 0))
@@ -135,15 +202,14 @@ def build_armature(sh, arm_len=(0.31, 0.28, 0.09, 0.08)):
         wr = el + d2 * L2
         d3 = (d2 + V((0, -1, 0)) * math.tan(math.radians(8))).normalized()
         kn = wr + d3 * L3
-        d4 = (d3 + V((0, -1, 0)) * math.tan(math.radians(10))).normalized()
-        tp = kn + d4 * L4
         add(f"UpperArm.{sd}", sh_pos, el, f"Shoulder.{sd}", True)
         add(f"Forearm.{sd}", el, wr, f"UpperArm.{sd}", True)
         add(f"Hand.{sd}", wr, kn, f"Forearm.{sd}", True)
-        add(f"Fingers.{sd}", kn, tp, f"Hand.{sd}", True)
-        th0 = wr + d3 * (L3 * .25) + V((0, -1, 0)) * 0.012 + V((-s, 0, 0)) * .012
-        th_d = (d3 * .6 + V((0, -1, 0)) * .7 + V((-s, 0, 0)) * .15).normalized()
-        add(f"Thumb.{sd}", th0, th0 + th_d * .06, f"Hand.{sd}", False)
+        # mano de cinco dedos: X1 cuelga de Hand; X2 de X1 y X3 de X2 (X2 y X3 conectados)
+        for nm, head, tail, zax in hand_bones(sd, s, wr, kn, d3, L4, sh):
+            fn_, ph = nm.split(".")[0][:-1], int(nm.split(".")[0][-1])
+            par = f"Hand.{sd}" if ph == 1 else f"{fn_}{ph - 1}.{sd}"
+            add(nm, head, tail, par, ph > 1, hint=zax)
 
         hip = sx(.085, 0, .88)
         knee = sx(.088, -.028, .45)
@@ -432,8 +498,21 @@ class Rig:
         Zh.normalize()
         Xh = Yh.cross(Zh)
         self.world(H, mat_from_axes(Xh, Yh, Zh, tgt))
-        self.fk(f"Fingers.{sd}", (0, 0, -s * a["curl"]))
-        self.fk(f"Thumb.{sd}", (0, 0, -s * a["thumb_curl"]))
+        self._fingers(sd, s, a)
+
+    def _fingers(self, sd, s, a):
+        """curl / thumb_curl (grados) repartidos entre las tres falanges; spread (grados) abre los dedos;
+        fcurl (opcional) = {dedo: factor} para curvar cada dedo por separado."""
+        spread = a.get("spread", 0.0)
+        per = a.get("fcurl", {})
+        for nm in FINGER_NAMES:
+            tot = a["curl"] * FINGER_GAIN * FINGER_CURL_FACTOR[nm] * per.get(nm, 1.0)
+            for i, fr in enumerate(FINGER_FLEX_SPLIT):
+                sp_ = spread * FINGER_SPREAD_W[nm] * s if i == 0 else 0.0
+                self.fk(f"{nm}{i + 1}.{sd}", (sp_, 0, -s * tot * fr))
+        tot = a["thumb_curl"] * FINGER_GAIN * per.get("Thumb", 1.0)
+        for i, fr in enumerate(THUMB_FLEX_SPLIT):
+            self.fk(f"Thumb{i + 1}.{sd}", (0, 0, -s * tot * fr))
 
     def default_spec(self):
         sp = dict(hips_off=V((0, 0, 0)), hips_rot=(0, 0, 0), spine=(0, 0, 0), chest=(0, 0, 0),

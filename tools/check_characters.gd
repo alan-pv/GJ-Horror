@@ -4,7 +4,10 @@ extends SceneTree
 ## Imprime huesos, animaciones y duraciones; termina con código 1 si falta algo.
 
 const BASE_BONES := ["Hips", "Spine", "Chest", "Neck", "Head"]
-const SIDE_BONES := ["Shoulder", "UpperArm", "Forearm", "Hand", "Fingers", "Thumb", "Thigh", "Shin", "Foot"]
+const SIDE_BONES := ["Shoulder", "UpperArm", "Forearm", "Hand", "Thigh", "Shin", "Foot",
+	"Thumb1", "Thumb2", "Thumb3", "Index1", "Index2", "Index3", "Middle1", "Middle2", "Middle3",
+	"Ring1", "Ring2", "Ring3", "Pinky1", "Pinky2", "Pinky3"]
+const BONE_COUNT := 49   # 5 del tronco/cabeza + 22 por lado
 const MATERIALS := ["Skin", "Shirt", "Jacket", "Pants", "Shoes", "Hair"]
 
 const CHARACTERS := {
@@ -65,6 +68,8 @@ func _check(path: String, spec: Dictionary) -> void:
 	for b in SIDE_BONES:
 		want.append(b + ".L")
 		want.append(b + ".R")
+	if names.size() != BONE_COUNT:
+		_fail("se esperaban %d huesos y hay %d" % [BONE_COUNT, names.size()])
 	for b in want:
 		if not names.has(b):
 			_fail("falta el hueso " + b)

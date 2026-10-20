@@ -10,7 +10,6 @@ El arte (modelado y animación) también lo hacen los agentes con scripts de Ble
 
 ### Frente A — Mano del jugador con cinco dedos y agarre real
 Es lo que el jugador ve todo el tiempo: debe ser lo más pulido del juego.
-- [ ] Mano de 5 dedos en `player.glb` (Blender): índice, medio, anular y meñique con 3 falanges y pulgar con 3; pesos limpios en los nudillos. Actualizar `tools/check_characters.gd`.
 - [ ] Agarres por tipo de pieza (peón por la cabeza, torre/alfil por el cuerpo, caballo, dama y rey por la corona): puntos de contacto definidos por pieza en `PieceFactory` y dedos que se cierran hasta tocar (sin atravesar ni quedar en el aire).
 - [ ] Orientación de la muñeca controlada (hoy el IK no la controla): la palma mira a la pieza al acercarse.
 - [ ] Pulsar el reloj, tomar la pluma y escribir con la mano nueva; temblor por estrés en los dedos.
@@ -19,6 +18,8 @@ Es lo que el jugador ve todo el tiempo: debe ser lo más pulido del juego.
 - [ ] Si la trampa interrumpe la anotación del humano hay ~0,25 s de retraso por dejar la pluma; el rival (que escribe con la otra mano) podría empezarla a la vez.
 
 ### Frente B — Pulido de animaciones
+- [ ] El puño al máximo de los clips (`curl` ~80) no cierra del todo y entre dedos curvados se ve el canto plano de la palma.
+- [ ] La inclinación del IK encorva: `HandRig.LEAN_MAX` = 0,95 rad deja la cabeza a 4-14 cm de la mesa y `TorsoLeanModifier` la reparte solo entre Spine y Chest. Bajar el tope (~0,6), adelantar más la cadera (`SHIFT_MAX`) y repartir parte en la pelvis.
 - [ ] Poses de espera también para el cuerpo del jugador en primera persona (hoy solo el rival y las mesas de fondo usan `sit_wait`).
 - [ ] Maniquíes sin rasgos: la nariz y las orejas son geometría de `Skin` en `player.glb` y quedan como relieve; hace falta una variante sin rasgos (o separar esa geometría) en `build_player.py`.
 - [ ] `dragged`: las manos quedan en puño hacia fuera; los guardias se ven casi negros fuera del cono de luz (ropa más clara o algo de emisión).

@@ -16,6 +16,10 @@ const CHEST_START := deg_to_rad(28.0)
 const CHEST_SHARE := 0.4
 const NECK_SHARE := 0.4
 const HEAD_SHARE := 0.6
+## Al mirar hacia abajo la cabeza se inclina solo esta fraccion del pitch pedido: el rival mira el
+## tablero (~-35 grados) y con el pitch completo la barbilla cae sobre el pecho y la cabeza queda
+## pegada a la mesa. La direccion de la mirada la decide el servidor, esto es solo el dibujo.
+const DOWN_SCALE := 0.75
 
 var yaw: float = 0.0
 var pitch: float = 0.0
@@ -37,9 +41,10 @@ func _process_modification() -> void:
 	if absf(yaw) > 0.0005 or absf(pitch) > 0.0005:
 		var extra := signf(yaw) * maxf(absf(yaw) - CHEST_START, 0.0) * CHEST_SHARE
 		var rest := yaw - extra
+		var pit := pitch * (DOWN_SCALE if pitch < 0.0 else 1.0)
 		_rotate(sk, chest, extra, 0.0)
-		_rotate(sk, neck, rest * NECK_SHARE, pitch * NECK_SHARE)
-		_rotate(sk, head, rest * HEAD_SHARE, pitch * HEAD_SHARE)
+		_rotate(sk, neck, rest * NECK_SHARE, pit * NECK_SHARE)
+		_rotate(sk, head, rest * HEAD_SHARE, pit * HEAD_SHARE)
 	if hide_head:
 		sk.set_bone_pose_scale(head, Vector3.ONE * 0.001)
 		_head_hidden = true

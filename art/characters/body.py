@@ -1,7 +1,7 @@
 """Malla low-poly del cuerpo humano (compartida por jugador y arbitro) con pesos al esqueleto."""
 import math
 
-from chartools import V, Builder, ring, limb_rings, make_material
+from chartools import V, Builder, ring, limb_rings, make_material, hand_frame, FINGER_DEFS, FINGER_NAMES
 
 
 def build_body(arm, sh, cfg, coll):
@@ -81,24 +81,7 @@ def build_body(arm, sh, cfg, coll):
         rs[-1]["w"] = {f"Forearm.{sd}": .6, f"Hand.{sd}": .4}
         bd.loft(rs, n=N)
         # mano
-        hb, fb = bn[f"Hand.{sd}"], bn[f"Fingers.{sd}"]
-        hd = (hb.tail_local - hb.head_local).normalized()
-        fd = (fb.tail_local - fb.head_local).normalized()
-        e1 = V((0, 1, 0))
-        hr_ = [
-            ring(hb.head_local, hd, R(.03), R(.024), {f"Forearm.{sd}": .4, f"Hand.{sd}": .6}, e1=e1, mat=hand_mat),
-            ring(hb.head_local.lerp(hb.tail_local, .55), hd, R(.043), R(.021), {f"Hand.{sd}": 1}, e1=e1, mat=hand_mat),
-            ring(hb.tail_local, hd, R(.045), R(.022), {f"Hand.{sd}": .5, f"Fingers.{sd}": .5}, e1=e1, mat=hand_mat),
-            ring(fb.head_local.lerp(fb.tail_local, .5), fd, R(.043), R(.02), {f"Fingers.{sd}": 1}, e1=e1, mat=hand_mat),
-            ring(fb.tail_local, fd, R(.036), R(.015), {f"Fingers.{sd}": 1}, e1=e1, mat=hand_mat),
-        ]
-        bd.loft(hr_, n=6)
-        tb = bn[f"Thumb.{sd}"]
-        td = (tb.tail_local - tb.head_local).normalized()
-        tr = [ring(tb.head_local, td, R(.017), R(.015), {f"Hand.{sd}": .5, f"Thumb.{sd}": .5}, mat=hand_mat),
-              ring(tb.head_local.lerp(tb.tail_local, .55), td, R(.015), R(.013), {f"Thumb.{sd}": 1}, mat=hand_mat),
-              ring(tb.tail_local, td, R(.011), R(.01), {f"Thumb.{sd}": 1}, mat=hand_mat)]
-        bd.loft(tr, n=5, e1hint=V((1, 0, 0)))
+        _hand(bd, bn, sd, s, R, hand_mat)
 
     # ---- piernas y zapatos -------------------------------------------------------------
     pr = cfg.get("leg_r", 1.0)
@@ -136,3 +119,51 @@ def build_body(arm, sh, cfg, coll):
     bald = hair("Hair_Bald", [(1.585, .096, .114, .014), (1.625, .089, .107, .01), (1.66, .069, .086, .007),
                               (1.682, .036, .052, .008)])
     return [body, short, long_, bald]
+
+
+def _hand(bd, bn, sd, s, R, mat):
+    """Palma (loft de ocho lados) y cinco dedos (lofts de seis lados). Cada anillo de nudillo reparte
+    sus pesos entre las dos falanges vecinas; la palma queda rigida (solo Forearm/Hand)."""
+    hb = bn[f"Hand.{sd}"]
+    hd, w, n = hand_frame(hb.tail_local - hb.head_local, s)
+    e1 = V((0, 1, 0))
+    H, T = hb.head_local, hb.tail_local
+    hr_ = [
+        ring(H, hd, R(.030), R(.021), {f"Forearm.{sd}": .4, f"Hand.{sd}": .6}, e1=e1, mat=mat),
+        ring(H.lerp(T, .5), hd, R(.042), R(.0165), {f"Hand.{sd}": 1}, e1=e1, mat=mat),
+        ring(T, hd, R(.041), R(.0135), {f"Hand.{sd}": 1}, e1=e1, mat=mat),
+    ]
+    bd.loft(hr_, n=8)
+
+    def finger(names, radii):
+        """names: tres huesos; radii: radios [base, mitad1, nudillo1, mitad2, nudillo2, mitad3, punta]."""
+        bs = [bn[f"{nm}.{sd}"] for nm in names]
+        pts = [bs[0].head_local, bs[1].head_local, bs[2].head_local, bs[2].tail_local]
+        dirs = [(b.tail_local - b.head_local).normalized() for b in bs]
+        z = (bs[0].matrix_local.to_3x3() @ V((0, 0, 1))).normalized()
+        def ax(i):      # eje del anillo en la articulacion i: bisectriz de las falanges vecinas
+            if i == 0:
+                return dirs[0]
+            if i == 3:
+                return dirs[2]
+            return (dirs[i - 1] + dirs[i]).normalized()
+        P_ = f"Hand.{sd}"
+        rings = [
+            ring(pts[0], ax(0), radii[0], radii[0] * .88, {P_: .5, bs[0].name: .5}, e1=z, mat=mat),
+            ring(pts[0].lerp(pts[1], .5), dirs[0], radii[1], radii[1] * .88, {bs[0].name: 1}, e1=z, mat=mat),
+            ring(pts[1], ax(1), radii[2], radii[2] * .88, {bs[0].name: .5, bs[1].name: .5}, e1=z, mat=mat),
+            ring(pts[1].lerp(pts[2], .5), dirs[1], radii[3], radii[3] * .88, {bs[1].name: 1}, e1=z, mat=mat),
+            ring(pts[2], ax(2), radii[4], radii[4] * .88, {bs[1].name: .5, bs[2].name: .5}, e1=z, mat=mat),
+            ring(pts[2].lerp(pts[3], .55), dirs[2], radii[5], radii[5] * .88, {bs[2].name: 1}, e1=z, mat=mat),
+            ring(pts[3], ax(3), radii[6], radii[6] * .88, {bs[2].name: 1}, e1=z, mat=mat),
+        ]
+        bd.loft(rings, n=6, caps=(False, True))
+
+    for nm in FINGER_NAMES:
+        r = R(FINGER_DEFS[nm][4])
+        # nudillos algo mas gruesos que las falanges; la yema se afina
+        finger([f"{nm}{i}" for i in (1, 2, 3)],
+               [r * .98, r * .92, r * 1.0, r * .88, r * .93, r * .84, r * .55])
+    r = R(.0115)
+    finger([f"Thumb{i}" for i in (1, 2, 3)],
+           [r * 1.35, r * 1.2, r * 1.05, r * .98, r * .98, r * .92, r * .6])

@@ -46,7 +46,7 @@ func test_animations_exist() -> void:
 	var a := ArbiterFigure.new()
 	for n in ARBITER_ANIMS:
 		check(a.has_animation(n), "árbitro sin " + n)
-	check(p.skeleton() != null and p.skeleton().get_bone_count() == 23, "23 huesos")
+	check(p.skeleton() != null and p.skeleton().get_bone_count() == 49, "49 huesos")
 	p.free()
 	a.free()
 
@@ -357,3 +357,25 @@ func test_accuse_hands_over_to_hold() -> void:
 			worst = maxf(worst, rad_to_deg((va as Quaternion).angle_to(vb)))
 	check(worst < 1.0, "empalme accuse -> hold (%.2f grados)" % worst)
 	f.free()
+
+
+## Postura sentada natural: espalda casi recta (la inclinación sale del cuello) y la cabeza a una
+## altura razonable sobre la mesa (0,72 m), incluso mirando al tablero (pitch -35 grados).
+func test_seated_posture_is_upright() -> void:
+	var table := 0.72
+	for clip in ["sit_idle", "sit_nervous", "sit_wait__chin", "sit_wait__crossed", "sit_wait__head",
+			"sit_wait__lean_back", "sit_think", "sit_think__chin", "sit_think__temple"]:
+		var f := _spawn(CharacterFigure.new()) as CharacterFigure
+		f.play(StringName(clip), 0.0)
+		var ap := f.animation_player()
+		ap.pause()
+		for frac in [0.0, 0.5]:
+			ap.seek(frac * ap.get_animation(clip).length, true)
+			f.set_look(0.0, deg_to_rad(-35.0), true)
+			_apply(f)
+			var tr := f.bone_global(&"Neck").origin - f.bone_global(&"Hips").origin
+			var lean := rad_to_deg(atan2(tr.z, tr.y))
+			var h := f.head_global_position().y - table
+			check(lean < 13.0, "%s: tronco a %.1f grados de la vertical (máx 13)" % [clip, lean])
+			check(h >= 0.30, "%s: cabeza a %.2f m sobre la mesa (mín 0,30)" % [clip, h])
+		f.queue_free()

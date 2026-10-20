@@ -77,7 +77,8 @@ def rest_hand(sp, sd, x=.20, y=-.29, z=.79, curl=34.0, hdir=None, thumb=None, po
 def make_sit():
     sp = rig.default_spec()
     sp["hips_off"] = V((0, -0.03, 0.54 - HIP_Z))
-    sp.update(spine=(8, 0, 0), chest=(8, 0, 0), neck=(-2, 0, 0), head=(6, 0, 0))
+    # Espalda casi recta; la cabeza baja con el cuello (no con una joroba en Spine/Chest).
+    sp.update(spine=(3, 0, 0), chest=(3, 0, 0), neck=(2, 0, 0), head=(6, 0, 0))
     a = fit_sit_legs(sp, 0.54)
     for sd in "LR":
         sp["thigh" + sd] = (a, 0, 0)
@@ -136,7 +137,7 @@ def _(t, u):
 
 def think_base():
     sp = clone(SIT)
-    sp.update(spine=(13, 0, 2), chest=(9, 0, 0), neck=(2, 0, 0), head=(9, 4, -6))
+    sp.update(spine=(7, 0, 2), chest=(5, 0, 0), neck=(6, 0, 0), head=(9, 4, -6))
     arm_set(sp, "R", "att", (-0.062, -0.045, 0.085), bone="Head", pole=(-.4, .5, -1),
             hdir=(.45, .35, .85), thumb=(-1, 0, 0), curl=70.0, thumb_curl=15.0)
     return sp
@@ -540,7 +541,7 @@ def breathe_s(sp, w, k=1.0):
 
 def crossed_pose():
     sp = clone(SIT)
-    sp.update(spine=(9, 0, 0), chest=(8, 0, 0), neck=(0, 0, 0), head=(6, 0, 0))
+    sp.update(spine=(4, 0, 0), chest=(4, 0, 0), neck=(2, 0, 0), head=(6, 0, 0))
     arm_set(sp, "L", "abs", (-.10, -.31, .805), pole=(.5, 1, .1), hdir=(-1, -.18, -.06), thumb=(0, 1, .3),
             curl=30.0, thumb_curl=12.0)
     arm_set(sp, "R", "abs", (.10, -.40, .805), pole=(-.5, 1, .1), hdir=(1, -.18, -.06), thumb=(0, 1, .3),
@@ -568,8 +569,8 @@ def chin_hand(sp, sd, tilt=0.0):
 def _(t, u):
     sp = clone(SIT)
     w = 2 * pi * u
-    sp.update(spine=(14, 0, 0), chest=(12, 0, 0), neck=(2, 0, 0), head=(2, -3, 4))
-    tw(sp, "hips_off", (0, -0.03, 0))
+    sp.update(spine=(8, 0, 0), chest=(6, 0, 0), neck=(6, 0, 0), head=(2, -3, 4))
+    tw(sp, "hips_off", (0, -0.02, 0))
     chin_hand(sp, "R")
     breathe_s(sp, w, .8)
     settle(sp, w, .5)
@@ -579,8 +580,8 @@ def _(t, u):
 
 def head_pose():
     sp = clone(SIT)
-    sp.update(spine=(14, 0, 0), chest=(12, 0, 0), neck=(6, 0, 0), head=(16, 3, -4))
-    tw(sp, "hips_off", (0, -0.03, 0))
+    sp.update(spine=(8, 0, 0), chest=(6, 0, 0), neck=(8, 0, 0), head=(14, 3, -4))
+    tw(sp, "hips_off", (0, -0.02, 0))
     arm_set(sp, "R", "att", (-.118, .085, .04), bone="Head", pole=(-1, .2, .1),
             hdir=(.4, -.1, .9), thumb=(0, 1, 0), curl=48.0, thumb_curl=15.0)
     return sp
@@ -600,7 +601,7 @@ def _(t, u):
 def _(t, u):
     sp = clone(SIT)
     w = 2 * pi * u
-    sp.update(spine=(-9, 0, 0), chest=(-8, 0, 0), neck=(2, 0, 0), head=(8, 0, 0))
+    sp.update(spine=(-6, 0, 0), chest=(-5, 0, 0), neck=(4, 0, 0), head=(12, 0, 0))
     tw(sp, "hips_off", (0, 0.03, 0))
     for sd, s in (("L", 1), ("R", -1)):
         arm_set(sp, sd, "abs", (s * .09, -.12, .69), pole=(s * .6, .9, -.3), hdir=(-s * .45, -1, -.35),
@@ -615,8 +616,8 @@ def _(t, u):
 # Pensar la propia jugada (rol sit_think)
 # ----------------------------------------------------------------------------
 def think_lean(sp):
-    sp.update(spine=(14, 0, 2), chest=(11, 0, 0), neck=(4, 0, 0), head=(14, 3, -3))
-    tw(sp, "hips_off", (0, -0.035, 0))
+    sp.update(spine=(8, 0, 2), chest=(6, 0, 0), neck=(7, 0, 0), head=(12, 3, -3))
+    tw(sp, "hips_off", (0, -0.02, 0))
 
 
 @anim("sit_think__chin", 5.0, True, 0.25)
@@ -865,7 +866,8 @@ def _(t, u):
 # Verificacion de penetracion contra la mesa
 # ----------------------------------------------------------------------------
 CHECK_EDGE_Y = -0.27     # canto de la mesa con la silla a 0,72 m (el caso mas estricto)
-ARM_GROUPS = ("UpperArm", "Forearm", "Hand", "Fingers", "Thumb", "Shoulder")
+ARM_GROUPS = ("UpperArm", "Forearm", "Hand", "Shoulder") + tuple(
+    f"{f}{i}" for f in C.FINGER_NAMES + ("Thumb",) for i in (1, 2, 3))
 
 
 def _scan(name, step, fn):
