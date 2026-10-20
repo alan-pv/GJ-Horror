@@ -1,7 +1,7 @@
 extends TestCase
 ## Entrada del jugador con el diseño "agarra cualquier pieza": enrutado de clics
 ## (`PieceInteraction`: nivel 0 → jugada, otro nivel → trampa, pila → robo), selección de
-## pieza rival, rey ignorado, deselección, mano ocupada, y colores del mapa de calor.
+## pieza rival, rey agarrable, deselección, mano ocupada, y colores del mapa de calor.
 ## No necesita nodos ni entrada real: se usa un `MatchServer` sin vista.
 
 const W := ChessPiece.WHITE
@@ -137,15 +137,29 @@ func test_enemy_piece_to_square_is_enemy_cheat() -> void:
 	check_eq(m.active_cheat(W).cheat_id, &"enemy", "clase rival")
 
 
-func test_king_is_ignored() -> void:
-	var x := _make()
+func test_king_can_be_selected() -> void:
+	var x := _make("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1")
 	var pi: PieceInteraction = x[1]
-	check_eq(pi.click(_sq("e1")), "reject", "el rey propio no se agarra")
-	check_eq(pi.click(_sq("e8")), "reject", "ni el rival")
-	check_eq(pi.selected, -1, "sin selección")
-	pi.click(_sq("e2"))
-	check_eq(pi.click(_sq("e1")), "reject", "con una pieza elegida tampoco")
-	check_eq(pi.selected, _sq("e2"), "la selección se mantiene")
+	check_eq(pi.click(_sq("e1")), "select", "el rey propio se agarra")
+	check_eq(pi.level_of(_sq("g1")), 0, "enroque corto a nivel 0")
+	check_eq(pi.level_of(_sq("c1")), 0, "enroque largo a nivel 0")
+	check_eq(pi.level_of(_sq("e2")), 0, "paso legal a nivel 0")
+	check(pi.level_of(_sq("e4")) > 0, "trampa con el rey propio")
+	check_eq(pi.click(_sq("g1")), "move", "el enroque se juega")
+	check_eq(x[0].board.squares[_sq("f1")], ChessPiece.make(W, ChessPiece.ROOK), "la torre saltó")
+
+
+func test_enemy_king_cheat_but_not_pile() -> void:
+	var x := _make("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1")
+	var pi: PieceInteraction = x[1]
+	var said: Array = []
+	pi.subtitle = func(t: String, _s: float) -> void: said.append(t)
+	check_eq(pi.click(_sq("e8")), "select", "el rey rival se agarra")
+	check(pi.level_of(_sq("e6")) > 0, "mover el rey rival")
+	check(not pi.levels.has(PILE), "sin pila para el rey rival")
+	check_eq(pi.click(PILE), "deselect", "la pila no admite el rey")
+	pi.click(_sq("e8"))
+	check_eq(pi.click(_sq("e6")), "cheat", "trampa con el rey rival")
 
 
 func test_deselect_and_change_selection() -> void:
@@ -171,8 +185,6 @@ func test_invalid_square_gives_server_reason() -> void:
 	var pi: PieceInteraction = x[1]
 	var said: Array = []
 	pi.subtitle = func(t: String, _s: float) -> void: said.append(t)
-	check_eq(pi.click(_sq("e1")), "reject", "rey")
-	check(said.size() == 1 and said[0].contains("king"), "subtítulo del rey")
 	pi.click(_sq("a7"))
 	check_eq(pi.click(_sq("a1")), "reject", "un peón no puede quedar en la primera fila")
 	check(said.back().begins_with("...no, not that"), "subtítulo con motivo")

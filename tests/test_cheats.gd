@@ -28,6 +28,12 @@ func _board(fen: String) -> BoardState:
 	return BoardState.from_fen(fen)
 
 
+func _rng(seed_value: int) -> RandomNumberGenerator:
+	var r := RandomNumberGenerator.new()
+	r.seed = seed_value
+	return r
+
+
 func _lvl(b: BoardState, color: int, from: String, to: String) -> int:
 	return CheatRules.level(b, color, _sq(from), _sq(to))
 
@@ -75,14 +81,51 @@ func test_enemy_piece_level_is_distance() -> void:
 	check_eq(CheatRules.level(b, W, _sq("a2"), CheatRules.TO_PILE), -1, "tu pieza no va a tu pila")
 
 
-func test_kings_are_untouchable() -> void:
-	var b := BoardState.start_position()
-	check(not CheatRules.validate(b, W, _sq("e8"), CheatRules.TO_PILE).ok, "no se roba un rey")
-	check(not CheatRules.validate(b, W, _sq("e8"), _sq("e6")).ok, "no se mueve un rey rival")
-	check(not CheatRules.validate(b, W, _sq("e1"), _sq("e3")).ok, "ni el propio")
-	check_eq(CheatRules.validate(b, W, _sq("e1"), _sq("e3")).reason, CheatRules.REASON_KING)
-	check(CheatRules.preview(b, W, _sq("e8")).is_empty(), "preview de un rey vacío")
+func test_kings_can_be_grabbed() -> void:
+	var b := _board("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1")
+	# Rey propio: jugadas legales (incluido el enroque) a nivel 0 en tu turno.
+	var pv := CheatRules.preview(b, W, _sq("e1"))
+	check_eq(pv.get(_sq("e2"), -1), 0, "paso legal")
+	check_eq(pv.get(_sq("g1"), -1), 0, "enroque corto es legal")
+	check_eq(pv.get(_sq("c1"), -1), 0, "enroque largo es legal")
+	check(not pv.has(CheatRules.TO_PILE), "el rey propio no va a la pila")
+	check_eq(_lvl(b, W, "e1", "e4"), 2, "trampa con rey propio: distancia al destino legal más cercano")
+	# Rey rival: se mueve con trampa, pero no se manda a la pila.
+	var pe := CheatRules.preview(b, W, _sq("e8"))
+	check_eq(pe.get(_sq("e6"), -1), 2, "mover el rey rival")
+	check(not pe.has(CheatRules.TO_PILE), "el rey rival no va a la pila")
+	var r := CheatRules.validate(b, W, _sq("e8"), CheatRules.TO_PILE)
+	check(not r.ok, "no se roba un rey")
+	check_eq(r.reason, CheatRules.REASON_KING)
+	check_eq(r.reason, "you cannot take the king")
+	check(CheatRules.validate(b, W, _sq("e8"), _sq("e6")).ok, "mover rey rival válido")
 	check(CheatRules.preview(b, W, _sq("e4")).is_empty(), "preview de casilla sin pieza vacío")
+
+
+func test_king_cheat_cannot_end_in_check_or_adjacent() -> void:
+	# Rey propio junto al rey rival: ni a su lado ni en jaque de la torre.
+	var b := _board("4k3/8/8/8/8/8/8/R3K3 w - - 0 1")
+	check(not CheatRules.validate(b, W, _sq("e1"), _sq("e7")).ok, "rey propio pegado al rival")
+	check(not CheatRules.validate(b, W, _sq("e1"), _sq("d7")).ok, "rey propio pegado al rival (diagonal)")
+	check(CheatRules.validate(b, W, _sq("e1"), _sq("e5")).ok, "a distancia 2 sí")
+	var b2 := _board("4k3/8/8/8/8/8/r7/4K3 w - - 0 1")
+	check(not CheatRules.validate(b2, W, _sq("e1"), _sq("e2")).ok, "rey propio en jaque de torre")
+	# Rey rival: no puede quedar pegado al mío ni en jaque.
+	check(not CheatRules.validate(b, W, _sq("e8"), _sq("e2")).ok, "rey rival pegado al mío")
+	check(not CheatRules.validate(b, W, _sq("e8"), _sq("a8")).ok, "rey rival atacado por mi torre dejaría a un bando en jaque")
+	check(CheatRules.validate(b, W, _sq("e8"), _sq("f7")).ok, "rey rival a casilla segura")
+
+
+func test_king_cheat_loses_castling_rights() -> void:
+	var b := _board("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1")
+	var def := _def("enemy")
+	CheatRules.apply(b, W, def, _sq("e8"), _sq("e6"), _rng(1))
+	check_eq(b.castling & (BoardState.CASTLE_BK | BoardState.CASTLE_BQ), 0, "rey rival movido: sin enroque")
+	check(b.castling & BoardState.CASTLE_WK != 0, "blancas conservan el suyo")
+	CheatRules.apply(b, W, _def("own"), _sq("e1"), _sq("e3"), _rng(1))
+	check_eq(b.castling, 0, "rey propio movido: sin enroque")
+	check_eq(b.squares[_sq("e3")], ChessPiece.make(W, ChessPiece.KING))
+	check_eq(b.king_square(W), _sq("e3"), "el tablero queda coherente")
 
 
 func test_legal_move_is_not_a_cheat() -> void:
@@ -136,14 +179,12 @@ func test_preview_matches_level_and_is_fast() -> void:
 				var t0 := Time.get_ticks_usec()
 				var pv := CheatRules.preview(b, color, from)
 				worst = maxi(worst, Time.get_ticks_usec() - t0)
-				if ChessPiece.type_of(b.squares[from]) == ChessPiece.KING:
-					check(pv.is_empty(), "rey sin preview")
-					continue
 				for to in 64:
 					var lv := CheatRules.level(b, color, from, to)
 					check_eq(pv.get(to, -1), lv, "preview == level %d->%d" % [from, to])
 				var own: bool = ChessPiece.color_of(b.squares[from]) == color
-				check_eq(pv.has(CheatRules.TO_PILE), not own, "la pila solo para piezas rivales")
+				var is_king: bool = ChessPiece.type_of(b.squares[from]) == ChessPiece.KING
+				check_eq(pv.has(CheatRules.TO_PILE), not own and not is_king, "la pila solo para piezas rivales que no son rey")
 			check(worst < 5000, "preview < 5 ms (peor %d us)" % worst)
 			check(pieces > 0)
 
@@ -154,7 +195,7 @@ func test_server_preview_wrapper() -> void:
 	check_eq(pv[_sq("e3")], 0)
 	check_eq(pv[_sq("e5")], 1)
 	check(not pv.has(CheatRules.TO_PILE))
-	check(m.cheat_preview(W, _sq("e8")).is_empty())
+	check(not m.cheat_preview(W, _sq("e8")).has(CheatRules.TO_PILE), "rey rival sin pila")
 	check(m.cheat_preview(W, _sq("a7")).has(CheatRules.TO_PILE))
 
 

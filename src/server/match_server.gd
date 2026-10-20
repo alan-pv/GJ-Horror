@@ -153,7 +153,7 @@ func get_cheat(id: StringName) -> CheatDef:
 
 ## Destinos válidos de la pieza de `from` para `color` y su nivel de sospecha:
 ## {casilla: nivel} (el nivel 0 es una jugada legal, solo en tu turno) y, si la
-## pieza es rival, también `CheatRules.TO_PILE`. {} si no hay pieza o es un rey.
+## pieza es rival (y no es un rey), también `CheatRules.TO_PILE`. {} si no hay pieza.
 ## No mira si la mano está ocupada: eso lo decide el cliente.
 func cheat_preview(color: int, from: int) -> Dictionary:
 	return CheatRules.preview(board, color, from, turn_ready_for(color))

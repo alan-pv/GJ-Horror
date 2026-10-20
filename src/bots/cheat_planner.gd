@@ -44,6 +44,9 @@ static func candidates(board: BoardState, color: int, defs: Array, rng: RandomNu
 	for def: CheatDef in defs:
 		var pieces := _pieces_for(board, color, def)
 		_shuffle(pieces, rng)
+		# Reyes al final: se prefieren otras piezas.
+		pieces.sort_custom(func(a: int, c: int) -> bool:
+			return ChessPiece.type_of(board.squares[a]) != ChessPiece.KING and ChessPiece.type_of(board.squares[c]) == ChessPiece.KING)
 		var found := 0
 		for from: int in pieces:
 			var ctx := CheatRules.context(board, color, from, turn_ready)
@@ -157,12 +160,13 @@ static func abort_probability(personality: BotPersonality, evidence: float) -> f
 
 # --- Enumeración -----------------------------------------------------------
 
-## Casillas con piezas que esta clase puede tocar (nunca reyes).
+## Casillas con piezas que esta clase puede tocar. Los reyes van al final de la lista
+## (ver `candidates`): mover un rey casi nunca aporta, así que solo se prueban si sobran cupos.
 static func _pieces_for(b: BoardState, color: int, def: CheatDef) -> Array:
 	var res: Array = []
 	for sq in 64:
 		var p := b.squares[sq]
-		if p == ChessPiece.NONE or ChessPiece.type_of(p) == ChessPiece.KING:
+		if p == ChessPiece.NONE:
 			continue
 		if (ChessPiece.color_of(p) == color) == (def.kind == CheatDef.Kind.OWN_MOVE):
 			res.append(sq)

@@ -158,7 +158,7 @@ func _demo_steps(name_: String) -> Array[Dictionary]:
 		"accuse":
 			return [rival_own, {"t": 3.6, "who": "human", "kind": "accuse"}]
 		"input":
-			# Recorre la entrada del jugador: pieza rival a la pila, rey, pieza propia a destino legal.
+			# Recorre la entrada del jugador: rey propio (se elige y se cambia), pieza rival a la pila, pieza propia a destino legal.
 			return [
 				{"t": 1.0, "kind": "click", "sq": "e1"},
 				{"t": 1.2, "kind": "click", "sq": "a7"},

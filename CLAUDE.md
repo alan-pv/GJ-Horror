@@ -34,7 +34,7 @@ Juego de Godot 4.6 (GDScript): torneo de ajedrez por eliminación con trampas y 
 
 ## Arquitectura (reglas que no se rompen)
 - **El servidor manda.** Todo lo que decide el resultado vive en `src/server/` (`MatchServer`). Cliente y bots solo envían intenciones (`submit_move`, `set_gaze`, `start_cheat`, `abort_cheat`, `accuse`) y dibujan lo que el servidor confirma por señales. Aunque hoy corre todo en un proceso, no se cruza esa frontera.
-- **Tablero físico:** `BoardState` es lo que hay sobre la mesa, no lo que resultaría de jugadas legales. Las trampas nunca tocan reyes, nunca dejan en jaque al tramposo ni al bando que no mueve.
+- **Tablero físico:** `BoardState` es lo que hay sobre la mesa, no lo que resultaría de jugadas legales. Los reyes se mueven con trampas como cualquier pieza, pero el rey rival nunca va a la pila; las trampas nunca dejan en jaque al tramposo ni al bando que no mueve.
 - **Bots = mismas entradas que un humano.** Los cerebros devuelven una política (`{uci: probabilidad}`) que el bot muestrea; Maia-3 5M en web (licencia AGPL: el repo se hace público al publicar el juego), `FallbackBrain` en editor/escritorio.
 - **Web es el objetivo:** renderer Compatibility (sin niebla volumétrica, sin procesos externos). Nada que dependa de `OS.execute`.
 - Las decisiones de diseño abiertas van como opciones en `MatchConfig`, no fijas en el código.

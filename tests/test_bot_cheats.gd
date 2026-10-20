@@ -43,7 +43,8 @@ func test_candidates_are_all_valid() -> void:
 				check_eq(v.kind, c.def.kind, "clase de la candidata")
 				check_eq(v.as_move, c.as_move)
 				check_eq(c.evidence, c.def.evidence_for(c.level), "evidencia por nivel")
-				check(ChessPiece.type_of(b.squares[c.from]) != ChessPiece.KING, "tocó un rey")
+				if ChessPiece.type_of(b.squares[c.from]) == ChessPiece.KING:
+					check(c.to != CheatRules.TO_PILE, "un rey no va a la pila")
 	check(total > 50, "debería haber candidatas: %d" % total)
 
 

@@ -7,7 +7,7 @@ extends Node3D
 ## al servidor unas 10 veces por segundo y elige casillas con un rayo desde
 ## el centro de la pantalla contra el plano del tablero.
 ##
-## Clic en cualquier pieza (menos reyes; propia o rival, en tu turno o fuera de él) → mapa de
+## Clic en cualquier pieza (reyes incluidos; propia o rival, en tu turno o fuera de él) → mapa de
 ## calor de adónde puede ir → clic en destino. Nivel 0 = jugada normal (`submit_move`, coronación
 ## siempre a dama); otro nivel = trampa (`start_cheat`); la pila propia = robo. Toda esa lógica
 ## vive en `PieceInteraction`; aquí solo se convierte el rayo en destino. Solo se actúa con la

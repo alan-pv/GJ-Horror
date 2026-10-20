@@ -1,7 +1,7 @@
 class_name PieceInteraction
 extends RefCounted
 ## Única interacción de selección del jugador (sin nodos de entrada): agarrar una pieza
-## cualquiera (propia o rival, en tu turno o fuera de él; nunca un rey), ver el mapa de calor
+## cualquiera (propia o rival, en tu turno o fuera de él; reyes incluidos), ver el mapa de calor
 ## de adónde puede ir y soltarla. El servidor clasifica: nivel 0 es una jugada normal
 ## (`submit_move`); cualquier otro nivel es una trampa (`start_cheat`); la pila de capturas
 ## propia (`CheatRules.TO_PILE`) es un robo. Solo envía intenciones; no decide nada.
@@ -84,13 +84,10 @@ func click(target: int) -> String:
 			return "none"
 		# Casilla vacía que el servidor no admite: se pregunta para dar el motivo.
 		return _start_cheat(selected, target)
-	if ChessPiece.type_of(piece) == ChessPiece.KING:
-		_say("...not the king")
-		return "reject"
 	return "select" if select(target) else "none"
 
 
-## Elige la pieza de `sq` y pide su mapa de calor. false si no se puede agarrar (rey, vacía).
+## Elige la pieza de `sq` y pide su mapa de calor. false si no se puede agarrar (vacía).
 func select(sq: int) -> bool:
 	var preview := server.cheat_preview(color, sq)
 	if preview.is_empty():

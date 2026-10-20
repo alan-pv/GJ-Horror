@@ -1,9 +1,10 @@
 class_name CheatRules
 ## Clasificación, validación y aplicación de trampas sobre el tablero físico.
-## El jugador agarra cualquier pieza (no rey) y la deja donde quiere; aquí se
+## El jugador agarra cualquier pieza, reyes incluidos, y la deja donde quiere; aquí se
 ## decide de qué clase es la trampa y qué tan sospechosa resulta (nivel).
-## Límites: nunca se toca un rey, nunca queda en jaque el rey del tramposo
-## y nunca queda en jaque el bando al que no le toca (posición imposible).
+## Límites: el rey rival no se puede mandar a la pila (no se "quita" un rey), nunca
+## queda en jaque el rey del tramposo (ni queda pegado al rey rival) y nunca queda en
+## jaque el bando al que no le toca (posición imposible).
 ##
 ## Niveles de sospecha (enteros; 0 = jugada legal, no es trampa):
 ## - Pieza propia: d = distancia de rey mínima del destino a las casillas a las
@@ -18,7 +19,7 @@ const TO_PILE := -2
 ## Nivel de un robo (el máximo).
 const PILE_LEVEL := 5
 
-const REASON_KING := "kings cannot be touched"
+const REASON_KING := "you cannot take the king"
 const REASON_ENEMY_ONLY := "enemy pieces only"
 const REASON_LEGAL := "that is a legal move"
 
@@ -26,12 +27,12 @@ const REASON_LEGAL := "that is a legal move"
 # --- Consulta de niveles ------------------------------------------------------
 
 ## Clase de trampa (`CheatDef.Kind`) que sería agarrar la pieza de `from`;
-## -1 si no hay pieza o es un rey.
+## -1 si no hay pieza.
 static func kind_of(b: BoardState, color: int, from: int) -> int:
 	if from < 0 or from > 63:
 		return -1
 	var piece := b.squares[from]
-	if piece == ChessPiece.NONE or ChessPiece.type_of(piece) == ChessPiece.KING:
+	if piece == ChessPiece.NONE:
 		return -1
 	if ChessPiece.color_of(piece) == color:
 		return CheatDef.Kind.OWN_MOVE
@@ -48,7 +49,7 @@ static func level(b: BoardState, color: int, from: int, to: int, turn_ready: int
 
 
 ## Todos los destinos válidos de la pieza de `from` con su nivel: {casilla: nivel}
-## (más `TO_PILE` si es rival). Vacío si no hay pieza o es un rey.
+## (más `TO_PILE` si es rival). Vacío si no hay pieza. Un rey rival no incluye `TO_PILE`.
 static func preview(b: BoardState, color: int, from: int, turn_ready: int = -1) -> Dictionary:
 	var out := {}
 	var ctx := context(b, color, from, turn_ready)
@@ -58,7 +59,7 @@ static func preview(b: BoardState, color: int, from: int, turn_ready: int = -1) 
 		var lv := dest_level(ctx, to)
 		if lv >= 0:
 			out[to] = lv
-	if not ctx.own:
+	if not ctx.own and ChessPiece.type_of(ctx.piece) != ChessPiece.KING:
 		out[TO_PILE] = PILE_LEVEL
 	return out
 
@@ -74,11 +75,11 @@ static func validate(b: BoardState, color: int, from: int, to: int, allow_legal:
 	if b.squares[from] == ChessPiece.NONE:
 		res.reason = "no piece there"
 		return res
-	if ChessPiece.type_of(b.squares[from]) == ChessPiece.KING:
-		res.reason = REASON_KING
-		return res
 	var ctx := context(b, color, from, turn_ready)
 	var lv := dest_level(ctx, to)
+	if ctx.is_empty():
+		res.reason = "invalid square"
+		return res
 	res.kind = CheatDef.Kind.STEAL if to == TO_PILE and not ctx.own else ctx.kind
 	if lv < 0:
 		res.reason = ctx.reason
@@ -150,6 +151,9 @@ static func dest_level(ctx: Dictionary, to: int) -> int:
 	if to == TO_PILE:
 		if ctx.own:
 			ctx.reason = REASON_ENEMY_ONLY
+			return -1
+		if ChessPiece.type_of(ctx.piece) == ChessPiece.KING:
+			ctx.reason = REASON_KING
 			return -1
 		return PILE_LEVEL if _safe_after(ctx, to) else -1
 	if to < 0 or to > 63:
