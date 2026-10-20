@@ -45,6 +45,10 @@ var _materials: Dictionary = {}  # nombre de material -> Array[StandardMaterial3
 var _pose_cache: Array[Transform3D] = []  # poses globales YA modificadas (mirada, IK)
 var _eye_local := Vector3.ZERO
 var _head_local := Vector3.ZERO
+## rol -> PackedStringArray de clips que lo cumplen (se descubren por nombre al cargar).
+var _roles: Dictionary = {}
+## rol -> última variante elegida (para no repetirla seguida).
+var _last_variant: Dictionary = {}
 
 
 ## Ruta del `.glb` del personaje (la define la subclase).
@@ -65,6 +69,7 @@ func _init() -> void:
 	_player = _find(_model, "AnimationPlayer") as AnimationPlayer
 	# La animación se evalúa antes que los modificadores del esqueleto.
 	_player.process_priority = -10
+	_discover_roles()
 	_mark_loops()
 	_own_materials(_model)
 	_look_mod = FigureLookModifier.new()
@@ -142,11 +147,87 @@ func _own_materials(root: Node) -> void:
 
 # --- Animación --------------------------------------------------------------------
 
-## Marca como cíclicas las animaciones de `_loops()` (los .glb no traen el flag).
+## Marca como cíclicas las animaciones de `_loops()` y las de roles cíclicos (los .glb no
+## traen el flag).
 func _mark_loops() -> void:
 	for a in _loops():
 		if _player.has_animation(a):
 			_player.get_animation(a).loop_mode = Animation.LOOP_LINEAR
+	for a in _player.get_animation_list():
+		if AnimRoles.is_loop_clip(a):
+			_player.get_animation(a).loop_mode = Animation.LOOP_LINEAR
+
+
+# --- Roles de animación (contrato código <-> arte, ver `AnimRoles`) ------------------
+
+## Agrupa los clips del modelo por rol según su nombre (`<rol>` o `<rol>__<variante>`).
+func _discover_roles() -> void:
+	_roles.clear()
+	var names := Array(_player.get_animation_list())
+	names.sort()
+	for a in names:
+		var r := AnimRoles.role_of(a)
+		if r == &"":
+			continue
+		var arr: PackedStringArray = _roles.get(r, PackedStringArray())
+		arr.append(String(a))
+		_roles[r] = arr
+
+
+## Clips del modelo que cumplen el rol (vacío si no trae ninguno).
+func variants(role: StringName) -> PackedStringArray:
+	return _roles.get(role, PackedStringArray())
+
+
+## True si el modelo trae al menos un clip propio del rol (el respaldo no cuenta).
+func has_role(role: StringName) -> bool:
+	return not variants(role).is_empty()
+
+
+## Elige el clip del rol: una variante al azar (sin repetir la última si hay más de una) o,
+## si no hay ninguna, el respaldo. Devuelve &"" si no hay nada que reproducir.
+func pick_role_clip(role: StringName, rng: RandomNumberGenerator = null, _depth: int = 0) -> StringName:
+	var vs := variants(role)
+	if not vs.is_empty():
+		var pool: Array = Array(vs)
+		var last: String = _last_variant.get(role, "")
+		if pool.size() > 1:
+			pool.erase(last)
+		var i := rng.randi() % pool.size() if rng != null else randi() % pool.size()
+		var chosen := StringName(pool[i])
+		_last_variant[role] = String(chosen)
+		return chosen
+	var fb := AnimRoles.fallback_of(role)
+	if fb == &"" or _depth > 3:
+		return &""
+	if fb != role and AnimRoles.is_role(fb):
+		return pick_role_clip(fb, rng, _depth + 1)
+	return fb if _player.has_animation(fb) else &""
+
+
+## Reproduce el rol (mezcla y ciclo según `AnimRoles`). `speed` multiplica el ritmo. Devuelve el
+## clip elegido, o &"" (con aviso) si el modelo no trae ninguno ni respaldo.
+func play_role(role: StringName, rng: RandomNumberGenerator = null, speed: float = 1.0) -> StringName:
+	var clip := pick_role_clip(role, rng)
+	if clip == &"":
+		push_warning("%s: sin clip ni respaldo para el rol '%s'" % [get_class(), role])
+		return &""
+	if AnimRoles.loop_of(role):
+		_player.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
+	play(clip, AnimRoles.blend_of(role), speed)
+	return clip
+
+
+## Reproduce el rol una vez y espera a que termine (corrutina). Los roles cíclicos se rechazan.
+func play_role_once(role: StringName, rng: RandomNumberGenerator = null) -> void:
+	if AnimRoles.loop_of(role):
+		push_warning("%s: el rol '%s' es cíclico; play_role_once no terminaría" % [get_class(), role])
+		return
+	var clip := pick_role_clip(role, rng)
+	if clip == &"":
+		push_warning("%s: sin clip ni respaldo para el rol '%s'" % [get_class(), role])
+		return
+	await play_once(clip, AnimRoles.blend_of(role))
 
 
 ## Lista de animaciones del modelo.

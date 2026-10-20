@@ -59,6 +59,21 @@ def fit_sit_legs(sp, hip_z, ankle_z=0.075):
     return best[1]
 
 
+# Zona segura de las manos sentado: el tablero (marco incluido) empieza a 0,47 m del centro de la silla
+# cuando la silla esta a 0,72 m (mesa del humano y del rival) y a 0,55 m si esta a 0,80 m (fondo). Las
+# manos en reposo dejan las puntas de los dedos a y >= HAND_LIMIT_Y (-0,47) y descansan sobre la mesa
+# entre su canto (y -0,27 / -0,35) y el tablero.
+HAND_LIMIT_Y = -0.47
+
+
+def rest_hand(sp, sd, x=.20, y=-.29, z=.79, curl=34.0, hdir=None, thumb=None, pole=None):
+    """Mano relajada apoyada de plano sobre la mesa, cerca del canto (fuera del tablero)."""
+    s = 1 if sd == "L" else -1
+    C.arm_set(sp, sd, "abs", (s * x, y, z), pole=pole or (s * .35, 1, -.45),
+              hdir=hdir or (-s * .10, -1, -.05), thumb=thumb or (-s, 0, .3), curl=curl, thumb_curl=curl * .4)
+    return sp
+
+
 def make_sit():
     sp = rig.default_spec()
     sp["hips_off"] = V((0, -0.03, 0.54 - HIP_Z))
@@ -68,8 +83,7 @@ def make_sit():
         sp["thigh" + sd] = (a, 0, 0)
         sp["shin" + sd] = (-a, 0, 0)
         s = 1 if sd == "L" else -1
-        C.arm_set(sp, sd, "abs", (s * .19, -.50, .768), pole=(s * .9, .6, .45),
-                  hdir=(-s * .12, -1, .02), thumb=(-s, 0, .3), curl=14.0, thumb_curl=6.0)
+        rest_hand(sp, sd)
     return sp
 
 
@@ -506,15 +520,359 @@ def _(t, u):
 
 
 # ----------------------------------------------------------------------------
+# Esperar el turno rival (rol sit_wait): manos fuera del tablero
+# ----------------------------------------------------------------------------
+def settle(sp, w, k=1.0):
+    """Cambios de peso muy lentos: la pelvis y el tronco se mecen de lado a lado."""
+    tw(sp, "hips_off", (0.006 * k * sin(w), 0, 0))
+    tw(sp, "spine", (0, 0, 1.2 * k * sin(w + .5)))
+    tw(sp, "chest", (0, 0, -0.9 * k * sin(w + .5)))
+    tw(sp, "head", (0, 0, 0.8 * k * sin(w + .9)))
+
+
+def breathe_s(sp, w, k=1.0):
+    """Respiracion de ciclo entero (sin(w) con w = 2*pi*n*u)."""
+    tw(sp, "spine", (0.7 * k * sin(w), 0, 0))
+    tw(sp, "chest", (1.1 * k * sin(w - .5), 0, 0))
+    tw(sp, "shL", (0, 0, 0.7 * k * sin(w - .5)))
+    tw(sp, "shR", (0, 0, 0.7 * k * sin(w - .5)))
+
+
+def crossed_pose():
+    sp = clone(SIT)
+    sp.update(spine=(9, 0, 0), chest=(8, 0, 0), neck=(0, 0, 0), head=(6, 0, 0))
+    arm_set(sp, "L", "abs", (-.10, -.31, .805), pole=(.5, 1, .1), hdir=(-1, -.18, -.06), thumb=(0, 1, .3),
+            curl=30.0, thumb_curl=12.0)
+    arm_set(sp, "R", "abs", (.10, -.40, .805), pole=(-.5, 1, .1), hdir=(1, -.18, -.06), thumb=(0, 1, .3),
+            curl=30.0, thumb_curl=12.0)
+    return sp
+
+
+@anim("sit_wait__crossed", 5.0, True, 0.25)
+def _(t, u):
+    sp = crossed_pose()
+    w = 2 * pi * u
+    breathe_s(sp, w, 1.0)
+    settle(sp, w, 1.0)
+    tw(sp, "head", (1.0 * sin(2 * w), 2.5 * sin(w + 1.5), 0))
+    return sp
+
+
+def chin_hand(sp, sd, tilt=0.0):
+    s = 1 if sd == "L" else -1
+    arm_set(sp, sd, "att", (s * .05, .01, .105), bone="Head", pole=(s * .2, -.6, -.3),
+            hdir=(-s * .75, -.45, .5), thumb=(0, 1, .2), curl=75.0, thumb_curl=20.0)
+
+
+@anim("sit_wait__chin", 5.0, True, 0.25)
+def _(t, u):
+    sp = clone(SIT)
+    w = 2 * pi * u
+    sp.update(spine=(14, 0, 0), chest=(12, 0, 0), neck=(2, 0, 0), head=(2, -3, 4))
+    tw(sp, "hips_off", (0, -0.03, 0))
+    chin_hand(sp, "R")
+    breathe_s(sp, w, .8)
+    settle(sp, w, .5)
+    tw(sp, "head", (1.5 * sin(w), 2 * sin(w + 1), 0))
+    return sp
+
+
+def head_pose():
+    sp = clone(SIT)
+    sp.update(spine=(14, 0, 0), chest=(12, 0, 0), neck=(6, 0, 0), head=(16, 3, -4))
+    tw(sp, "hips_off", (0, -0.03, 0))
+    arm_set(sp, "R", "att", (-.118, .085, .04), bone="Head", pole=(-1, .2, .1),
+            hdir=(.4, -.1, .9), thumb=(0, 1, 0), curl=48.0, thumb_curl=15.0)
+    return sp
+
+
+@anim("sit_wait__head", 5.0, True, 0.25)
+def _(t, u):
+    sp = head_pose()
+    w = 2 * pi * u
+    breathe_s(sp, w, .9)
+    settle(sp, w, .6)
+    tw(sp, "spine", (1.8 * sin(w), 0, 0)), tw(sp, "head", (2.2 * sin(w), 2.5 * sin(w + 1), 0))
+    return sp
+
+
+@anim("sit_wait__lean_back", 5.5, True, 0.25)
+def _(t, u):
+    sp = clone(SIT)
+    w = 2 * pi * u
+    sp.update(spine=(-9, 0, 0), chest=(-8, 0, 0), neck=(2, 0, 0), head=(8, 0, 0))
+    tw(sp, "hips_off", (0, 0.03, 0))
+    for sd, s in (("L", 1), ("R", -1)):
+        arm_set(sp, sd, "abs", (s * .09, -.12, .69), pole=(s * .6, .9, -.3), hdir=(-s * .45, -1, -.35),
+                thumb=(-s, .2, .5), curl=40.0, thumb_curl=15.0)
+    breathe_s(sp, w, 1.1)
+    settle(sp, w, .8)
+    tw(sp, "head", (2.0 * sin(w + 1), 4 * sin(w + .3), 0))
+    return sp
+
+
+# ----------------------------------------------------------------------------
+# Pensar la propia jugada (rol sit_think)
+# ----------------------------------------------------------------------------
+def think_lean(sp):
+    sp.update(spine=(14, 0, 2), chest=(11, 0, 0), neck=(4, 0, 0), head=(14, 3, -3))
+    tw(sp, "hips_off", (0, -0.035, 0))
+
+
+@anim("sit_think__chin", 5.0, True, 0.25)
+def _(t, u):
+    sp = clone(SIT)
+    w = 2 * pi * u
+    think_lean(sp)
+    chin_hand(sp, "R")
+    breathe_s(sp, w, .7)
+    tw(sp, "head", (1.5 * sin(w), 3 * sin(w + 1.2), 1.2 * sin(2 * w)))
+    sp["armL"]["curl"] += 8 * max(0, sin(4 * w))
+    return sp
+
+
+@anim("sit_think__temple", 5.0, True, 0.25)
+def _(t, u):
+    sp = clone(SIT)
+    w = 2 * pi * u
+    think_lean(sp)
+    arm_set(sp, "R", "att", (-.10, .045, .045), bone="Head", pole=(-.6, .7, -.6),
+            hdir=(.12, -.25, .95), thumb=(0, 1, 0), curl=26.0, thumb_curl=10.0)
+    breathe_s(sp, w, .7)
+    tw(sp, "head", (1.5 * sin(w), 3 * sin(w + .6), 1.2 * sin(2 * w)))
+    sp["armR"]["curl"] += 6 * max(0, sin(3 * w))
+    return sp
+
+
+# ----------------------------------------------------------------------------
+# Reacciones breves (una vez): sobresalto, tos, recoger del suelo
+# ----------------------------------------------------------------------------
+def startle_pose(sgn, k=1.0):
+    sp = clone(SIT)
+    tw(sp, "spine", (-6 * k, sgn * 4 * k, 0)), tw(sp, "chest", (-9 * k, sgn * 6 * k, 0))
+    tw(sp, "neck", (-5 * k, sgn * 6 * k, 0)), tw(sp, "head", (-6 * k, sgn * 22 * k, 0))
+    tw(sp, "shL", (0, 0, 9 * k)), tw(sp, "shR", (0, 0, 9 * k))
+    tw(sp, "hips_off", (0, 0.025 * k, 0.006 * k))
+    for sd in "LR":
+        rest_hand(sp, sd, y=-.29 + .035 * k, z=.78 + .045 * k, curl=34 + 22 * k)
+    return sp
+
+
+def startle_anim(sgn):
+    keys = [(0.0, clone(SIT)), (0.13, startle_pose(sgn, 1.0)), (0.28, startle_pose(sgn, 1.1)),
+            (0.60, startle_pose(sgn, .45)), (1.0, clone(SIT))]
+    return lambda t, u: seq(t, keys)
+
+
+anim("sit_startle__left", 1.0, False, 0.05)(startle_anim(1))
+anim("sit_startle__right", 1.0, False, 0.05)(startle_anim(-1))
+
+
+def cough_pose(k=1.0, hunch=0.0):
+    sp = clone(SIT)
+    sp.update(spine=(4 + hunch, 0, 0), chest=(3 + hunch * 1.4, 0, 0), neck=(2 * k, 0, 0), head=(-2 + hunch, 10 * k, 0))
+    tw(sp, "hips_off", (0, -0.01 * k, 0))
+    arm_set(sp, "R", "att", (-.035 * k - .09 * (1 - k), .04 + .1 * (1 - k), .125 + .1 * (1 - k)), bone="Head",
+            pole=(-.5, 1.3, -1.2), hdir=(.2, -.4, .9), thumb=(0, 1, 0), curl=80.0, thumb_curl=40.0)
+    return sp
+
+
+@anim("sit_cough", 1.8, False, 0.05)
+def _(t, u):
+    up = cough_pose(1.0)
+    keys = [(0.0, clone(SIT)), (0.35, up), (0.55, cough_pose(1.0, 0)), (0.62, cough_pose(1.0, 7)),
+            (0.70, cough_pose(1.0, 0)), (0.79, cough_pose(1.0, 9)), (0.88, cough_pose(1.0, 1)),
+            (0.97, cough_pose(1.0, 6)), (1.10, cough_pose(1.0, 1)), (1.30, up), (1.80, clone(SIT))]
+    sp = seq(t, keys)
+    if 0.5 < t < 1.2:   # espasmos de los hombros
+        tw(sp, "shL", (0, 0, 3 * sin(t * 40))), tw(sp, "shR", (0, 0, 3 * sin(t * 40)))
+    return sp
+
+
+def pickup_pose(reach, hold=False, curl=12.0):
+    """reach 0 = sentado, 1 = mano al suelo, a la derecha de la silla. Se inclina de lado (no hacia la mesa)."""
+    sp = clone(SIT)
+    r = reach
+    tw(sp, "hips_off", (-0.04 * r, -0.005 * r, 0))
+    sp["hips_rot"] = (0, 0, 7 * r)
+    sp.update(spine=(14 * r + 4, 0, 22 * r), chest=(10 * r + 4, 0, 18 * r),
+              neck=(6 * r, 0, -12 * r), head=(14 * r + 6, -12 * r, -14 * r))
+    if r > 0.01:
+        # primero retira la mano de la mesa hacia el regazo y despues baja al suelo
+        a_, b_ = smooth(min(1.0, r * 2.5)), smooth(max(0.0, (r - .25) / .75))
+        tgt = V((-.20 - .14 * b_, -.29 + .24 * a_, .79 - .53 * b_))
+        arm_set(sp, "R", "abs", tgt, pole=(-1, .3, -.4),
+                hdir=V((-.1, -1, -.05)).lerp(V((-.1, -.3, -1)), b_), thumb=(1, 0, .3),
+                curl=curl, thumb_curl=curl * .4)
+    return sp
+
+
+@anim("sit_pick_up", 2.8, False, 0.05)
+def _(t, u):
+    keys = [(0.0, clone(SIT)), (0.35, pickup_pose(.18)), (0.55, pickup_pose(.38)), (0.72, pickup_pose(.62)),
+            (1.0, pickup_pose(1.0)), (1.25, pickup_pose(1.0)),
+            (1.45, pickup_pose(1.0, curl=62.0)), (1.65, pickup_pose(1.0, curl=62.0)),
+            (1.9, pickup_pose(.62, curl=62.0)), (2.15, pickup_pose(.3, curl=62.0)), (2.8, clone(SIT))]
+    return seq(t, keys)
+
+
+# ----------------------------------------------------------------------------
+# Levantarse / sentarse / acusar / ser arrastrado / caminar
+# La silla debe retirarse >= 0,40 m hacia atras (+Y del personaje) mientras la pelvis sube: de pie los pies
+# quedan donde estaba el asiento. Con la silla a 0,72 m el vientre queda a >= 8 cm del canto de la mesa.
+# ----------------------------------------------------------------------------
+STAND_Y = -0.03      # y de la pelvis de pie junto a la mesa
+
+
+def seated_ik_hands():
+    """Sentado con piernas por IK y manos en reposo (base de levantarse/sentarse)."""
+    return seated_ik()
+
+
+def push_hands(sp, y=-.33, curl=20.0):
+    for sd in "LR":
+        rest_hand(sp, sd, x=.21, y=y, z=.785, curl=curl)
+    return sp
+
+
+def rise_keys():
+    """Fotogramas de la subida (sentado -> de pie, brazos colgando). Duracion 1.7 s."""
+    k0 = seated_ik_hands()
+    # 1) se adelanta y retrae los pies bajo la silla
+    k1 = seated_ik_hands()
+    legs_ik(k1, (.088, -.26, ANK_Z), (-.088, -.26, ANK_Z))
+    k1.update(spine=(18, 0, 0), chest=(16, 0, 0), neck=(-4, 0, 0), head=(-6, 0, 0))
+    tw(k1, "hips_off", (0, -0.05, 0.0))
+    push_hands(k1)
+    # 2) impulso: pelvis arriba y adelante, apoyado en las manos
+    k2 = stand_spec(-0.12, 0.70, la=(.088, -.15, ANK_Z), ra=(-.088, -.15, ANK_Z))
+    k2.update(spine=(26, 0, 0), chest=(20, 0, 0), neck=(-8, 0, 0), head=(-10, 0, 0))
+    push_hands(k2)
+    # 3) casi erguido, las manos aun en la mesa
+    k3 = stand_spec(-0.05, 0.83, la=(.088, -.09, ANK_Z), ra=(-.088, -.09, ANK_Z))
+    k3.update(spine=(10, 0, 0), chest=(8, 0, 0), neck=(-2, 0, 0), head=(-4, 0, 0))
+    push_hands(k3)
+    # 4) de pie, brazos colgando
+    k4 = stand_spec(STAND_Y)
+    k4.update(spine=(2, 0, 0), chest=(2, 0, 0), neck=(0, 0, 0), head=(2, 0, 0))
+    arms_rel(k4, V((.12, -.06, -.56)), V((-.12, -.06, -.56)), hands_up=False, curl=18.0)
+    for sd in "LR":     # que el peso 'abs' desaparezca sin arrastrar la muñeca hacia el origen
+        k4["arm" + sd]["abs"] = V(k3["arm" + sd]["abs"])
+    return [(0.0, k0), (0.40, k1), (0.85, k2), (1.25, k3), (1.70, k4)]
+
+
+@anim("stand_up", 1.7, False, 0.05)
+def _(t, u):
+    return seq(t, rise_keys())
+
+
+@anim("sit_down", 1.7, False, 0.05)
+def _(t, u):
+    # La subida al reves: de pie -> manos a la mesa -> se deja caer en la silla.
+    return seq(1.7 - t, rise_keys())
+
+
+def accuse_pose(lunge=0.0, shake=0.0, arm_y=-.62):
+    """De pie, el brazo derecho señalando al frente a la altura del hombro; la mano izquierda apoyada en la mesa."""
+    sp = stand_spec(STAND_Y)
+    sp.update(spine=(4 + 6 * lunge, 0, 0), chest=(5 + 7 * lunge, 0, 0), neck=(-3, 0, 0), head=(-6 + 8 * lunge, 0, 0))
+    tw(sp, "hips_off", (0, -0.015 * lunge, 0))
+    arm_set(sp, "R", "abs", (-.17, arm_y, 1.235 + shake), pole=(-.3, .7, -1), hdir=(-.02, -1, .06),
+            thumb=(1, 0, .3), curl=2.0, thumb_curl=0.0)
+    rest_hand(sp, "L", x=.21, y=-.33, z=.785, curl=70.0)
+    return sp
+
+
+def raise_arm_keys():
+    # el brazo derecho sube desde la mesa mientras el torso se endereza
+    k3 = rise_keys()[3][1]
+    k4 = clone(k3)
+    k4.update(spine=(4, 0, 0), chest=(3, 0, 0), neck=(-2, 0, 0), head=(-4, 0, 0))
+    k4["legikL"], k4["legikR"] = clone(stand_spec(STAND_Y)["legikL"]), clone(stand_spec(STAND_Y)["legikR"])
+    k4["hips_off"] = stand_spec(STAND_Y)["hips_off"]
+    rest_hand(k4, "L", x=.21, y=-.33, z=.785, curl=70.0)
+    arm_set(k4, "R", "abs", (-.30, -.30, 1.0), pole=(-.6, .7, -1), hdir=(-.1, -1, .1), thumb=(1, 0, .3), curl=15.0)
+    return k4
+
+
+@anim("stand_accuse", 2.6, False, 0.05)
+def _(t, u):
+    rk = rise_keys()
+    keys = rk[:4] + [(1.45, raise_arm_keys()), (1.85, accuse_pose(-.4, 0, -.50)), (2.15, accuse_pose(1.0)),
+                     (2.6, accuse_pose(0.0))]
+    return seq(t, keys)
+
+
+@anim("stand_accuse_hold", 1.2, True, 0.05)
+def _(t, u):
+    w = 2 * pi * u
+    sp = accuse_pose(0.0, 0.004 * sin(3 * w), -.62 + .004 * sin(w))
+    tw(sp, "spine", (1.2 * sin(w), 0, 0)), tw(sp, "chest", (1.5 * sin(w), 0, 0))
+    tw(sp, "head", (-1.5 * sin(w) + 1.0 * sin(2 * w), 1.5 * sin(w), 0))
+    sp["armR"]["curl"] += 2 * (1 - cos(2 * w))
+    return sp
+
+
+DRAG_T = 1.2
+
+
+@anim("dragged", DRAG_T, True, 0.05)
+def _(t, u):
+    w = 2 * pi * u
+    sp = stand_spec(0.0, 0.80)
+    sp.update(spine=(24, 0, 0), chest=(18, 0, 0), neck=(16, 0, 0), head=(22, 0, 0))
+    tw(sp, "hips_off", (0.01 * sin(w), 0.02, -0.012 * (1 - cos(2 * w)) / 2))
+    tw(sp, "hips_rot", (0, 0, 2.5 * sin(w)))
+    tw(sp, "spine", (1.5 * sin(2 * w), 0, 2.0 * sin(w))), tw(sp, "chest", (0, 0, -2.0 * sin(w)))
+    tw(sp, "head", (3 * sin(2 * w + 1), 4 * sin(w + .5), 7 * sin(w + 1.3)))
+    for sd, off in (("L", 0.0), ("R", pi)):
+        s = 1 if sd == "L" else -1
+        p = w + off
+        legs = dict(ankle=V((s * .09, .40 + .05 * sin(p), .17 + .02 * (1 - cos(p)))), pitch=-62.0,
+                    pole=V((s * .1, -1, .2)))
+        sp["legik" + sd] = legs
+        sag = sin(2 * w + (0 if sd == "L" else 1.0))
+        arm_set(sp, sd, "rel", (s * .40, -.02 + .02 * sin(p), .06 + .015 * sag), pole=(s * .3, .6, -1),
+                hdir=(s * .1, -.3, -1), thumb=(-s, -.2, 0), curl=30.0, thumb_curl=10.0)
+    return sp
+
+
+WALK_T, WALK_D = 1.0, 0.66
+WALK_SPEED = WALK_D / (0.6 * WALK_T)      # m/s con velocidad 1: 1,1 m/s
+STRIDE = WALK_SPEED * WALK_T
+
+
+@anim("walk", WALK_T, True, 0.05)
+def _(t, u):
+    sp = stand_spec(0.0)
+    hz = ANK_Z + math.sqrt((LEG_LEN * .975) ** 2 - (WALK_D / 2) ** 2)
+    ph = (t / WALK_T) % 1.0
+    sp["hips_off"] = V((0, 0, hz - HIP_Z - 0.014 * (0.5 - 0.5 * cos(4 * pi * ph + .6))))
+    C.gait(sp, t, WALK_T, WALK_D, ANK_Z, lift=0.075, forward=True)
+    w = 2 * pi * ph
+    sw = sin(w)
+    tw(sp, "hips_off", (0.012 * sw, 0, 0))
+    tw(sp, "hips_rot", (0, 3 * sw, 0)), tw(sp, "spine", (2, -3 * sw, 0)), tw(sp, "chest", (3, -4 * sw, 0))
+    tw(sp, "head", (3, 0, 0))
+    for sd, k in (("L", 1), ("R", -1)):
+        s = 1 if sd == "L" else -1
+        arm_set(sp, sd, "rel", (s * .12, -.10 - .12 * sw * k, -.53), pole=(s * .6, 1, -.2), hdir=(0, -.1, -1),
+                thumb=(0, -1, .1), curl=20.0, thumb_curl=8.0)
+    return sp
+
+
+# ----------------------------------------------------------------------------
 # Verificacion de penetracion contra la mesa
 # ----------------------------------------------------------------------------
-def check_table(name, step=3):
-    """Cuenta vertices de brazo/cabeza/torso dentro de la losa de la mesa (z 0.68..0.72, y < borde)."""
+CHECK_EDGE_Y = -0.27     # canto de la mesa con la silla a 0,72 m (el caso mas estricto)
+ARM_GROUPS = ("UpperArm", "Forearm", "Hand", "Fingers", "Thumb", "Shoulder")
+
+
+def _scan(name, step, fn):
+    """Recorre los fotogramas de la accion y llama fn(coord, grupo, frame) por cada vertice del cuerpo."""
     body = bpy.data.objects["Body"]
-    dg = bpy.context.evaluated_depsgraph_get()
     act = bpy.data.actions[name]
     arm.animation_data.action = act
-    bad_total, worst, wg = 0, 0.0, ""
     names = [g.name for g in body.vertex_groups]
     f0, f1 = int(act.frame_range[0]), int(act.frame_range[1])
     for f in range(f0, f1 + 1, step):
@@ -523,16 +881,51 @@ def check_table(name, step=3):
         me = eo.to_mesh()
         orig = body.data.vertices
         for i, v in enumerate(me.vertices):
-            if not (v.co.y < TABLE_EDGE_Y and abs(v.co.x) < .65 and 0.685 < v.co.z < 0.715):
-                continue
             g = max(orig[i].groups, key=lambda x: x.weight).group
-            if names[g].split(".")[0] in ("Thigh", "Shin", "Foot", "Hips"):
-                continue
-            bad_total += 1
-            if 0.715 - v.co.z > worst:
-                worst, wg = 0.715 - v.co.z, names[g]
+            fn(v.co, names[g].split(".")[0], f)
         eo.to_mesh_clear()
-    return bad_total, worst, wg
+
+
+def check_table(name, step=3):
+    """Vertices (no de piernas) dentro de la losa de la mesa: z 0,685..0,715 y delante del canto (y < -0,27)."""
+    res = [0, 0.0, ""]
+
+    def fn(co, grp, f):
+        if grp in ("Thigh", "Shin", "Foot", "Hips"):
+            return
+        if co.y < CHECK_EDGE_Y and abs(co.x) < .65 and 0.685 < co.z < 0.715:
+            res[0] += 1
+            if 0.715 - co.z > res[1]:
+                res[1], res[2] = 0.715 - co.z, f"{grp} @{f / FPS:.2f}s"
+    _scan(name, step, fn)
+    return res[0], res[1], res[2]
+
+
+def check_hands(name, step=3):
+    """Vertices de brazo/mano sobre el tablero (y < -0,47 y por debajo de la cabeza). Devuelve (n, y minimo)."""
+    res = [0, 0.0, ""]
+
+    def fn(co, grp, f):
+        if grp in ARM_GROUPS and co.z < 1.0 and co.y < HAND_LIMIT_Y:
+            res[0] += 1
+            if co.y < res[1]:
+                res[1], res[2] = co.y, f"{grp} x={co.x:+.2f} @{f / FPS:.2f}s"
+    _scan(name, step, fn)
+    return res[0], res[1], res[2]
+
+
+def check_chair(name, step=3):
+    """Vertices del torso/cabeza que traspasan el respaldo (y > 0,19, z 0,47..0,89)."""
+    res = [0, 0.0]
+
+    def fn(co, grp, f):
+        if grp in ("Thigh", "Shin", "Foot") or abs(co.x) > .22:
+            return
+        if co.y > 0.19 and 0.47 < co.z < 0.89:
+            res[0] += 1
+            res[1] = max(res[1], co.y - 0.19)
+    _scan(name, step, fn)
+    return res[0], res[1]
 
 
 # ----------------------------------------------------------------------------
@@ -543,11 +936,18 @@ if not os.environ.get("CHAR_PREVIEW"):
         C.make_action(rig, name, dur, fn, step, loop)
         print(f"accion {name}: {dur}s {'loop' if loop else ''}")
 
-    print("== Comprobacion contra la mesa (vertices de brazo/torso/cabeza dentro de la losa) ==")
+    HANDS_OUT = ("sit_idle", "sit_think", "sit_nervous", "sit_wait", "sit_startle", "sit_cough", "sit_look")
+    print("== Comprobacion contra la mesa (losa y> -0,27), el tablero (manos y< -0,47) y el respaldo ==")
     for name, dur, loop, step, fn in ANIMS:
-        if name.startswith("sit_") or name.startswith("death_slump"):
+        if (name.startswith("sit_") and name != "sit_down") or name.startswith("death_slump"):
             n, worst, wg = check_table(name)
-            print(f"   {name}: {n} vertices dentro, penetracion max {worst * 100:.1f} cm ({wg})")
+            msg = f"   {name}: mesa {n} vert. dentro, max {worst * 100:.1f} cm ({wg})"
+            if name.startswith(HANDS_OUT):
+                nh, ymin, who = check_hands(name)
+                msg += f" | tablero {nh} vert. (y min {ymin:.3f} {who})"
+            nc, cmax = check_chair(name)
+            msg += f" | respaldo {nc} vert. ({cmax * 100:.1f} cm)"
+            print(msg)
 
     # pose de reposo limpia y accion activa para editar
     arm.animation_data.action = bpy.data.actions["sit_idle"]

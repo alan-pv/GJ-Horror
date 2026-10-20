@@ -22,6 +22,11 @@ const LOOPS: Array[StringName] = [
 	&"sit_beg", &"sit_cry", &"sit_frozen", &"stand_flee_cycle",
 ]
 
+## Velocidad (m/s) a la que avanza el rol `walk` con velocidad 1 (ciclo de 1,0 s, paso doble de
+## 1,1 m: apoyo 60 %, recorrido del pie 0,66 m). Para caminar a `v` m/s: `play_role(&"walk", rng, v / WALK_SPEED)`.
+const WALK_SPEED := 1.1
+const WALK_STRIDE := 1.1
+
 ## Polo del codo por defecto, en espacio local de la figura, para el brazo derecho (el
 ## izquierdo es el espejo en X): hacia fuera y un poco atrás, a la altura del hombro (el
 ## hombro está a ~0,90 m). El codo acaba afuera y por DEBAJO del hombro, pero por encima

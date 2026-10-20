@@ -24,3 +24,6 @@ Thumbs.db
 
 # Respaldos de Blender
 *.blend1
+
+# Caché de Python de los scripts de Blender
+__pycache__/

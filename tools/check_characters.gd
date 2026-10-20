@@ -11,12 +11,16 @@ const CHARACTERS := {
 	"res://assets/models/characters/player.glb": {
 		"anims": ["sit_idle", "sit_think", "sit_nervous", "sit_look_left", "sit_look_right", "sit_move_piece",
 			"sit_press_clock", "sit_write", "sit_beg", "sit_cry", "sit_frozen", "stand_flee", "stand_flee_cycle",
-			"death_slump_table", "death_fall_back", "death_standing"],
+			"death_slump_table", "death_fall_back", "death_standing",
+			"sit_wait__crossed", "sit_wait__chin", "sit_wait__head", "sit_wait__lean_back", "sit_think__chin",
+			"sit_think__temple", "sit_startle__left", "sit_startle__right", "sit_cough", "sit_pick_up",
+			"stand_accuse", "stand_accuse_hold", "dragged", "stand_up", "walk", "sit_down"],
 		"nodes": ["Hair_Short", "Hair_Long", "Hair_Bald"],
 	},
 	"res://assets/models/characters/arbiter.glb": {
 		"anims": ["idle", "walk", "inspect_sheets", "aim", "aim_hold", "shoot", "lower_gun", "point_accuse"],
 		"nodes": ["Pistol", "Muzzle", "Hair_Short"],
+		"roles": ["walk"],
 	},
 }
 
@@ -94,8 +98,40 @@ func _check(path: String, spec: Dictionary) -> void:
 				_fail("falta la animación " + a)
 		for a in lst:
 			var an := ap.get_animation(a)
-			print("  anim %-18s %.3f s  pistas=%d" % [a, an.length, an.get_track_count()])
+			var loops := AnimRoles.is_loop_clip(a)
+			print("  anim %-22s %.3f s  pistas=%d%s" % [a, an.length, an.get_track_count(),
+				"  [rol cíclico]" if loops else ""])
+		_contract_report(lst, spec.get("roles", []))
 	root.free()
+
+
+## INFORME DEL CONTRATO: por rol, variantes encontradas o respaldo; avisa de nombres casi correctos.
+func _contract_report(clips: PackedStringArray, only: Array = []) -> void:
+	print("  -- INFORME DEL CONTRATO (roles de animación, ver docs/contrato-arte.md) --")
+	for role in AnimRoles.ROLES:
+		if not only.is_empty() and not only.has(String(role)):
+			continue
+		var vs: Array[String] = []
+		for c in clips:
+			if AnimRoles.role_of(StringName(c)) == role:
+				vs.append(c)
+		vs.sort()
+		var info: Dictionary = AnimRoles.ROLES[role]
+		var tipo := "cíclico" if info["loop"] else "una vez"
+		if not vs.is_empty():
+			print("  rol %-18s [%s] %d variante(s): %s" % [role, tipo, vs.size(), ", ".join(vs)])
+			continue
+		var fb: StringName = info["fallback"]
+		if fb != &"" and clips.has(String(fb)):
+			print("  rol %-18s [%s] sin variantes: usa respaldo '%s'" % [role, tipo, fb])
+		elif fb != &"":
+			print("  rol %-18s [%s] sin variantes y SIN respaldo '%s' en este modelo" % [role, tipo, fb])
+		else:
+			print("  rol %-18s [%s] sin variantes (sin respaldo: el código no lo usará)" % [role, tipo])
+	for c in clips:
+		var problem := AnimRoles.naming_problem(StringName(c))
+		if problem != "":
+			print("  AVISO nombre '%s': %s" % [c, problem])
 
 
 func _find(n: Node, cls: String) -> Node:
