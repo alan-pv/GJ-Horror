@@ -10,8 +10,7 @@ extends Node3D
 ##  - miran alrededor con `set_look`: al tablero, a otras mesas, a su rival, al árbitro si
 ##    pasa cerca, hacia las distracciones (`notice_event`, mismas probabilidades que los bots,
 ##    ver `Distraction`; los eventos fuertes además les hacen `sit_startle`) y, rara vez, al jugador;
-##  - rara vez se les cae una pieza (`sit_pick_up`, aviso `piece_drop`) y al caer la bandera de
-##    un reloj suena un pitido (aviso `flag`);
+##  - al caer la bandera de un reloj suena un pitido (aviso `flag`);
 ##  - cuando su partida hace una jugada, quien movió reproduce `sit_move_piece` ->
 ##    `sit_press_clock` -> `sit_write` en secuencia (`play_once`); el tablero cambia a la
 ##    mitad del gesto;
@@ -43,7 +42,6 @@ const POSES_TURN := {&"sit_think": 6.0, &"sit_wait": 2.0}
 const POSES_WAIT := {&"sit_wait": 6.0, &"sit_think": 1.5, &"sit_write": 0.6}
 const POSE_DWELL := Vector2(5.0, 12.0)
 ## Promedio de segundos entre dos caídas de pieza de un mismo asiento.
-const DROP_MEAN := 1500.0
 
 var table_index: int = -1
 var hall: Hall
@@ -55,7 +53,7 @@ var figures: Array[CharacterFigure] = [null, null]
 var _rng := RandomNumberGenerator.new()
 var _clock: float = 0.0
 ## Por asiento: {present, stage, gen, until, pose_t, look_t, calm, noise_pos, noise_until, manual}.
-## stage: ambient | move | press | write | relief | doomed | startle | pick | lent | condemned | left.
+## stage: ambient | move | press | write | relief | doomed | startle | lent | condemned | left.
 var _seats: Array[Dictionary] = []
 var _decide_acc: float = 0.0
 var _anim_acc: float = 0.0
@@ -205,9 +203,6 @@ func _decide(dt: float) -> void:
 			s.stage = &"ambient"
 			s.pose_t = 0.0
 		var free: bool = s.stage == &"ambient" or s.stage == &"doomed"
-		if s.stage == &"ambient" and not _game_over and _rng.randf() < dt / DROP_MEAN:
-			_drop_piece(color)
-			continue
 		if free:
 			s.pose_t -= dt
 			if s.pose_t <= 0.0:
@@ -314,25 +309,6 @@ func _startle(color: int, world_pos: Vector3, delay: float) -> void:
 		return
 	await f.play_once(f.pick_role_clip(&"sit_startle", _rng), AnimRoles.blend_of(&"sit_startle"))
 	if not _same_job(color, g, &"startle"):
-		return
-	s.stage = &"ambient"
-	s.pose_t = 0.0
-
-
-## Se le cae una pieza a un asiento: se inclina a recogerla, suena y avisa a los vecinos.
-func _drop_piece(color: int) -> void:
-	var s := _seats[color]
-	var f := figures[color]
-	if not f.has_role(&"sit_pick_up"):
-		return
-	s.gen += 1
-	var g: int = s.gen
-	s.stage = &"pick"
-	var pos := f.global_position + Vector3(0.0, 0.05, 0.0)
-	_play_sound(&"clack", pos, -4.0)
-	Distraction.broadcast(self, &"piece_drop", pos, table_index)
-	await f.play_role_once(&"sit_pick_up", _rng)
-	if not _same_job(color, g, &"pick"):
 		return
 	s.stage = &"ambient"
 	s.pose_t = 0.0

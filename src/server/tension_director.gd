@@ -13,7 +13,7 @@ signal event_triggered(event_id: StringName, origin: Vector3, duration: float)
 
 const EVENT_IDS: Array[StringName] = [
 	&"apagon", &"ruido_detras", &"acusacion_ajena", &"eliminacion", &"arbitro_pasa",
-	&"cough", &"drop_piece",
+	&"cough",
 ]
 
 ## Segundos entre eventos con el salón lleno y con los últimos jugadores.

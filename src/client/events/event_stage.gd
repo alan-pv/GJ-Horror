@@ -1,11 +1,16 @@
 class_name EventStage
 extends Node3D
 ## Escenografía de los eventos: apagón, banqueta que cae a las espaldas del jugador (único objeto
-## de primitivas), figura que acusa en otra mesa, guardias que se llevan a alguien y la pieza que
-## se le cae al rival. Las personas son `CharacterFigure` con roles de animación. Los sonidos son espaciales (`AudioStreamPlayer3D`) y
+## de primitivas), figura que acusa en otra mesa y guardias que se llevan a alguien. Las personas son `CharacterFigure` con roles de animación. Los sonidos son espaciales (`AudioStreamPlayer3D`) y
 ## salen de `EventSounds`.
 
 const ROOM_MARGIN := 0.8
+## Nivel de luz (`blackout_level`) por debajo del cual se considera oscuridad de verdad:
+## el servidor deja de contar las trampas como vistas.
+const DARK_LEVEL := 0.3
+
+## La sala pasó a oscuridad (`true`) o recuperó la luz (`false`).
+signal darkness_changed(dark: bool)
 
 var hall: Hall
 ## Raíz del juego: da acceso a las mesas de fondo (`bg_tables`) para prestar sus figuras.
@@ -397,36 +402,3 @@ func _clamp_room(p: Vector3) -> Vector3:
 		clampf(p.x, -Hall.ROOM_HALF_X + ROOM_MARGIN, Hall.ROOM_HALF_X - ROOM_MARGIN),
 		0.0,
 		clampf(p.z, -Hall.ROOM_HALF_Z + ROOM_MARGIN, Hall.ROOM_HALF_Z - ROOM_MARGIN))
-
-
-# --- Pieza que se cae --------------------------------------------------------------------------
-
-## Una pieza se le escapa al rival: cae sobre la mesa junto al tablero, rueda hasta
-## el borde y cae al suelo, con un golpe en cada contacto.
-func drop_piece(color: int, side: float = -1.0) -> Node3D:
-	var piece := PieceFactory.build(ChessPiece.make(color, ChessPiece.BISHOP))
-	piece.name = "PiezaCaida"
-	add_child(piece)
-	var lying := BoardView.TABLE_TOP + 0.018
-	# `side` = -1: cae a la derecha del rival (-X; allí se inclina `sit_pick_up`); +1 a su izquierda.
-	var start := Vector3(side * 0.27, BoardView.BOARD_TOP + 0.09, -0.33)
-	var on_table := Vector3(side * 0.37, lying, -0.14)
-	var edge := Vector3(side * 0.62, lying, -0.10)
-	var land := Vector3(side * 0.74, 0.02, -0.06)
-	piece.position = start
-	var tw := create_tween()
-	tw.tween_property(piece, "position", on_table, 0.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tw.parallel().tween_property(piece, "rotation:z", deg_to_rad(-90.0), 0.3)
-	tw.tween_callback(play_sound.bind(&"clack", on_table, 2.0))
-	tw.tween_property(piece, "position", edge, 0.55).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	tw.parallel().tween_property(piece, "rotation:x", deg_to_rad(540.0), 0.55)
-	tw.tween_property(piece, "position", land, 0.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	tw.parallel().tween_property(piece, "rotation:z", deg_to_rad(-200.0), 0.3)
-	tw.tween_callback(play_sound.bind(&"clack", land, 4.0))
-	tw.tween_property(piece, "position:y", land.y + 0.04, 0.08).set_ease(Tween.EASE_OUT)
-	tw.tween_property(piece, "position:y", land.y, 0.08).set_ease(Tween.EASE_IN)
-	tw.tween_interval(40.0)
-	tw.tween_callback(func() -> void:
-		if is_instance_valid(piece):
-			piece.queue_free())
-	return piece

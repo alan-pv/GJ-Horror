@@ -42,7 +42,7 @@ func test_cooldown_per_color_and_event() -> void:
 	var m := _make()
 	check(m.trigger_rival_event(B, &"cough").ok)
 	check(not m.trigger_rival_event(B, &"cough").ok, "en espera")
-	check(m.trigger_rival_event(B, &"drop_piece").ok, "otro evento sí")
+	check(not m.trigger_rival_event(B, &"drop_piece").ok, "evento retirado: desconocido")
 	check(m.trigger_rival_event(W, &"cough").ok, "otro color sí")
 	check(m.rival_event_wait(B, &"cough") > 4.0, "espera restante")
 	for i in 60:
@@ -56,11 +56,10 @@ func test_rejected_during_accusation() -> void:
 	check(not m.trigger_rival_event(B, &"cough").ok, "no durante una acusación")
 
 
-func test_drop_piece_needs_free_hand() -> void:
+func test_cough_with_busy_hand() -> void:
 	var m := _make()
 	var r := m.start_cheat(B, _sq("e7"), _sq("e6"))
 	check(r.ok, "empieza la trampa")
-	check(not m.trigger_rival_event(B, &"drop_piece").ok, "mano ocupada")
 	check(m.trigger_rival_event(B, &"cough").ok, "toser no usa la mano")
 
 

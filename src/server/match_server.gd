@@ -16,7 +16,7 @@ signal cheat_finished(color: int, cheat_id: StringName, from: int, to: int)
 signal accusation_started(accuser: int)
 signal accusation_resolved(accuser: int, correct: bool, warnings: int)
 signal game_over(winner: int, reason: String)
-## Un jugador hizo toser o tiró una pieza a su personaje (lo anima el cliente).
+## Un jugador hizo toser a su personaje (evento propio; lo anima el cliente).
 signal rival_event(color: int, event_id: StringName)
 ## `color` pulsó el reloj: su turno terminó (con `require_clock_press` pasa después de mover).
 signal clock_pressed(color: int)
@@ -25,7 +25,7 @@ signal clock_pressed(color: int)
 signal sheet_entry(color: int, move_number: int, san: String)
 
 ## Eventos que un jugador puede provocar sobre sí mismo.
-const RIVAL_EVENT_IDS: Array[StringName] = [&"cough", &"drop_piece"]
+const RIVAL_EVENT_IDS: Array[StringName] = [&"cough"]
 
 const REASON_CHECKMATE := "checkmate"
 const REASON_TIMEOUT := "time ran out"
@@ -316,14 +316,12 @@ func abort_cheat(color: int) -> bool:
 	return true
 
 
-## Un evento de distracción sobre el personaje de `color` (toser, tirar una pieza).
+## Un evento de distracción sobre el personaje de `color` (toser).
 ## Tiene tiempo de espera por color y evento. Devuelve {ok, reason}.
 func trigger_rival_event(color: int, event_id: StringName) -> Dictionary:
 	var err := _can_act(color)
 	if err == "" and not RIVAL_EVENT_IDS.has(event_id):
 		err = "unknown event"
-	if err == "" and event_id == &"drop_piece" and is_hand_busy(color):
-		err = "your hand is busy"
 	var key := "%d:%s" % [color, event_id]
 	if err == "" and time < _rival_event_ready.get(key, 0.0):
 		err = "you cannot repeat it yet"

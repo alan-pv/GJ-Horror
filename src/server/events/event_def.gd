@@ -6,7 +6,7 @@ extends Resource
 
 enum Kind {
 	GLOBAL,    ## Lo ven todos (apagón, ruido, acusación ajena...).
-	RIVAL,     ## Lo provoca un jugador sobre su propio personaje (toser, tirar pieza).
+	RIVAL,     ## Lo provoca un jugador sobre su propio personaje (toser).
 	DETERRENT, ## Frena las trampas (el árbitro pasa detrás).
 }
 

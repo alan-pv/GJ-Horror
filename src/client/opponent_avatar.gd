@@ -4,8 +4,8 @@ extends Node3D
 ## jugador. La cabeza sigue la mirada del bot (`BotController.looked`: la misma cámara virtual
 ## con la que el servidor decide si mira el tablero), que es lo que el jugador debe leer. En
 ## reposo pide ROLES de animación (`sit_wait` esperando, `sit_think` en su turno, `sit_nervous`
-## con poco reloj) y cambia de variante cada 5-12 s sin pisar una mezcla. Toser (`sit_cough`),
-## recoger la pieza (`sit_pick_up`) y sobresaltarse (`sit_startle`) también son roles. Es dueño
+## con poco reloj) y cambia de variante cada 5-12 s sin pisar una mezcla. Toser (`sit_cough`) y
+## sobresaltarse (`sit_startle`) también son roles. Es dueño
 ## de la mano (`HandRig`) del rival, que usa el brazo izquierdo: así queda del mismo lado que el
 ## reloj y que su pila de capturas.
 ##
@@ -31,9 +31,6 @@ const IK_OFF_DELAY := 0.8
 ## Retraso (s) del sonido de la tos respecto al inicio de `sit_cough` (los espasmos empiezan ~0,55 s).
 const COUGH_SOUND_DELAY := 0.55
 
-## Se agarró la pieza caída (mitad de `sit_pick_up`).
-signal piece_grabbed
-
 var figure: SeatedFigure
 ## Marcador pegado al hueso de la cabeza (posición de la cabeza para efectos y sonidos).
 var head: Node3D
@@ -46,7 +43,7 @@ var animator: HandAnimator
 
 var _look_yaw: float = 0.0
 var _look_pitch: float = 0.0
-## Sacudida de eventos (toser, tirar una pieza): cabeza (cabeceo, rad) y torso (inclinación, rad).
+## Sacudida de eventos (toser): cabeza (cabeceo, rad) y torso (inclinación, rad).
 var _head_kick: float = 0.0
 var _body_kick: float = 0.0
 var _event_tween: Tween
@@ -264,37 +261,6 @@ func _cough_step(t: float) -> void:
 	var spasm := maxf(sin(t * TAU * 2.0), 0.0) * (1.0 - t * 0.4)
 	_head_kick = -spasm * 0.45
 	_body_kick = spasm * 0.16
-
-
-## Se le escapa una pieza: mira al suelo un momento y la recoge (`sit_pick_up`, inclinándose a
-## su derecha). A mitad del gesto se emite `piece_grabbed` y la pieza (si se da) desaparece.
-## Sin el clip (o con la mano ocupada) solo mira hacia abajo.
-func play_drop_piece(piece: Node3D = null) -> void:
-	if condemned:
-		return
-	_start_event_tween()
-	_event_tween.tween_method(_dip_step, 0.0, 1.0, 0.25).set_ease(Tween.EASE_OUT)
-	_event_tween.tween_interval(0.5)
-	_event_tween.tween_method(_dip_step, 1.0, 0.0, 0.35)
-	_event_tween.tween_callback(_end_event)
-	await _event_tween.finished
-	if condemned or not _hands_free() or not figure.has_role(&"sit_pick_up"):
-		return
-	# La pieza tarda ~1,2 s en llegar al suelo.
-	_grab_later(piece)
-	await _play_once_role(&"sit_pick_up")
-
-
-func _grab_later(piece: Node3D) -> void:
-	await get_tree().create_timer(1.55).timeout
-	if is_instance_valid(piece):
-		piece.visible = false
-	piece_grabbed.emit()
-
-
-func _dip_step(k: float) -> void:
-	_head_kick = -k * 0.8
-	_body_kick = k * 0.22
 
 
 ## Respingo ante un evento fuerte en `world_pos`: `sit_startle` (el lado lo da la mirada).

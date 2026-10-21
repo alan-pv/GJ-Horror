@@ -4,7 +4,7 @@ extends TestCase
 
 const EXPECTED := {
 	&"gunshot": 0.95, &"accusation": 0.8, &"blackout": 0.8, &"arbiter_pass": 0.45,
-	&"plea": 0.45, &"piece_drop": 0.15, &"flag": 0.15,
+	&"plea": 0.45, &"flag": 0.15,
 }
 
 
@@ -29,7 +29,7 @@ func test_ignored_never_turn() -> void:
 
 func test_frequency_matches_chance() -> void:
 	var r := _rng(11)
-	for k in [&"gunshot", &"arbiter_pass", &"piece_drop"]:
+	for k in [&"gunshot", &"arbiter_pass", &"flag"]:
 		var n := 0
 		for i in 4000:
 			if Distraction.plan(k, -1.0, 1.0, r).turn:
@@ -59,22 +59,22 @@ func test_delay_and_duration_in_range() -> void:
 	check(shot >= 1.5 and shot <= 3.0, "disparo 1,5-3 s")
 	var glance := Distraction.look_seconds(&"arbiter_pass", r)
 	check(glance >= 0.4 and glance <= 0.9, "de reojo 0,4-0,9 s")
-	check(Distraction.reaction_delay(&"gunshot", r) < Distraction.reaction_delay(&"piece_drop", _rng(1)) + 0.07, "más fuerte, más rápido")
+	check(Distraction.reaction_delay(&"gunshot", r) < Distraction.reaction_delay(&"flag", _rng(1)) + 0.07, "más fuerte, más rápido")
 
 
 func test_startle_only_strong() -> void:
 	check(Distraction.startle_chance(&"gunshot") > 0.5)
 	check(Distraction.startle_chance(&"accusation") > 0.5)
 	check(Distraction.startle_chance(&"blackout") > 0.5)
-	check_eq(Distraction.startle_chance(&"piece_drop"), 0.0)
+	check_eq(Distraction.startle_chance(&"flag"), 0.0)
 	check_eq(Distraction.startle_chance(&"arbiter_pass"), 0.0)
 	check(Distraction.is_glance(&"arbiter_pass"))
 
 
 func test_range() -> void:
 	check(Distraction.in_range(&"gunshot", Vector3.ZERO, Vector3(50, 0, 50)), "disparo: todo el salón")
-	check(not Distraction.in_range(&"piece_drop", Vector3.ZERO, Vector3(8, 0, 0)), "pieza: solo vecinas")
-	check(Distraction.in_range(&"piece_drop", Vector3.ZERO, Vector3(3, 0, 0)))
+	check(not Distraction.in_range(&"flag", Vector3.ZERO, Vector3(8, 0, 0)), "bandera: solo vecinas")
+	check(Distraction.in_range(&"flag", Vector3.ZERO, Vector3(3, 0, 0)))
 
 
 func test_event_defs_data() -> void:
@@ -84,7 +84,7 @@ func test_event_defs_data() -> void:
 	check_eq(by[&"apagon"].turn_chance, 0.8)
 	check_eq(by[&"acusacion_ajena"].turn_chance, 0.8)
 	check_eq(by[&"arbitro_pasa"].turn_chance, 0.45)
-	for id in [&"ruido_detras", &"eliminacion", &"cough", &"drop_piece"]:
+	for id in [&"ruido_detras", &"eliminacion", &"cough"]:
 		check_eq(by[id].turn_chance, 0.0, "no voltea: " + String(id))
 
 

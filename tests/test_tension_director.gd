@@ -21,7 +21,7 @@ func _run(d: TensionDirector, seconds: float) -> Array:
 
 func test_defs_load() -> void:
 	var defs := TensionDirector.load_defs()
-	check_eq(defs.size(), 7, "siete eventos como datos")
+	check_eq(defs.size(), 6, "seis eventos como datos")
 	for dd in defs:
 		check(dd.duration > 0.0, "duración positiva: " + String(dd.id))
 

@@ -336,7 +336,7 @@ func _maybe_distract_rival() -> void:
 	if CheatPlanner.plan(server.board, color, server.config.cheats, _rng, personality.risk_appetite, server.turn_ready_for(color)).is_empty():
 		return
 	_next_event_ok = server.time + CheatPlanner.event_cooldown(personality.risk_appetite, _rng)
-	var event_id: StringName = &"cough" if _rng.randf() < 0.6 else &"drop_piece"
+	var event_id: StringName = &"cough"
 	var r: Variant = server.call("trigger_rival_event", color, event_id)
 	_log("evento %s: %s" % [event_id, str(r)])
 

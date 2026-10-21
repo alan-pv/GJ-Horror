@@ -9,10 +9,10 @@ extends Node
 ## detrás, durante lo cual el servidor marca las trampas como vistas.
 ##
 ## Argumentos de depuración (después de `--`):
-##   --event=apagon|ruido|acusacion|eliminacion|arbitro|toser|pieza   fuerza un evento
+##   --event=apagon|ruido|acusacion|eliminacion|arbitro|toser   fuerza un evento
 ##   --event-at=S       segundos de partida antes de forzarlo (por defecto 1)
 ##   --event-table=N    mesa decorativa de origen (0-8) para acusación/eliminación
-##   --event-side=human fuerza toser/pieza sobre el humano en vez del rival
+##   --event-side=human fuerza toser sobre el humano en vez del rival
 ##   --no-events        sin eventos automáticos
 
 ## Referencia de "detrás del jugador" para el árbitro (él elige el pasillo de su espalda).
@@ -21,7 +21,7 @@ const ARBITER_BEHIND := Vector3(0.0, 0.0, 0.45)
 const DEMO_IDS := {
 	"apagon": &"apagon", "ruido": &"ruido_detras", "acusacion": &"acusacion_ajena",
 	"eliminacion": &"eliminacion", "arbitro": &"arbitro_pasa",
-	"toser": &"cough", "pieza": &"drop_piece",
+	"toser": &"cough",
 }
 
 var root: GameRoot
@@ -151,7 +151,7 @@ func _table_of(pos: Vector3) -> int:
 
 ## Reparte una distracción (ver `Distraction`) a bots y mesas de fondo. `table` = mesa de origen
 ## (-1 ninguna): los bots de la mesa del humano la ignoran si ocurre en su propia mesa, y en
-## `piece_drop` / `flag` la mesa de origen no reacciona (ya lo sabe). `chance` < 0 = la de la tabla.
+## `flag` la mesa de origen no reacciona (ya lo sabe). `chance` < 0 = la de la tabla.
 func on_distraction(kind: StringName, pos: Vector3, table: int = -1, chance: float = -1.0) -> void:
 	if not Distraction.has(kind) or root == null:
 		return
@@ -161,7 +161,7 @@ func on_distraction(kind: StringName, pos: Vector3, table: int = -1, chance: flo
 			if b != null and Distraction.in_range(kind, b.eye_position, pos):
 				b.notice_event(pos, chance, kind)
 	for t in root.bg_tables:
-		if t == table and (kind == &"piece_drop" or kind == &"flag"):
+		if t == table and kind == &"flag":
 			continue
 		var bt: BackgroundTable = root.bg_tables[t]
 		if Distraction.in_range(kind, bt.global_position + Vector3(0.0, 1.1, 0.0), pos):
@@ -180,7 +180,7 @@ func _start_arbiter_pass(duration: float) -> bool:
 
 # --- Eventos del rival ----------------------------------------------------------------------------
 
-## El servidor confirmó que `color` tosió o tiró una pieza.
+## El servidor confirmó que `color` tosió.
 func _on_rival_event(color: int, event_id: StringName) -> void:
 	var is_rival := color == root.rival_color
 	var pos: Vector3 = root.avatar.head.global_position if is_rival else root.player.global_position
@@ -191,10 +191,4 @@ func _on_rival_event(color: int, event_id: StringName) -> void:
 				# Los espasmos de `sit_cough` empiezan ~0,55 s tras el inicio del clip.
 				await get_tree().create_timer(OpponentAvatar.COUGH_SOUND_DELAY).timeout
 			stage.play_sound(&"cough", pos, 2.0)
-		&"drop_piece":
-			if is_rival:
-				var piece := stage.drop_piece(color, -1.0)
-				root.avatar.play_drop_piece(piece)
-			else:
-				stage.play_sound(&"clack", Vector3(0.4, 0.0, 0.7), 2.0)
 	# Tos y ruidos del jugador no hacen voltear (descartados): no hay aviso a los bots.
