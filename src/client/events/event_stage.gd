@@ -197,12 +197,23 @@ static func back_of(f: Node3D) -> Vector3:
 	return b.normalized()
 
 
-## Mueve `node` en el mundo a `to` en `seconds` (tween en este escenario).
-func _slide(node: Node3D, to: Vector3, seconds: float, delay: float = 0.0) -> void:
-	var tw := create_tween()
-	if delay > 0.0:
-		tw.tween_interval(delay)
-	tw.tween_property(node, "global_position", to, seconds).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+## Mantiene la silla a la distancia que pide la pose real de `fig` (ver `ChairFollow`) durante
+## `seconds`. `standing_up`: la silla sale al levantarse (acaba en `CHAIR_BACK`); si no, vuelve a la
+## par al sentarse (acaba en su sitio). Corrutina: se lanza sin `await`.
+func _chair_follow(chair: Node3D, fig: CharacterFigure, home: Transform3D, standing_up: bool, seconds: float) -> void:
+	var back := -home.basis.z
+	var r := 0.0 if standing_up else CHAIR_BACK
+	var t := 0.0
+	while t < seconds and is_inside_tree() and is_instance_valid(fig) and is_instance_valid(chair):
+		await get_tree().process_frame
+		var dt := get_process_delta_time()
+		t += dt
+		var want := ChairFollow.desired(ChairFollow.rise_progress(fig, home), CHAIR_BACK)
+		var fade := 0.0 if standing_up else clampf(t / maxf(seconds, 0.01), 0.0, 1.0)
+		r = ChairFollow.step(r, ChairFollow.need(fig, home), want, 0.0, dt, fade)
+		chair.global_position = home.origin + back * r
+	if is_instance_valid(chair):
+		chair.global_position = home.origin + back * (CHAIR_BACK if standing_up else 0.0)
 
 
 ## Gira `f` hasta `yaw` (rad) en `seconds`, tras `delay`.
@@ -248,8 +259,9 @@ func accuser(origin: Vector3, duration: float, toward: Vector3) -> void:
 	var yaw0 := f.rotation.y
 	var yaw := figure_yaw(f.global_position, toward)
 	f.set_look(0.0, 0.0)
-	# La silla sale hacia atrás mientras sube la pelvis; el cuerpo se vuelve hacia el jugador.
-	_slide(chair, chair_home + back * CHAIR_BACK, 0.9, 0.2)
+	# La silla sale hacia atrás siguiendo la pelvis y las piernas; el cuerpo se vuelve hacia el jugador.
+	var chair_xf := chair.global_transform
+	_chair_follow(chair, f, chair_xf, true, f.clip_length(&"stand_accuse"))
 	_turn_figure(f, yaw, 1.0, 0.9)
 	get_tree().create_timer(1.7).timeout.connect(func() -> void:
 		if is_instance_valid(f):
@@ -260,7 +272,7 @@ func accuser(origin: Vector3, duration: float, toward: Vector3) -> void:
 		return
 	# Vuelve a su silla: gira hacia la mesa, la silla entra y se sienta.
 	_turn_figure(f, yaw0, 0.7)
-	_slide(chair, chair_home, 0.9, 0.6)
+	_chair_follow(chair, f, chair_xf, false, f.clip_length(&"sit_down"))
 	await f.play_role_once(&"sit_down")
 	if is_instance_valid(f):
 		f.rotation.y = yaw0
@@ -271,12 +283,13 @@ func accuser(origin: Vector3, duration: float, toward: Vector3) -> void:
 
 # --- Eliminación en otra mesa -----------------------------------------------------------
 
-## Aspecto de los guardias: ropa oscura (algo más clara que negro para que se lea en la penumbra), maniquí gris.
+## Aspecto de los guardias: ropa oscura pero con luz propia suficiente (gris azulado, no negro) para
+## que se lea fuera del cono de luz, sin llegar a destacar más que la víctima; maniquí gris.
 static func guard_look(rng: RandomNumberGenerator) -> Dictionary:
-	var dark := Color(0.11, 0.11, 0.14)
+	var dark := Color(0.24, 0.25, 0.31)
 	return CharacterFigure.bot_look(rng, {
-		"skin": CharacterFigure.BOT_SKIN, "shirt": Color(0.16, 0.16, 0.18), "jacket": dark,
-		"pants": dark, "shoes": Color(0.05, 0.05, 0.05), "hair": CharacterFigure.BOT_SKIN, "hair_style": "bald",
+		"skin": CharacterFigure.BOT_SKIN, "shirt": Color(0.34, 0.35, 0.40), "jacket": dark,
+		"pants": Color(0.20, 0.21, 0.26), "shoes": Color(0.12, 0.12, 0.14), "hair": CharacterFigure.BOT_SKIN, "hair_style": "bald",
 	})
 
 
@@ -320,7 +333,8 @@ func drag_away(origin: Vector3, _duration: float, seat_index: int = -1) -> void:
 		g.rotation.y = figure_yaw(g.global_position, seat_pos)
 	victim.set_look(0.0, 0.0)
 	play_sound(&"struggle", seat_pos, 8.0, victim)
-	_slide(chair, chair.global_position + back * CHAIR_BACK, 0.7, 0.1)
+	var chair_xf := chair.global_transform
+	_chair_follow(chair, victim, chair_xf, true, victim.clip_length(&"stand_up"))
 	await victim.play_role_once(&"stand_up")
 	# Por los pasillos hasta el perímetro, entre los dos guardias.
 	var out := Vector3(seat_pos.x, 0.0, seat_pos.z)

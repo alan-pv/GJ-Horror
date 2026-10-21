@@ -297,20 +297,11 @@ func _dip_step(k: float) -> void:
 	_body_kick = k * 0.22
 
 
-## Respingo ante un evento fuerte en `world_pos`: `sit_startle` del lado del origen.
-func startle(world_pos: Vector3) -> void:
+## Respingo ante un evento fuerte en `world_pos`: `sit_startle` (el lado lo da la mirada).
+func startle(_world_pos: Vector3) -> void:
 	if condemned or _once_busy or not figure.has_role(&"sit_startle") or not _hands_free():
 		return
-	var local := figure.global_transform.affine_inverse() * world_pos
-	var clip := &"sit_startle__left" if local.x > 0.0 else &"sit_startle__right"
-	if not figure.has_animation(clip):
-		_play_once_role(&"sit_startle")
-		return
-	_once_busy = true
-	if _ik_on:
-		_set_ik(false, 0.2)
-	await figure.play_once(clip, AnimRoles.blend_of(&"sit_startle"))
-	_resume_idle()
+	_play_once_role(&"sit_startle")
 
 
 func _start_event_tween() -> void:

@@ -387,6 +387,7 @@ class Rig:
         self.basis = {}
         self.warn = []
         self._prevq = {}
+        self.fist_boost = 0.0      # >0: los curl altos cierran mas (puño completo); 0 = sin cambio (arbitro)
 
     def _base(self, n):
         p = self.parent[n]
@@ -506,7 +507,8 @@ class Rig:
         spread = a.get("spread", 0.0)
         per = a.get("fcurl", {})
         for nm in FINGER_NAMES:
-            tot = a["curl"] * FINGER_GAIN * FINGER_CURL_FACTOR[nm] * per.get(nm, 1.0)
+            boost = 1.0 + self.fist_boost * (min(a["curl"], 90.0) / 80.0) ** 2   # cierra el puño del todo
+            tot = a["curl"] * FINGER_GAIN * FINGER_CURL_FACTOR[nm] * per.get(nm, 1.0) * boost
             for i, fr in enumerate(FINGER_FLEX_SPLIT):
                 sp_ = spread * FINGER_SPREAD_W[nm] * s if i == 0 else 0.0
                 self.fk(f"{nm}{i + 1}.{sd}", (sp_, 0, -s * tot * fr))

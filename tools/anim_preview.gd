@@ -5,6 +5,8 @@ extends SceneTree
 ##   DISPLAY=:0 godot --path . --script res://tools/anim_preview.gd -- --role=sit_wait --out=/ruta
 ##   opciones: --clip=nombre (en vez de --role), --times=0,0.25,0.5,0.75 (fracciones de la duración),
 ##             --seat=0.72|0.80 (distancia silla-centro de la mesa), --views=side,front,top
+##             --bare (sin mesa, silla ni tablero: para ver una mano de cerca)
+##             --focus=x,y,z --dist=0.4 (primer plano: la cámara mira a ese punto desde esa distancia)
 ## Guarda <out>/<clip>_<fracción>_<vista>.png (la figura mira a +Z; la silla está en el origen).
 
 const PROPS := "res://assets/models/props/"
@@ -65,6 +67,21 @@ func _run() -> void:
 
 func _place_camera(cam: Camera3D, view: String, seat: float) -> void:
 	var target := Vector3(0, 0.95, seat * 0.5)
+	if _args.has("focus"):
+		var f := String(_args["focus"]).split(",")
+		target = Vector3(float(f[0]), float(f[1]), float(f[2]))
+		var d := float(_args.get("dist", 0.4))
+		match view:
+			"side":
+				cam.position = target + Vector3(d, 0.0, 0.0)
+			"front":
+				cam.position = target + Vector3(d * 0.4, d * 0.3, d)
+			"under":
+				cam.position = target + Vector3(d * 0.2, -d * 0.6, d * 0.8)
+			_:
+				cam.position = target + Vector3(0.0, d, 0.01)
+		cam.look_at(target, Vector3.UP if view != "top" else Vector3(0, 0, -1))
+		return
 	match view:
 		"side":
 			cam.position = Vector3(3.6, 1.0, seat * 0.5)
@@ -96,6 +113,8 @@ func _add_set(world: Node3D, seat: float) -> void:
 	fm.albedo_color = Color(0.12, 0.12, 0.14)
 	floor_mesh.material_override = fm
 	world.add_child(floor_mesh)
+	if _args.has("bare"):
+		return
 	var chair := (load(PROPS + "chair.glb") as PackedScene).instantiate() as Node3D
 	world.add_child(chair)
 	var table := (load(PROPS + "table.glb") as PackedScene).instantiate() as Node3D

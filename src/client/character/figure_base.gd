@@ -230,6 +230,12 @@ func play_role_once(role: StringName, rng: RandomNumberGenerator = null) -> void
 	await play_once(clip, AnimRoles.blend_of(role))
 
 
+## Duración (s) del clip que cumple el rol (0 si el modelo no trae ninguno ni respaldo).
+func clip_length(role: StringName) -> float:
+	var clip := pick_role_clip(role)
+	return _player.get_animation(clip).length if clip != &"" else 0.0
+
+
 ## Lista de animaciones del modelo.
 func animations() -> PackedStringArray:
 	return _player.get_animation_list()

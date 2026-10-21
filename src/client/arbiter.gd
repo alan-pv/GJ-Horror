@@ -283,8 +283,6 @@ func _do_execution(e: Dictionary) -> void:
 		var kind := &"slump"
 		if cond.standing:
 			kind = &"standing"
-		elif _rng.randf() < 0.3:
-			kind = &"fall_back"
 		cond.die(kind)
 	await figure.play_once(&"shoot", 0.02)
 	await figure.play_once(&"lower_gun", 0.1)

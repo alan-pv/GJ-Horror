@@ -2,14 +2,14 @@ extends TestCase
 ## Pruebas de las figuras 3D (`CharacterFigure`, `ArbiterFigure`) con los .glb reales.
 
 const PLAYER_ANIMS := [
-	"sit_idle", "sit_think", "sit_nervous", "sit_look_left", "sit_look_right", "sit_move_piece",
-	"sit_press_clock", "sit_write", "sit_beg", "sit_cry", "sit_frozen", "stand_flee",
-	"stand_flee_cycle", "death_slump_table", "death_fall_back", "death_standing",
+	"sit_idle", "sit_think", "sit_nervous", "sit_move_piece",
+	"sit_press_clock", "sit_write", "sit_cry", "sit_frozen", "stand_flee",
+	"stand_flee_cycle", "death_slump_table", "death_standing",
 ]
+## Variantes admitidas por rol: un clip por acción (el .glb viejo aún puede traer variantes).
 const ROLE_CLIPS := {
-	&"sit_wait": ["sit_wait__chin", "sit_wait__crossed", "sit_wait__head", "sit_wait__lean_back"],
-	&"sit_think": ["sit_think", "sit_think__chin", "sit_think__temple"],
-	&"sit_startle": ["sit_startle__left", "sit_startle__right"],
+	&"sit_think": ["sit_think"],
+	&"sit_startle": ["sit_startle"],
 }
 const ARBITER_ANIMS := ["idle", "walk", "inspect_sheets", "aim", "aim_hold", "shoot", "lower_gun", "point_accuse"]
 
@@ -233,10 +233,10 @@ func test_role_variants_are_discovered() -> void:
 	for role in ROLE_CLIPS:
 		var got := Array(f.variants(role))
 		got.sort()
-		check_eq(got, ROLE_CLIPS[role], "variantes de " + role)
+		check_eq(got, ROLE_CLIPS[role], "clip único de " + role)
 		check(f.has_role(role), "has_role " + role)
 	for role in AnimRoles.ROLES:
-		check(f.has_role(role), "el jugador trae el rol " + role)
+		check(f.has_role(role) or f.pick_role_clip(role) != &"", "el jugador resuelve el rol " + role)
 	check(not f.has_role(&"no_existe"), "rol inexistente")
 	check(f.variants(&"no_existe").is_empty(), "sin variantes")
 	f.free()
@@ -251,23 +251,17 @@ func test_role_clips_follow_loop_table() -> void:
 	f.free()
 
 
-func test_play_role_avoids_repeating_variant() -> void:
+func test_play_role_single_clip_and_fallback() -> void:
 	var f := CharacterFigure.new()
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 11
-	var last := &""
-	var seen := {}
-	for i in 40:
-		var clip := f.play_role(&"sit_wait", rng, 1.0)
-		check(clip != last, "no repite la variante (%s)" % clip)
-		check(AnimRoles.role_of(clip) == &"sit_wait", "es del rol")
-		seen[clip] = true
-		last = clip
-	check_eq(seen.size(), 4, "usa todas las variantes")
-	check_eq(f.current(), last, "reproduce la elegida")
-	# Con una sola variante (sit_cough) sí puede repetir.
+	# Un clip por acción: el rol se repite sin problema.
 	check_eq(f.play_role(&"sit_cough", rng), &"sit_cough")
 	check_eq(f.play_role(&"sit_cough", rng), &"sit_cough")
+	# `sit_wait` sin clips propios cae en su respaldo `sit_idle` (con un .glb viejo usa sus variantes).
+	var clip := f.play_role(&"sit_wait", rng, 1.0)
+	check(clip == &"sit_idle" or AnimRoles.role_of(clip) == &"sit_wait", "sit_wait resuelve (%s)" % clip)
+	check_eq(f.current(), clip, "reproduce la elegida")
 	f.free()
 
 
@@ -300,7 +294,7 @@ func test_play_role_once_finishes() -> void:
 		done[0] = true
 	run.call()
 	check(not done[0], "aún no termina")
-	check_eq(AnimRoles.role_of(f.current()), &"sit_startle", "reproduce una variante del rol")
+	check_eq(AnimRoles.role_of(f.current()), &"sit_startle", "reproduce el clip del rol")
 	f.animation_player().advance(0.2)
 	f.animation_player().advance(2.0)
 	check(done[0], "play_role_once terminó")
@@ -308,7 +302,7 @@ func test_play_role_once_finishes() -> void:
 
 
 func test_naming_problems_are_detected() -> void:
-	check_eq(AnimRoles.naming_problem(&"sit_wait__crossed"), "", "bien")
+	check_eq(AnimRoles.naming_problem(&"sit_wait__variante"), "", "bien")
 	check_eq(AnimRoles.naming_problem(&"sit_idle"), "", "clip directo")
 	check(AnimRoles.naming_problem(&"sit_wait_crossed") != "", "un guion bajo")
 	check(AnimRoles.naming_problem(&"sit_wiat__x") != "", "rol desconocido")
@@ -363,8 +357,7 @@ func test_accuse_hands_over_to_hold() -> void:
 ## altura razonable sobre la mesa (0,72 m), incluso mirando al tablero (pitch -35 grados).
 func test_seated_posture_is_upright() -> void:
 	var table := 0.72
-	for clip in ["sit_idle", "sit_nervous", "sit_wait__chin", "sit_wait__crossed", "sit_wait__head",
-			"sit_wait__lean_back", "sit_think", "sit_think__chin", "sit_think__temple"]:
+	for clip in ["sit_idle", "sit_nervous", "sit_think"]:
 		var f := _spawn(CharacterFigure.new()) as CharacterFigure
 		f.play(StringName(clip), 0.0)
 		var ap := f.animation_player()

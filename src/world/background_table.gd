@@ -312,9 +312,7 @@ func _startle(color: int, world_pos: Vector3, delay: float) -> void:
 	await get_tree().create_timer(delay).timeout
 	if not _same_job(color, g, &"startle"):
 		return
-	var local := f.global_transform.affine_inverse() * world_pos
-	var clip := &"sit_startle__left" if local.x > 0.0 else &"sit_startle__right"
-	await f.play_once(clip if f.has_animation(clip) else f.pick_role_clip(&"sit_startle", _rng), AnimRoles.blend_of(&"sit_startle"))
+	await f.play_once(f.pick_role_clip(&"sit_startle", _rng), AnimRoles.blend_of(&"sit_startle"))
 	if not _same_job(color, g, &"startle"):
 		return
 	s.stage = &"ambient"

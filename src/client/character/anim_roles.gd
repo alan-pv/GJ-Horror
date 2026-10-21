@@ -67,9 +67,9 @@ const ROLES := {
 
 ## Clips que el código aún pide por nombre exacto (no son roles; no se avisa de ellos).
 const DIRECT_CLIPS: Array[StringName] = [
-	&"sit_idle", &"sit_look_left", &"sit_look_right", &"sit_move_piece", &"sit_press_clock", &"sit_write",
-	&"sit_beg", &"sit_cry", &"sit_frozen", &"stand_flee", &"stand_flee_cycle",
-	&"death_slump_table", &"death_fall_back", &"death_standing",
+	&"sit_idle", &"sit_move_piece", &"sit_press_clock", &"sit_write",
+	&"sit_cry", &"sit_frozen", &"stand_flee", &"stand_flee_cycle",
+	&"death_slump_table", &"death_standing",
 	# árbitro
 	&"idle", &"inspect_sheets", &"aim", &"aim_hold", &"shoot", &"lower_gun", &"point_accuse",
 ]

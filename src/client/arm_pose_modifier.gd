@@ -404,6 +404,13 @@ func _solve_thumb(ch: Chain, sgn: float, p0: Vector3, u: Vector3, dir_i: Vector3
 			break
 	_swing_goal = best_sw
 	_swing = move_toward(_swing, best_sw, 4.0 * maxf(dt, 0.016))
+	# Si con el pulgar abierto (c = 0) la yema ya queda dentro de la pieza, la flexión no puede
+	# sacarla: la abducción avanza más rápido que el tope hasta que quede fuera (no atraviesa).
+	if best_c >= 0.0:
+		var guard := 0
+		while _swing != best_sw and guard < 64 and _dist(ch, sgn, 0.0, p0, u, _swing) < -CONTACT_EPS:
+			_swing = move_toward(_swing, best_sw, 0.01)
+			guard += 1
 	if best_c >= 0.0 and absf(_swing - best_sw) > 0.01:
 		# Mientras la abducción llega a su valor, la flexión se recalcula con la actual.
 		var c2 := _solve_touch(ch, sgn, p0, u, THUMB, _swing)

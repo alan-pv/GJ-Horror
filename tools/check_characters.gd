@@ -12,11 +12,10 @@ const MATERIALS := ["Skin", "Shirt", "Jacket", "Pants", "Shoes", "Hair"]
 
 const CHARACTERS := {
 	"res://assets/models/characters/player.glb": {
-		"anims": ["sit_idle", "sit_think", "sit_nervous", "sit_look_left", "sit_look_right", "sit_move_piece",
-			"sit_press_clock", "sit_write", "sit_beg", "sit_cry", "sit_frozen", "stand_flee", "stand_flee_cycle",
-			"death_slump_table", "death_fall_back", "death_standing",
-			"sit_wait__crossed", "sit_wait__chin", "sit_wait__head", "sit_wait__lean_back", "sit_think__chin",
-			"sit_think__temple", "sit_startle__left", "sit_startle__right", "sit_cough", "sit_pick_up",
+		"anims": ["sit_idle", "sit_think", "sit_nervous", "sit_move_piece",
+			"sit_press_clock", "sit_write", "sit_cry", "sit_frozen", "stand_flee", "stand_flee_cycle",
+			"death_slump_table", "death_standing",
+			"sit_startle", "sit_cough", "sit_pick_up",
 			"stand_accuse", "stand_accuse_hold", "dragged", "stand_up", "walk", "sit_down"],
 		"nodes": ["Hair_Short", "Hair_Long", "Hair_Bald"],
 	},

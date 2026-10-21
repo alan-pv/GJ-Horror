@@ -62,8 +62,9 @@ def build_body(arm, sh, cfg, coll):
     if cfg.get("eyes"):
         for s in (1, -1):
             bd.box(P(s * .036, -.104, 1.548), (R(.024), R(.012), .012 * sh.kz), {"Head": 1}, "Eyes")
-    for s in (1, -1):
-        bd.box(P(s * .092, .0, 1.525), (R(.012), R(.03), .04 * sh.kz), {"Head": 1}, head_mat)
+    if cfg.get("ears", True):
+        for s in (1, -1):
+            bd.box(P(s * .092, .0, 1.525), (R(.012), R(.03), .04 * sh.kz), {"Head": 1}, head_mat)
 
     # ---- brazos ------------------------------------------------------------------------
     for sd, s in (("L", 1), ("R", -1)):
@@ -81,7 +82,7 @@ def build_body(arm, sh, cfg, coll):
         rs[-1]["w"] = {f"Forearm.{sd}": .6, f"Hand.{sd}": .4}
         bd.loft(rs, n=N)
         # mano
-        _hand(bd, bn, sd, s, R, hand_mat)
+        _hand(bd, bn, sd, s, R, hand_mat, cfg.get("round_hand", False), cfg.get("finger_scale", 1.0))
 
     # ---- piernas y zapatos -------------------------------------------------------------
     pr = cfg.get("leg_r", 1.0)
@@ -121,7 +122,7 @@ def build_body(arm, sh, cfg, coll):
     return [body, short, long_, bald]
 
 
-def _hand(bd, bn, sd, s, R, mat):
+def _hand(bd, bn, sd, s, R, mat, cfg_round=False, fscale=1.0):
     """Palma (loft de ocho lados) y cinco dedos (lofts de seis lados). Cada anillo de nudillo reparte
     sus pesos entre las dos falanges vecinas; la palma queda rigida (solo Forearm/Hand)."""
     hb = bn[f"Hand.{sd}"]
@@ -133,6 +134,9 @@ def _hand(bd, bn, sd, s, R, mat):
         ring(H.lerp(T, .5), hd, R(.042), R(.0165), {f"Hand.{sd}": 1}, e1=e1, mat=mat),
         ring(T, hd, R(.041), R(.0135), {f"Hand.{sd}": 1}, e1=e1, mat=mat),
     ]
+    if cfg_round:
+        # nudillos redondeados: la palma no termina en un canto plano que se vea entre los dedos curvados
+        hr_.append(ring(T + hd * .012, hd, R(.036), R(.0105), {f"Hand.{sd}": 1}, e1=e1, mat=mat))
     bd.loft(hr_, n=8)
 
     def finger(names, radii):
@@ -160,10 +164,10 @@ def _hand(bd, bn, sd, s, R, mat):
         bd.loft(rings, n=6, caps=(False, True))
 
     for nm in FINGER_NAMES:
-        r = R(FINGER_DEFS[nm][4])
+        r = R(FINGER_DEFS[nm][4]) * fscale
         # nudillos algo mas gruesos que las falanges; la yema se afina
         finger([f"{nm}{i}" for i in (1, 2, 3)],
                [r * .98, r * .92, r * 1.0, r * .88, r * .93, r * .84, r * .55])
-    r = R(.0115)
+    r = R(.0115) * fscale
     finger([f"Thumb{i}" for i in (1, 2, 3)],
            [r * 1.35, r * 1.2, r * 1.05, r * .98, r * .98, r * .92, r * .6])

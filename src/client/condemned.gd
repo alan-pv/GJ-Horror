@@ -71,7 +71,7 @@ func start(p_figure: CharacterFigure, p_mode: Mode, p_rich: bool, p_sign: float,
 	_loop = _make_player(VOICE_SEATED, -9.0 if rich else -15.0)
 	match mode:
 		Mode.BEG:
-			figure.play(&"sit_beg", 0.7, _rng.randf_range(0.9, 1.15))
+			figure.play(&"sit_cry", 0.7, _rng.randf_range(0.9, 1.15))
 			_set_loop("sob_loop")
 		Mode.CRY, Mode.SOB:
 			figure.play(&"sit_cry", 0.7, _rng.randf_range(0.9, 1.1))
@@ -172,8 +172,7 @@ static func flee_spot(seat_pos: Vector3, p_sign: float) -> Vector3:
 	return seat_pos + Vector3(0.0, 0.0, p_sign * (FLEE_RISE_BACK + FLEE_RUN))
 
 
-## Recibe el disparo. `kind`: &"slump" (sobre la mesa), &"fall_back" (de espaldas) o
-## &"standing" (de pie). Corrutina: termina cuando el cuerpo ya cayó.
+## Recibe el disparo. `kind`: &"slump" (sobre la mesa) o &"standing" (de pie). Corrutina: termina cuando el cuerpo ya cayó.
 func die(kind: StringName) -> void:
 	if dead:
 		return
@@ -184,9 +183,6 @@ func die(kind: StringName) -> void:
 	var anim := &"death_slump_table"
 	var floor_sound := false
 	match kind:
-		&"fall_back":
-			anim = &"death_fall_back"
-			floor_sound = true
 		&"standing":
 			anim = &"death_standing"
 			floor_sound = true
