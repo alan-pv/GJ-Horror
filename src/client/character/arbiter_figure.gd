@@ -18,6 +18,17 @@ func _model_path() -> String:
 	return MODEL_PATH
 
 
+## El exportador de glTF de Blender coloca los hijos de hueso respecto a la cola del hueso, pero
+## Godot los cuelga de la cabeza: sin corrección la pistola queda 9 cm (el largo de `Hand.R`)
+## hacia el antebrazo y la mano asoma por debajo. En el modelo la empuñadura ya está modelada
+## respecto a la cabeza del hueso, así que se anula ese desplazamiento.
+func _init() -> void:
+	super()
+	var gun := _find_named(_model, "Pistol") as Node3D
+	if gun != null:
+		gun.position = Vector3.ZERO
+
+
 func _loops() -> Array:
 	return LOOPS
 

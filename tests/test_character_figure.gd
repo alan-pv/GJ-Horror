@@ -215,6 +215,14 @@ func test_arbiter_api() -> void:
 	a.queue_free()
 
 
+func test_arbiter_gun_in_hand() -> void:
+	# El exportador de Blender desplaza la pistola 9 cm respecto a la cabeza de Hand.R.
+	var a := _spawn(ArbiterFigure.new()) as ArbiterFigure
+	check(a.pistol().position.length() < 0.001, "pistola sin desplazamiento respecto a Hand.R")
+	check_eq(a.pistol().get_parent().get_class(), "BoneAttachment3D", "pistola en un hueso")
+	a.queue_free()
+
+
 func test_hide_for_first_person() -> void:
 	var f := _spawn(CharacterFigure.new()) as CharacterFigure
 	f.play(&"sit_idle", 0.0)
