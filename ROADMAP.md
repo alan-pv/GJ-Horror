@@ -22,6 +22,13 @@ Un clip por acción, sin variantes (21 en `player.glb`); lo que queda es revisar
 - [ ] Revisar en el juego `sit_cough`, `sit_pick_up` (la mano baja hasta ~10 cm del suelo) y `sit_press_clock` (el preview no dibuja el reloj) con el IK del brazo apagado.
 - [ ] Inclinación del torso: el tope quedó en 0,70 rad (con 0,6 había posturas sin alcanzar) y 3 posturas extremas en la esquina lejana no llegan por 3,5-4,5 cm; el vientre puede rozar ~1 cm el canto a máxima inclinación (estimado). Revisar en primera persona.
 - [ ] `test_seated_posture_is_upright` casi no comprueba nada (sin fotogramas el esqueleto queda en T-pose): rehacerla como `test_chair_follow`, dentro del árbol.
+- [ ] **Agarre de la pluma (trípode):** hoy los dedos quedan cerrados en puño detrás de la pluma. Como se agarra de verdad:
+  - la pluma descansa sobre el costado de la última falange del **medio**;
+  - la sujetan las **yemas de pulgar e índice**, a 2-3 cm de la punta, una frente a la otra;
+  - el cuerpo de la pluma se apoya en la base del índice (entre pulgar e índice) y apunta hacia atrás, por encima del dorso, hacia el hombro, a ~45-55° del papel;
+  - anular y meñique se recogen bajo la palma, y el canto de la mano (meñique) se apoya en el papel;
+  - la muñeca va recta y los trazos salen de los dedos y de un leve deslizamiento de la mano, no del brazo.
+  Hace falta una pose de mano propia para escribir (no `PINCH`), con el medio como apoyo, y revisarla con capturas de cerca, en la mano del jugador y en la del rival.
 
 ### Frente E — Escenificación según lo que ve el jugador
 - [ ] Calcular qué mesas están en la línea de visión directa del jugador (cono de la cámara en reposo, sin oclusión) y llevar ahí las reacciones más dramáticas (huidas, súplicas, ejecuciones con más preparación); las mesas fuera de cuadro usan reacciones discretas.
@@ -31,6 +38,22 @@ Depende del Frente B solo para la animación de caminar del jugador.
 - [ ] Mesas numeradas: el jugador empieza en una mesa de un extremo (p. ej. la 10) y al ganar sube (5, 3, 2, 1). En el extremo opuesto, un podio con las mesas finales visualmente más ricas (mejor tablero, mantel, lámpara, piezas); las primeras son sencillas.
 - [ ] Señal visual del progreso desde el asiento (número de mesa visible, podio al fondo que se acerca).
 - [ ] Entre rondas, en lugar de fundido a negro y recarga con el rival ya sentado: animación en primera persona de levantarse y caminar por el salón hasta la siguiente mesa. Hoy `GameRoot` supone la mesa del humano en `Vector3.ZERO` (mesa 9): decidir si se mueve la mesa del humano o se desplaza el salón alrededor de ella.
+
+### Frente G — Apagón: trampas invisibles
+- [ ] Durante el apagón nadie puede "cachar" una trampa, aunque mire al tablero: el servidor no cuenta como vista ninguna trampa hecha (o en curso) mientras dura la oscuridad, ni para el humano ni para los bots, y la acusación de esa trampa no prospera.
+- [ ] En el cliente, la mano y las piezas del rival no se distinguen a oscuras (sin luz de relleno ni emisivos que las delaten); solo al volver la luz se ve el tablero cambiado.
+- [ ] Como opción en `MatchConfig` (p. ej. `blackout_hides_cheats`, por defecto sí).
+
+### Frente H — Diseño: por qué hacer trampa (por discutir)
+Problema: si el jugador puede ganar sin trampas, el juego es solo ajedrez. Ideas para que hacer trampa sea necesario o muy tentador; se eligen y se combinan después de hablarlo:
+- **Rivales más fuertes que el jugador:** el Elo del rival sube más rápido que el del jugador medio (hoy 1000 → 1500), así que jugar limpio pierde casi siempre a partir de la ronda 2-3.
+- **Todos hacen trampa:** los bots tramposos lo hacen cada vez más; si el jugador no acusa ni responde con trampas, va perdiendo material sin ver por qué.
+- **Desventaja de salida:** en rondas avanzadas el jugador empieza con material de menos (partida con ventaja para el rival), menos tiempo o siempre con negras; la trampa es la forma de igualar.
+- **Reloj:** pensar cuesta tiempo y la trampa no (o cuesta menos); con poco tiempo, mover una pieza a escondidas es más rápido que encontrar la jugada.
+- **Objetivo por ronda:** el árbitro o "la casa" exige algo que el ajedrez limpio casi no permite (ganar en N jugadas, capturar la dama antes de la jugada 20); no cumplirlo es la eliminación.
+- **Recompensa del riesgo:** las trampas no detectadas dan algo visible (tiempo extra, quitar una advertencia, ventaja en la ronda siguiente) y la tensión crece con cada una.
+- **Ventanas de oportunidad:** los eventos (apagón, acusación ajena, árbitro que pasa) son momentos claros para hacer trampa; anunciarlos o hacerlos frecuentes en los momentos críticos de la partida.
+- **Narrativa:** el torneo está amañado y los campeones anteriores fueron tramposos; la regla tácita es "que no te vean", no "no hagas trampa".
 
 ## Pendiente
 
