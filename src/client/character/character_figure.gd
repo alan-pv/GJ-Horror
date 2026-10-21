@@ -19,7 +19,7 @@ const MODEL_PATH := "res://assets/models/characters/player.glb"
 ## Animaciones cíclicas (el .glb no trae el flag; se marcan `LOOP_LINEAR` al cargar).
 const LOOPS: Array[StringName] = [
 	&"sit_idle", &"sit_think", &"sit_nervous", &"sit_write",
-	&"sit_cry", &"sit_frozen", &"stand_flee_cycle",
+	&"sit_cry", &"sit_frozen",
 ]
 
 ## Velocidad (m/s) a la que avanza el rol `walk` con velocidad 1 (ciclo de 1,0 s, paso doble de

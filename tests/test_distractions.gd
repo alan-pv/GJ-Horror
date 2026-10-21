@@ -84,7 +84,7 @@ func test_event_defs_data() -> void:
 	check_eq(by[&"apagon"].turn_chance, 0.8)
 	check_eq(by[&"acusacion_ajena"].turn_chance, 0.8)
 	check_eq(by[&"arbitro_pasa"].turn_chance, 0.45)
-	for id in [&"ruido_detras", &"eliminacion", &"cough"]:
+	for id in [&"ruido_detras", &"cough"]:
 		check_eq(by[id].turn_chance, 0.0, "no voltea: " + String(id))
 
 

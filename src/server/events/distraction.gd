@@ -8,8 +8,8 @@ extends RefCounted
 ## Los avisos viajan por un grupo (`GROUP`): quien produce el evento llama a `broadcast` y el
 ## `EventModule` lo reparte a los bots y a las mesas de fondo.
 ##
-## Descartados a propósito (no hacen voltear): lámpara a media luz tras una ejecución, guardias
-## arrastrando, alguien que huye, banqueta o golpe detrás, puerta, tos o ruido del jugador.
+## Descartados a propósito (no hacen voltear): lámpara a media luz tras una ejecución,
+## banqueta o golpe detrás, puerta, tos o ruido del jugador.
 ## Se listan en `IGNORED` solo como documentación y prueba; cualquier tipo desconocido vale 0.
 
 ## Grupo de nodos que reciben `on_distraction(kind, pos, table)`.
@@ -33,7 +33,7 @@ const SPECS := {
 	&"flag": {"chance": 0.15, "strength": 0.25, "look": Vector2(0.6, 1.4), "glance": false, "startle": 0.0, "radius": 4.5, "speed": 1.0},
 }
 
-const IGNORED: Array[StringName] = [&"dim_lamp", &"guards", &"flee", &"stool", &"door", &"player_noise"]
+const IGNORED: Array[StringName] = [&"dim_lamp", &"stool", &"door", &"player_noise"]
 
 ## Retardo de reacción (s): entre 0,15 (muy fuerte) y 0,45 (débil).
 const REACTION_MIN := 0.15

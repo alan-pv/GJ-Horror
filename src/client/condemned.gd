@@ -3,21 +3,13 @@ extends Node
 ## Reacción de un condenado a muerte mientras espera al árbitro, y su caída.
 ## Cuelga de la `CharacterFigure` del perdedor (la entrega `GameRoot.condemn_seat`).
 ## Las mesas que el jugador ve de frente tienen reacciones ricas (suplicar, llorar,
-## paralizarse, huir); las lejanas, una más simple. Los sonidos son 3D en su cabeza.
+## paralizarse); las lejanas, una más simple. Siempre mueren sentados, sobre la mesa. Los sonidos son 3D en su cabeza.
 
-enum Mode { SOB, BEG, CRY, FROZEN, FLEE }
+enum Mode { SOB, BEG, CRY, FROZEN }
 
 const SFX := "res://assets/audio/sfx/"
-## Cuánto retrocede en la animación `stand_flee` (en metros, hacia atrás de la figura).
-const FLEE_RISE_BACK := 0.44
-## Metros más que huye hacia atrás con el ciclo de huida antes de quedarse a esperar.
-const FLEE_RUN := 0.7
-## Velocidad de avance del ciclo `stand_flee_cycle` a velocidad de animación 1 (m/s).
-const FLEE_SPEED := 0.5
-const FLEE_ANIM_SPEED := 1.3
-## Dónde suena la voz respecto al origen de la figura sentada / de pie.
+## Dónde suena la voz respecto al origen de la figura sentada.
 const VOICE_SEATED := Vector3(0.0, 1.15, 0.12)
-const VOICE_STANDING := Vector3(0.0, 1.55, 0.0)
 
 var figure: CharacterFigure
 var mode: Mode = Mode.SOB
@@ -25,9 +17,6 @@ var rich: bool = false
 ## Signo en Z del asiento: "atrás" de la figura es +Z mundial si vale +1.
 var seat_sign: float = 1.0
 var dead: bool = false
-var standing: bool = false
-var fleeing: bool = false
-var fled: bool = false
 ## Nodo del que se oye venir al árbitro (para mirarlo).
 var threat: Node3D
 ## Mesa del condenado (-1 si no se conoce): origen del aviso de súplica.
@@ -52,9 +41,7 @@ static func pick_mode(is_rich: bool, rng: RandomNumberGenerator) -> Mode:
 		return Mode.BEG
 	if r < 0.52:
 		return Mode.CRY
-	if r < 0.74:
-		return Mode.FROZEN
-	return Mode.FLEE
+	return Mode.FROZEN
 
 
 ## Prepara y arranca la reacción. `p_sign` = signo en Z del asiento.
@@ -78,10 +65,6 @@ func start(p_figure: CharacterFigure, p_mode: Mode, p_rich: bool, p_sign: float,
 			_set_loop("sob_loop")
 		Mode.FROZEN:
 			figure.play(&"sit_frozen", 0.8)
-			_set_loop("panic_breath_loop")
-		Mode.FLEE:
-			# Antes de huir tiembla en la silla.
-			figure.play(&"sit_nervous", 0.6, 1.4)
 			_set_loop("panic_breath_loop")
 	_next_whimper = _rng.randf_range(0.5, 2.5)
 
@@ -123,76 +106,28 @@ func _process(delta: float) -> void:
 	_next_whimper -= delta
 	if _next_whimper <= 0.0:
 		_next_whimper = _rng.randf_range(2.0, 4.5)
-		if (mode == Mode.BEG or mode == Mode.FLEE or (rich and mode != Mode.FROZEN)) and not fleeing:
+		if mode == Mode.BEG or (rich and mode != Mode.FROZEN):
 			_voice.stream = load(SFX + "whimper.wav")
 			_voice.pitch_scale = _rng.randf_range(0.9, 1.15)
 			_voice.play()
 
 
-## Corre y se queda de pie esperando: para el modo FLEE, cuando el árbitro ya viene.
-## Termina cuando se detiene (queda de pie, a `FLEE_RUN` metros del punto de reposo).
-func begin_flee() -> void:
-	if fleeing or fled or dead or mode != Mode.FLEE:
-		return
-	fleeing = true
-	_set_loop("panic_breath_loop")
-	_loop.volume_db = -3.0
-	var scrape := _make_player(Vector3(0.0, 0.3, 0.0), -2.0)
-	scrape.stream = load(SFX + "chair_scrape.wav")
-	scrape.pitch_scale = _rng.randf_range(0.95, 1.05)
-	scrape.play()
-	figure.set_look(0.0, 0.0)
-	await figure.play_once(&"stand_flee", 0.35)
-	if dead or not is_inside_tree():
-		return
-	standing = true
-	_voice.position = VOICE_STANDING
-	_loop.position = VOICE_STANDING
-	# La animación ya retrocedió `FLEE_RISE_BACK`; el ciclo parte del origen, así que se
-	# traslada la figura esa distancia para que no salte.
-	var back := Vector3(0.0, 0.0, seat_sign)
-	figure.global_position += back * FLEE_RISE_BACK
-	figure.play(&"stand_flee_cycle", 0.15, FLEE_ANIM_SPEED)
-	var run := FLEE_RUN
-	var v := FLEE_SPEED * FLEE_ANIM_SPEED
-	while run > 0.0 and not dead and is_inside_tree():
-		await get_tree().process_frame
-		var step := minf(v * get_process_delta_time(), run)
-		figure.global_position += back * step
-		run -= step
-	if dead:
-		return
-	# Se queda de pie, acorralado, temblando: ciclo lentísimo en el sitio.
-	figure.play(&"stand_flee_cycle", 0.3, 0.12)
-	fled = true
-
-
-## Posición de pie final tras huir (para que el árbitro vaya a ese punto), a partir del asiento.
-static func flee_spot(seat_pos: Vector3, p_sign: float) -> Vector3:
-	return seat_pos + Vector3(0.0, 0.0, p_sign * (FLEE_RISE_BACK + FLEE_RUN))
-
-
-## Recibe el disparo. `kind`: &"slump" (sobre la mesa) o &"standing" (de pie). Corrutina: termina cuando el cuerpo ya cayó.
-func die(kind: StringName) -> void:
+## Recibe el disparo y cae sobre la mesa.
+## Corrutina: termina cuando el cuerpo ya cayó.
+func die() -> void:
 	if dead:
 		return
 	dead = true
 	_voice.stop()
 	_loop.stop()
 	figure.set_look(0.0, 0.0)
-	var anim := &"death_slump_table"
-	var floor_sound := false
-	match kind:
-		&"standing":
-			anim = &"death_standing"
-			floor_sound = true
-	# El cuerpo cae y suena al golpear (tras el tiempo en que llega a la mesa o al suelo).
-	figure.play(anim, 0.04)
+	# El cuerpo cae y suena al golpear (tras el tiempo en que llega a la mesa).
+	figure.play(&"death_slump_table", 0.04)
 	var thud := _make_player(Vector3(0.0, 0.2, 0.0), 2.0)
-	thud.stream = load(SFX + ("body_fall_floor.wav" if floor_sound else "body_slump_table.wav"))
+	thud.stream = load(SFX + "body_slump_table.wav")
 	thud.unit_size = 3.0
 	thud.max_distance = 20.0
-	await get_tree().create_timer(0.5 if not floor_sound else 0.8).timeout
+	await get_tree().create_timer(0.5).timeout
 	if is_instance_valid(thud):
 		thud.play()
 	await get_tree().create_timer(1.0).timeout

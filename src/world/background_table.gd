@@ -351,18 +351,6 @@ func give_back(seat: int) -> void:
 	_apply_manual(seat, _tier > 0)
 
 
-## Entrega la figura prestada para siempre (se la llevan los guardias): el asiento queda vacío.
-func take_away(seat: int) -> CharacterFigure:
-	var f := figure(seat)
-	if f == null:
-		return null
-	var s := _seats[seat]
-	s.gen += 1
-	_apply_manual(seat, false)
-	s.stage = &"left"
-	return f
-
-
 # --- Jugadas y fin de partida --------------------------------------------------------------------
 
 func _on_move(color: int, _uci: String, _info: Dictionary) -> void:
@@ -448,10 +436,10 @@ func send_away(seat: int) -> void:
 	_apply_manual(seat, false)
 	s.stage = &"left"
 	f.set_look(0.0, 0.0)
-	await f.play_once(&"stand_flee")
+	await f.play_role_once(&"stand_up")
 	if not is_instance_valid(f):
 		return
-	f.play(&"stand_flee_cycle", 0.1)
+	f.play_role(&"walk")
 	var away := Hall.seat_local(seat) + Vector3(0.0, 0.0, 3.2 if seat == ChessPiece.WHITE else -3.2)
 	var tw := f.create_tween()
 	tw.tween_property(f, "rotation:y", f.rotation.y + PI, 0.35)

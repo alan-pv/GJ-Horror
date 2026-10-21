@@ -328,61 +328,6 @@ def arms_rel(sp, l, r, curl=10.0, hands_up=True):
     return sp
 
 
-@anim("stand_flee", 2.0, False, 0.05)
-def _(t, u):
-    S0 = seated_ik()
-    # recula en la silla
-    s1 = seated_ik()
-    s1.update(spine=(-8, 0, 0), chest=(-10, 0, 0), neck=(-6, 0, 0), head=(-14, 0, 0))
-    arms_rel(s1, V((.22, -.30, .05)), V((-.22, -.30, .05)))
-    tw(s1, "hips_off", (0, 0.04, 0))
-    # impulso: se levanta apoyando las manos
-    s2 = stand_spec(-0.14, 0.78, la=ANKLE["L"], ra=ANKLE["R"])
-    s2.update(spine=(14, 0, 0), chest=(16, 0, 0), neck=(-4, 0, 0), head=(-8, 0, 0))
-    arms_rel(s2, V((.15, -.42, -.28)), V((-.15, -.42, -.28)), hands_up=False)
-    # erguido, retrocede
-    s3 = stand_spec(-0.02, 0.83, la=(.1, -.3, .075), ra=(-.1, -.18, .17))
-    s3.update(spine=(-6, 0, 0), chest=(-8, 0, 0), neck=(-4, 0, 0), head=(-8, 0, 0))
-    arms_rel(s3, V((.26, -.34, .12)), V((-.26, -.34, .12)))
-    s4 = stand_spec(0.10, 0.83, la=(.1, -.16, .075), ra=(-.1, .04, .075))
-    s4.update(spine=(-10, 0, 3), chest=(-10, 0, 3), neck=(0, 0, 0), head=(-6, 0, 0))
-    arms_rel(s4, V((.42, -.12, .2)), V((-.34, -.30, .1)))
-    s5 = stand_spec(0.22, 0.83, la=(.1, .06, .17), ra=(-.1, .02, .075))
-    s5.update(spine=(8, 0, -3), chest=(4, 0, -3), neck=(-2, 0, 0), head=(-6, 0, 0))
-    arms_rel(s5, V((.3, -.3, .05)), V((-.46, -.1, .22)))
-    s6 = stand_spec(0.32, 0.83, la=(.1, .26, .075), ra=(-.1, .02, .075))
-    s6.update(spine=(-12, 0, 0), chest=(-12, 0, 0), neck=(-2, 0, 0), head=(-6, 0, 0))
-    arms_rel(s6, V((.4, -.2, .2)), V((-.36, -.2, .2)))
-    s7 = stand_spec(0.40, 0.82, la=(.11, .28, .075), ra=(-.11, .20, .17))
-    s7.update(spine=(-14, 0, 0), chest=(-12, 0, 0), neck=(0, 0, 0), head=(-6, 0, 0))
-    arms_rel(s7, V((.3, -.32, .2)), V((-.3, -.32, .2)))
-    s8 = stand_spec(0.44, 0.82, la=(.11, .28, .075), ra=(-.11, .42, .075))
-    s8.update(spine=(-10, 0, 0), chest=(-10, 0, 0), neck=(0, 0, 0), head=(-6, 0, 0))
-    arms_rel(s8, V((.26, -.36, .22)), V((-.26, -.36, .22)))
-    s0b = seated_ik()       # primero levanta las manos de la mesa
-    for sd in "LR":
-        rest_hand(s0b, sd, y=-.30, z=.86, curl=20)
-    keys = [(0.0, S0), (0.06, s0b), (0.14, s1), (0.55, s2), (0.8, s3), (1.05, s4), (1.25, s5), (1.45, s6), (1.7, s7), (2.0, s8)]
-    return seq(t, keys)
-
-
-FLEE_T, FLEE_D = 1.0, 0.30
-
-
-@anim("stand_flee_cycle", FLEE_T, True, 0.05)
-def _(t, u):
-    hz = ANK_Z + math.sqrt((LEG_LEN * .93) ** 2 - (FLEE_D / 2) ** 2)
-    sp = stand_spec(0.0, hz)
-    C.gait(sp, t, FLEE_T, FLEE_D, ANK_Z, lift=0.06, forward=False)
-    w = 2 * pi * u
-    sp.update(spine=(-8, 0, 0), chest=(-8, 0, 0), neck=(-2, 0, 0), head=(-6, 0, 0))
-    tw(sp, "hips_off", (0, 0, -0.012 * abs(sin(2 * w))))
-    tw(sp, "spine", (0, 3 * sin(2 * w), 0))
-    tw(sp, "head", (1.2 * sin(6 * w), 0, 1.0 * sin(5 * w)))
-    arms_rel(sp, V((.3, -.33 + .01 * sin(6 * w), .22)), V((-.3, -.33 + .01 * sin(6 * w + 1), .22)), curl=6.0)
-    return sp
-
-
 # ----------------------------------------------------------------------------
 # Muertes
 # ----------------------------------------------------------------------------
@@ -416,38 +361,6 @@ def _(t, u):
     over.update(spine=(30, 0, 0), chest=(34, 0, 0), neck=(12, 0, 0), head=(10, 0, -10))
     keys = [(0.0, clone(SIT)), (0.07, shot_snap()), (0.2, shot_snap()), (0.5, mid), (0.85, over),
             (1.1, slump_final()), (1.5, slump_final())]
-    return seq(t, keys)
-
-
-def prone(hip_y, hip_z):
-    sp = stand_spec(hip_y, hip_z, la=(.15, hip_y + .72, .09), ra=(-.15, hip_y + .76, .09))
-    sp["hips_rot"] = (88, 0, 0)
-    sp.update(spine=(-4, 0, 0), chest=(-6, 0, 0), neck=(-4, 0, 0), head=(0, 80, 0))
-    legs_ik(sp, (.15, hip_y + .70, .10), (-.15, hip_y + .74, .10), 78, 80, kp=(0, .2, 1.2))
-    arm_set(sp, "L", "abs", (.42, hip_y - .62, .09), pole=(.6, .2, 1), hdir=(.2, -.9, -.2), thumb=(-1, 0, 0), curl=20.0,
-            thumb_curl=5.0)
-    arm_set(sp, "R", "abs", (-.36, hip_y - .5, .09), pole=(-.6, .2, 1), hdir=(-.3, -.8, -.2), thumb=(1, 0, 0),
-            curl=30.0, thumb_curl=5.0)
-    return sp
-
-
-@anim("death_standing", 1.5, False, 0.05)
-def _(t, u):
-    s0 = stand_spec(0.0)
-    arms_rel(s0, V((.12, -.03, -.5)), V((-.12, -.03, -.5)), hands_up=False)
-    s1 = stand_spec(0.0)
-    s1.update(spine=(-6, 0, 0), chest=(-8, 0, 0), neck=(-12, 0, 0), head=(-34, 0, 0))
-    arms_rel(s1, V((.34, .02, .25)), V((-.34, .02, .25)))
-    s2 = stand_spec(-0.06, 0.66)
-    s2.update(spine=(8, 0, 0), chest=(8, 0, 0), neck=(2, 0, 0), head=(6, 0, 0))
-    arms_rel(s2, V((.3, -.1, .1)), V((-.3, -.1, .1)), hands_up=False)
-    s3 = stand_spec(-0.30, 0.42, la=(.1, 0.0, .075), ra=(-.1, 0.04, .075))
-    s3["hips_rot"] = (42, 0, 0)
-    s3.update(spine=(14, 0, 0), chest=(10, 0, 0), neck=(4, 0, 0), head=(10, 20, 0))
-    arms_rel(s3, V((.3, -.4, -.2)), V((-.3, -.4, -.2)), hands_up=False)
-    s4 = prone(-0.60, 0.12)
-    s5 = prone(-0.62, 0.11)
-    keys = [(0.0, s0), (0.06, s0), (0.17, s1), (0.45, s2), (0.8, s3), (1.15, s4), (1.5, s5)]
     return seq(t, keys)
 
 
@@ -493,33 +406,6 @@ def _(t, u):
     if 0.5 < t < 1.2:   # espasmos de los hombros
         tw(sp, "shL", (0, 0, 3 * sin(t * 40))), tw(sp, "shR", (0, 0, 3 * sin(t * 40)))
     return sp
-
-
-def pickup_pose(reach, hold=False, curl=12.0):
-    """reach 0 = sentado, 1 = mano al suelo, a la derecha de la silla. Se inclina de lado (no hacia la mesa)."""
-    sp = clone(SIT)
-    r = reach
-    tw(sp, "hips_off", (-0.05 * r, 0.01 * r, 0))
-    sp["hips_rot"] = (0, 0, 9 * r)
-    sp.update(spine=(8 * r + 4, 0, 30 * r), chest=(6 * r + 4, 0, 26 * r),
-              neck=(6 * r, 0, -12 * r), head=(14 * r + 6, -12 * r, -14 * r))
-    if r > 0.01:
-        # primero retira la mano de la mesa hacia el regazo y despues baja al suelo
-        a_, b_ = smooth(min(1.0, r * 2.5)), smooth(max(0.0, (r - .25) / .75))
-        tgt = V((-.20 - .18 * b_, -.29 + .24 * a_, .79 - .70 * b_))
-        arm_set(sp, "R", "abs", tgt, pole=(-1, .3, -.4),
-                hdir=V((-.1, -1, -.05)).lerp(V((-.1, -.3, -1)), b_), thumb=(1, 0, .3),
-                curl=curl, thumb_curl=curl * .4)
-    return sp
-
-
-@anim("sit_pick_up", 2.8, False, 0.05)
-def _(t, u):
-    keys = [(0.0, clone(SIT)), (0.35, pickup_pose(.18)), (0.55, pickup_pose(.38)), (0.72, pickup_pose(.62)),
-            (1.0, pickup_pose(1.0)), (1.25, pickup_pose(1.0)),
-            (1.45, pickup_pose(1.0, curl=62.0)), (1.65, pickup_pose(1.0, curl=62.0)),
-            (1.9, pickup_pose(.62, curl=62.0)), (2.15, pickup_pose(.3, curl=62.0)), (2.8, clone(SIT))]
-    return seq(t, keys)
 
 
 # ----------------------------------------------------------------------------
@@ -579,73 +465,6 @@ def _(t, u):
 def _(t, u):
     # La subida al reves: de pie -> manos a la mesa -> se deja caer en la silla.
     return seq(1.7 - t, rise_keys())
-
-
-def accuse_pose(lunge=0.0, shake=0.0, arm_y=-.62):
-    """De pie, el brazo derecho señalando al frente a la altura del hombro; la mano izquierda apoyada en la mesa."""
-    sp = stand_spec(STAND_Y)
-    sp.update(spine=(4 + 6 * lunge, 0, 0), chest=(5 + 7 * lunge, 0, 0), neck=(-3, 0, 0), head=(-6 + 8 * lunge, 0, 0))
-    tw(sp, "hips_off", (0, -0.015 * lunge, 0))
-    arm_set(sp, "R", "abs", (-.17, arm_y, 1.235 + shake), pole=(-.3, .7, -1), hdir=(-.02, -1, .06),
-            thumb=(1, 0, .3), curl=2.0, thumb_curl=0.0)
-    rest_hand(sp, "L", x=.21, y=-.33, z=.815, curl=60.0, hdir=(-.1, -1, .05))
-    return sp
-
-
-def raise_arm_keys():
-    # el brazo derecho sube desde la mesa mientras el torso se endereza
-    k3 = rise_keys()[3][1]
-    k4 = clone(k3)
-    side_hands(k4, -.06, .70, x=.26)
-    k4.update(spine=(4, 0, 0), chest=(3, 0, 0), neck=(-2, 0, 0), head=(-4, 0, 0))
-    k4["legikL"], k4["legikR"] = clone(stand_spec(STAND_Y)["legikL"]), clone(stand_spec(STAND_Y)["legikR"])
-    k4["hips_off"] = stand_spec(STAND_Y)["hips_off"]
-    rest_hand(k4, "L", x=.21, y=-.33, z=.815, curl=60.0, hdir=(-.1, -1, .05))
-    arm_set(k4, "R", "abs", (-.30, -.30, 1.0), pole=(-.6, .7, -1), hdir=(-.1, -1, .1), thumb=(1, 0, .3), curl=15.0)
-    return k4
-
-
-@anim("stand_accuse", 2.6, False, 0.05)
-def _(t, u):
-    rk = rise_keys()
-    keys = rk[:4] + [(1.45, raise_arm_keys()), (1.85, accuse_pose(-.4, 0, -.50)), (2.15, accuse_pose(1.0)),
-                     (2.6, accuse_pose(0.0))]
-    return seq(t, keys)
-
-
-@anim("stand_accuse_hold", 1.2, True, 0.05)
-def _(t, u):
-    w = 2 * pi * u
-    sp = accuse_pose(0.0, 0.004 * sin(3 * w), -.62 + .004 * sin(w))
-    tw(sp, "spine", (1.2 * sin(w), 0, 0)), tw(sp, "chest", (1.5 * sin(w), 0, 0))
-    tw(sp, "head", (-1.5 * sin(w) + 1.0 * sin(2 * w), 1.5 * sin(w), 0))
-    sp["armR"]["curl"] += 2 * (1 - cos(2 * w))
-    return sp
-
-
-DRAG_T = 1.2
-
-
-@anim("dragged", DRAG_T, True, 0.05)
-def _(t, u):
-    w = 2 * pi * u
-    sp = stand_spec(0.0, 0.80)
-    sp.update(spine=(24, 0, 0), chest=(18, 0, 0), neck=(16, 0, 0), head=(22, 0, 0))
-    tw(sp, "hips_off", (0.01 * sin(w), 0.02, -0.012 * (1 - cos(2 * w)) / 2))
-    tw(sp, "hips_rot", (0, 0, 2.5 * sin(w)))
-    tw(sp, "spine", (1.5 * sin(2 * w), 0, 2.0 * sin(w))), tw(sp, "chest", (0, 0, -2.0 * sin(w)))
-    tw(sp, "head", (3 * sin(2 * w + 1), 4 * sin(w + .5), 7 * sin(w + 1.3)))
-    for sd, off in (("L", 0.0), ("R", pi)):
-        s = 1 if sd == "L" else -1
-        p = w + off
-        legs = dict(ankle=V((s * .09, .40 + .05 * sin(p), .17 + .02 * (1 - cos(p)))), pitch=-62.0,
-                    pole=V((s * .1, -1, .2)))
-        sp["legik" + sd] = legs
-        sag = sin(2 * w + (0 if sd == "L" else 1.0))
-        arm_set(sp, sd, "rel", (s * .40, -.02 + .02 * sin(p), .06 + .015 * sag), pole=(s * .3, .6, -1),
-                hdir=(s * .1, -.3, -1), thumb=(-s, -.2, 0), curl=13.0, thumb_curl=4.0,
-                spread=6.0)   # manos colgando, abiertas y un poco curvas
-    return sp
 
 
 WALK_T, WALK_D = 1.0, 0.66
@@ -797,8 +616,8 @@ if not os.environ.get("CHAR_PREVIEW"):
         print(f"accion {name}: {dur}s {'loop' if loop else ''}")
 
     HANDS_OUT = ("sit_idle", "sit_think", "sit_nervous", "sit_startle", "sit_cough")
-    SKIP_TABLE = ("walk", "stand_flee_cycle", "dragged", "death_standing")
-    RISE = ("stand_up", "sit_down", "stand_accuse", "stand_flee")
+    SKIP_TABLE = ("walk",)
+    RISE = ("stand_up", "sit_down")
     print("== Comprobacion contra la mesa (losa y> -0,27), el tablero (manos y< -0,47) y la silla ==")
     CHAIR_TABLE = {}
     ONLY = [n for n in os.environ.get("CHAR_ONLY", "").split(",") if n]
@@ -820,7 +639,7 @@ if not os.environ.get("CHAR_PREVIEW"):
             CHAIR_TABLE[name] = env
             msg += " | silla: retirada minima " + " ".join(
                 f"{t:.2f}s:{d:.2f}" for t, d in env[::2]) + f" fin:{env[-1][1]:.2f}"
-        elif name.startswith("sit_") or name.startswith("death_slump") or name == "stand_flee":
+        elif name.startswith("sit_") or name.startswith("death_slump"):
             nc, cmax, cwho = check_chair(name, 2)
             msg += f" | silla {nc} fotogr. ({cmax * 100:.1f} cm {cwho})"
         print(msg)

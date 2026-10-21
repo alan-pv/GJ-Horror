@@ -33,10 +33,6 @@ const ROOM_ORIGIN := Vector3(1.0 * SPACING_X, 0.0, 2.0 * SPACING_Z)
 
 ## Índice de la mesa del humano en la escena actual. Por defecto la 16 (ronda 1 con 32 jugadores).
 static var human_table: int = 15
-## Alias obsoleto de `human_table` (antes era una constante). Usar `human_table`.
-static var HUMAN_TABLE: int:
-	get:
-		return human_table
 
 
 static func table_count() -> int:

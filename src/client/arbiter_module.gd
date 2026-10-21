@@ -7,7 +7,7 @@ extends Node
 ##
 ## Argumentos de depuración (después de `--`):
 ##   --force-execution=mesa,asiento[,modo][;...]  ejecuta a ese asiento (0 = blancas, 1 = negras);
-##                        modo opcional de reacción: beg, cry, frozen, flee, sob
+##                        modo opcional de reacción: beg, cry, frozen, sob
 ##   --force-at=S         segundos de partida antes de pedirla (3)
 ##   --lose-now           el humano pierde a los `--force-at` s (ejecución en primera persona)
 ##   --win-now            el humano gana a los `--force-at` s (ejecutan al rival)
@@ -86,7 +86,7 @@ func _run_forced(f: Dictionary) -> void:
 	if mode != "":
 		# Crea al condenado con la reacción pedida antes de encolar.
 		var modes := {"sob": Condemned.Mode.SOB, "beg": Condemned.Mode.BEG, "cry": Condemned.Mode.CRY,
-				"frozen": Condemned.Mode.FROZEN, "flee": Condemned.Mode.FLEE}
+				"frozen": Condemned.Mode.FROZEN}
 		if modes.has(mode):
 			arbiter.preset_mode(f.table, f.seat, modes[mode])
 	arbiter.request_execution(f.table, f.seat)

@@ -245,26 +245,13 @@ func _do_execution(e: Dictionary) -> void:
 	var cond := _condemn(table, seat)
 	var human_color := root.human_color if root != null else ChessPiece.WHITE
 	var seat_pos := ArbiterRoutes.seat_position(table, seat, human_color)
-	var sgn := ArbiterRoutes.seat_sign(table, seat, human_color)
-	var victim_spot := seat_pos
-	if cond != null and cond.mode == Condemned.Mode.FLEE:
-		victim_spot = Condemned.flee_spot(seat_pos, sgn)
-	var spot := victim_spot + Vector3(ArbiterRoutes.SIDE_OFFSET, 0.0, 0.0)
+	var spot := seat_pos + Vector3(ArbiterRoutes.SIDE_OFFSET, 0.0, 0.0)
 	var path := ArbiterRoutes.route(position, spot)
 	_log("va a ejecutar mesa %d asiento %d (%s, cola %d)" % [table, seat, Condemned.Mode.keys()[cond.mode] if cond != null else "-", queue.size()])
 	var speed := clampf(BRISK_SPEED + 0.12 * float(queue.size()), BRISK_SPEED, MAX_SPEED)
-	var progress := func(remaining: float) -> void:
-		# El condenado que huye arranca cuando ya lo oye venir.
-		if cond != null and remaining < 4.5:
-			cond.begin_flee()
-	if not await _walk_path(path, speed, Urgency.QUEUE, progress):
+	if not await _walk_path(path, speed, Urgency.QUEUE):
 		queue.requeue(e)
 		return
-	if cond != null and cond.mode == Condemned.Mode.FLEE:
-		var waited := 0.0
-		while not cond.fled and waited < 6.0 and is_inside_tree():
-			await get_tree().process_frame
-			waited += get_process_delta_time()
 	var head := _victim_head(cond, seat_pos)
 	await _turn_to(head, 0.35)
 	# Amartilla, apunta y se toma un instante antes de disparar.
@@ -280,10 +267,7 @@ func _do_execution(e: Dictionary) -> void:
 		_face_toward(_victim_head(cond, seat_pos), dt)
 	_fire(table)
 	if cond != null:
-		var kind := &"slump"
-		if cond.standing:
-			kind = &"standing"
-		cond.die(kind)
+		cond.die()
 	await figure.play_once(&"shoot", 0.02)
 	await figure.play_once(&"lower_gun", 0.1)
 	queue.finish()

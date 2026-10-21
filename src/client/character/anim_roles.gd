@@ -35,22 +35,6 @@ const ROLES := {
 		"loop": false, "fallback": &"", "blend": 0.4,
 		"desc": "Tos con el puño en la boca (una vez).",
 	},
-	&"sit_pick_up": {
-		"loop": false, "fallback": &"", "blend": 0.5,
-		"desc": "Sentado se inclina a la derecha, recoge algo del suelo y se reincorpora (una vez).",
-	},
-	&"stand_accuse": {
-		"loop": false, "fallback": &"", "blend": 0.6,
-		"desc": "Se levanta de la silla, señala al frente y grita (una vez); acaba de pie señalando.",
-	},
-	&"stand_accuse_hold": {
-		"loop": true, "fallback": &"", "blend": 0.3,
-		"desc": "De pie señalando al frente, con temblor leve (continúa a `stand_accuse`).",
-	},
-	&"dragged": {
-		"loop": true, "fallback": &"", "blend": 0.5,
-		"desc": "Cuerpo flácido con los brazos tomados a los lados y las piernas arrastrando.",
-	},
 	&"stand_up": {
 		"loop": false, "fallback": &"", "blend": 0.5,
 		"desc": "De sentado a de pie (la silla debe retirarse >= 0,40 m hacia atrás).",
@@ -68,8 +52,7 @@ const ROLES := {
 ## Clips que el código aún pide por nombre exacto (no son roles; no se avisa de ellos).
 const DIRECT_CLIPS: Array[StringName] = [
 	&"sit_idle", &"sit_move_piece", &"sit_press_clock", &"sit_write",
-	&"sit_cry", &"sit_frozen", &"stand_flee", &"stand_flee_cycle",
-	&"death_slump_table", &"death_standing",
+	&"sit_cry", &"sit_frozen", &"death_slump_table",
 	# árbitro
 	&"idle", &"inspect_sheets", &"aim", &"aim_hold", &"shoot", &"lower_gun", &"point_accuse",
 ]

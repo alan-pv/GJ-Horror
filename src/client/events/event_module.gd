@@ -9,9 +9,9 @@ extends Node
 ## detrás, durante lo cual el servidor marca las trampas como vistas.
 ##
 ## Argumentos de depuración (después de `--`):
-##   --event=apagon|ruido|acusacion|eliminacion|arbitro|toser   fuerza un evento
+##   --event=apagon|ruido|acusacion|arbitro|toser   fuerza un evento
 ##   --event-at=S       segundos de partida antes de forzarlo (por defecto 1)
-##   --event-table=N    mesa decorativa de origen (0-8) para acusación/eliminación
+##   --event-table=N    mesa decorativa de origen (0-8) para la acusación
 ##   --event-side=human fuerza toser sobre el humano en vez del rival
 ##   --no-events        sin eventos automáticos
 
@@ -20,7 +20,7 @@ const ARBITER_BEHIND := Vector3(0.0, 0.0, 0.45)
 
 const DEMO_IDS := {
 	"apagon": &"apagon", "ruido": &"ruido_detras", "acusacion": &"acusacion_ajena",
-	"eliminacion": &"eliminacion", "arbitro": &"arbitro_pasa",
+	"arbitro": &"arbitro_pasa",
 	"toser": &"cough",
 }
 
@@ -34,9 +34,6 @@ var _demo_table: int = -1
 var _demo_human: bool = false
 var _time: float = 0.0
 var _enabled: bool = true
-## Asiento del eliminado cuya salida está en curso (-1 = evento aleatorio, sin asiento);
-## solo lo usa el evento `eliminacion` forzado por depuración.
-var _drag_seat: int = -1
 
 
 func install(p_root: GameRoot) -> void:
@@ -44,10 +41,10 @@ func install(p_root: GameRoot) -> void:
 	root = p_root
 	var defs := TensionDirector.load_defs()
 	director = TensionDirector.new(defs, int(root.get_args().get("seed", -1)))
-	# Solo mesas con alguien sentado (las vacías no tienen quién acuse ni a quién llevarse).
+	# Solo mesas con alguien sentado (las vacías no tienen quién acuse).
 	var all_tables := Hall.table_positions()
 	for i in all_tables.size():
-		if int(Hall.DECOR_TABLES[i][2]) > 0:
+		if i != HallLayout.human_table:
 			director.table_positions.append(all_tables[i])
 	director.listener_pos = root.player.global_position
 	director.listener_forward = (BoardView.CENTER - root.player.global_position) * Vector3(1.0, 0.0, 1.0)
@@ -126,14 +123,11 @@ func _on_event(id: StringName, origin: Vector3, duration: float) -> void:
 			stage.accuser(origin, duration, root.player.global_position)
 			root.hud.show_subtitle("Cheater!", 2.2)
 			notice_pos = origin + Vector3(0.0, 1.5, 0.0)
-		&"eliminacion":
-			stage.drag_away(origin, duration, _drag_seat)
-			_drag_seat = -1
 		&"arbitro_pasa":
 			# El aviso lo da `ArbiterModule` cuando el árbitro llega de verdad cerca de la mesa.
 			_start_arbiter_pass(duration)
 			return
-	# Solo los eventos con `turn_chance` hacen voltear (banqueta, guardias... no).
+	# Solo los eventos con `turn_chance` hacen voltear (la banqueta, por ejemplo, no).
 	if def != null and def.turn_chance > 0.0 and def.distraction != &"":
 		on_distraction(def.distraction, notice_pos, _table_of(origin), def.turn_chance)
 
@@ -157,7 +151,7 @@ func _table_of(pos: Vector3) -> int:
 func on_distraction(kind: StringName, pos: Vector3, table: int = -1, chance: float = -1.0) -> void:
 	if not Distraction.has(kind) or root == null:
 		return
-	if table != HallLayout.HUMAN_TABLE:
+	if table != HallLayout.human_table:
 		for bot in [root.rival_bot, root.auto_bot]:
 			var b := bot as BotController
 			if b != null and Distraction.in_range(kind, b.eye_position, pos):

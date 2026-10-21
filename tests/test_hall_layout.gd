@@ -15,7 +15,6 @@ func test_human_table_is_origin_for_every_table() -> void:
 		HallLayout.set_human_table(h)
 		check_eq(HallLayout.table_position(h), Vector3.ZERO, "humano en el origen (mesa %d)" % (h + 1))
 		check_eq(HallLayout.human_table, h)
-		check_eq(HallLayout.HUMAN_TABLE, h, "alias obsoleto")
 	_restore()
 
 

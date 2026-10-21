@@ -93,16 +93,15 @@ func test_routes_to_every_execution_spot() -> void:
 				check(_route_clear(spot, ArbiterRoutes.route(spot, start)), "vuelta libre")
 
 
-func test_route_to_human_side_and_flee_spot() -> void:
+func test_route_to_human_side_and_seat_spots() -> void:
 	var start := Vector3(ArbiterRoutes.aisle_xs()[4], 0.0, ArbiterRoutes.aisle_zs()[0])
 	check(_route_clear(start, ArbiterRoutes.route(start, ArbiterRoutes.HUMAN_SIDE_SPOT)), "al lado del humano")
-	# Condenado que huyó al pasillo: el árbitro lo espera en el pasillo, no en la mesa.
+	# Junto a cada condenado sentado, el árbitro llega sin cruzar mesas.
 	for t in HallLayout.table_count():
 		for seat in 2:
 			var s := ArbiterRoutes.seat_position(t, seat, 0)
-			var sgn := ArbiterRoutes.seat_sign(t, seat, 0)
-			var spot := Condemned.flee_spot(s, sgn) + Vector3(ArbiterRoutes.SIDE_OFFSET, 0, 0)
-			check(_route_clear(start, ArbiterRoutes.route(start, spot)), "huida mesa %d asiento %d" % [t, seat])
+			var spot := s + Vector3(ArbiterRoutes.SIDE_OFFSET, 0, 0)
+			check(_route_clear(start, ArbiterRoutes.route(start, spot)), "asiento mesa %d asiento %d" % [t, seat])
 
 
 func test_behind_player_route() -> void:

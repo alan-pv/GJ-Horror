@@ -123,3 +123,9 @@ func _add_set(world: Node3D, seat: float) -> void:
 	var board := (load(PROPS + "board.glb") as PackedScene).instantiate() as Node3D
 	board.position = Vector3(0, 0.735, seat)
 	world.add_child(board)
+	# Reloj al costado derecho de la figura (-X, el lado de su mano que pulsa), con el LCD hacia el centro.
+	var clock := (load(PROPS + "chess_clock.glb") as PackedScene).instantiate() as Node3D
+	clock.scale = Vector3.ONE * 1.3
+	clock.position = Vector3(-0.42, BoardView.TABLE_TOP, seat)
+	clock.rotation_degrees.y = 180.0
+	world.add_child(clock)

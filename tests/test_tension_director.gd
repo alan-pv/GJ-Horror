@@ -21,7 +21,7 @@ func _run(d: TensionDirector, seconds: float) -> Array:
 
 func test_defs_load() -> void:
 	var defs := TensionDirector.load_defs()
-	check_eq(defs.size(), 6, "seis eventos como datos")
+	check_eq(defs.size(), 5, "cinco eventos como datos")
 	for dd in defs:
 		check(dd.duration > 0.0, "duración positiva: " + String(dd.id))
 
@@ -96,12 +96,12 @@ func test_fire_forced() -> void:
 	var d := _director()
 	var got: Array = []
 	d.event_triggered.connect(func(id: StringName, origin: Vector3, dur: float) -> void: got.append([id, origin, dur]))
-	check(d.fire(&"eliminacion", Vector3(1, 0, 2)), "se dispara")
+	check(d.fire(&"acusacion_ajena", Vector3(1, 0, 2)), "se dispara")
 	check_eq(got.size(), 1)
 	check_eq(got[0][1], Vector3(1, 0, 2), "origen dado")
-	check_eq(got[0][2], 9.0, "duración del dato")
+	check_eq(got[0][2], 3.5, "duración del dato")
 	check(not d.fire(&"no_existe"), "id desconocido")
-	check(not d.candidates().any(func(e: EventDef) -> bool: return e.id == &"eliminacion"), "queda en espera")
+	check(not d.candidates().any(func(e: EventDef) -> bool: return e.id == &"acusacion_ajena"), "queda en espera")
 
 
 func test_disabled_director() -> void:

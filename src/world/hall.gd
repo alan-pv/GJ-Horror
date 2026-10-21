@@ -48,17 +48,6 @@ const FADE_SECONDS := 1.4
 const STONE := Color(0.07, 0.065, 0.065)
 const FLOOR_COLOR := Color(0.075, 0.062, 0.055)
 
-## Compatibilidad con quien lea la disposición de las mesas por índice:
-## [posición XZ, giro Y en grados, ocupantes iniciales]. La del humano no tiene ocupantes
-## propios (los pone el cliente). Se deriva de `HallLayout` cada vez que se lee.
-static var DECOR_TABLES: Array:
-	get:
-		var out: Array = []
-		for i in HallLayout.table_count():
-			var p := HallLayout.table_position(i)
-			out.append([Vector2(p.x, p.z), 0.0, 0 if i == HallLayout.human_table else 2])
-		return out
-
 const PROPS := "res://assets/models/props/"
 
 ## Foco de la mesa del humano (con sombras).

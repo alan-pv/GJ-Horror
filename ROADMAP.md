@@ -9,11 +9,8 @@ Pedidos del 2026-10-19 que no entran en la tanda de arreglos rápidos. Cada fren
 El arte (modelado y animación) también lo hacen los agentes con scripts de Blender: el usuario no anima. El código pide **roles** de animación (`<rol>` o `<rol>__<variante>`) con respaldo, para que añadir variantes no exija tocar código.
 
 ### Frente B — Pulido de animaciones
-Un clip por acción, sin variantes (21 en `player.glb`); lo que queda es revisarlo en el juego.
-- [ ] Revisar en el juego la silla que sigue al cuerpo (`ChairFollow`) en la acusación y en la eliminación: la prueba no ve solape, pero no hay captura que encuadre la mesa del evento (falta una opción de cámara hacia `--event-table`).
-- [ ] Revisar en el juego `sit_cough`, `sit_pick_up` (la mano baja hasta ~10 cm del suelo) y `sit_press_clock` (el preview no dibuja el reloj) con el IK del brazo apagado.
+Un clip por acción, sin variantes (14 en `player.glb`); las escenas de muchas partes se eliminan o simplifican, no se pulen.
 - [ ] Inclinación del torso: el tope quedó en 0,70 rad (con 0,6 había posturas sin alcanzar) y 3 posturas extremas en la esquina lejana no llegan por 3,5-4,5 cm; el vientre puede rozar ~1 cm el canto a máxima inclinación (estimado). Revisar en primera persona.
-- [ ] `test_seated_posture_is_upright` casi no comprueba nada (sin fotogramas el esqueleto queda en T-pose): rehacerla como `test_chair_follow`, dentro del árbol.
 - [ ] **Agarre de la pluma (trípode), lo que falta:** ya están la pinza de pulgar e índice a 2,5 cm de la punta, el medio como apoyo y la pluma a ~50° hacia el hombro (ver `docs/arquitectura.md` 4.14). Pero anular y meñique quedan semiestirados sobre la hoja en vez de recogidos bajo la palma (recogidos atravesarían el papel 1-2 cm con la mano actual: hay que tocar la malla o el esqueleto en `art/`) y la pluma parece salir entre índice y medio. Falta una captura de la pose estable de escritura en el juego, en la mano del jugador y en la del rival.
 
 ### Frente E — Escenificación según lo que ve el jugador

@@ -3,8 +3,8 @@ extends TestCase
 
 const PLAYER_ANIMS := [
 	"sit_idle", "sit_think", "sit_nervous", "sit_move_piece",
-	"sit_press_clock", "sit_write", "sit_cry", "sit_frozen", "stand_flee",
-	"stand_flee_cycle", "death_slump_table", "death_standing",
+	"sit_press_clock", "sit_write", "sit_cry", "sit_frozen",
+	"death_slump_table",
 ]
 ## Variantes admitidas por rol: un clip por acción (el .glb viejo aún puede traer variantes).
 const ROLE_CLIPS := {
@@ -306,8 +306,7 @@ func test_naming_problems_are_detected() -> void:
 	check_eq(AnimRoles.naming_problem(&"sit_idle"), "", "clip directo")
 	check(AnimRoles.naming_problem(&"sit_wait_crossed") != "", "un guion bajo")
 	check(AnimRoles.naming_problem(&"sit_wiat__x") != "", "rol desconocido")
-	check_eq(AnimRoles.role_of(&"stand_accuse_hold"), &"stand_accuse_hold", "rol con prefijo de otro")
-	check_eq(AnimRoles.role_of(&"stand_accuse__loud"), &"stand_accuse", "variante")
+	check_eq(AnimRoles.role_of(&"sit_wait__chin"), &"sit_wait", "variante")
 
 
 ## Los clips cíclicos de roles cierran sin salto: primer y último fotograma coinciden.
@@ -333,42 +332,3 @@ func test_role_loops_close_without_jump() -> void:
 			check(worst < 0.6, "%s cierra el ciclo (salto %.2f)" % [c, worst])
 	f.free()
 
-
-## `stand_accuse` termina en la pose con la que arranca `stand_accuse_hold` (empalme sin salto).
-func test_accuse_hands_over_to_hold() -> void:
-	var f := CharacterFigure.new()
-	var ap := f.animation_player()
-	var a := ap.get_animation(&"stand_accuse")
-	var h := ap.get_animation(&"stand_accuse_hold")
-	var worst := 0.0
-	for t in a.get_track_count():
-		var ht := h.find_track(a.track_get_path(t), a.track_get_type(t))
-		if ht < 0:
-			continue
-		var va = a.track_get_key_value(t, a.track_get_key_count(t) - 1)
-		var vb = h.track_get_key_value(ht, 0)
-		if va is Quaternion:
-			worst = maxf(worst, rad_to_deg((va as Quaternion).angle_to(vb)))
-	check(worst < 1.0, "empalme accuse -> hold (%.2f grados)" % worst)
-	f.free()
-
-
-## Postura sentada natural: espalda casi recta (la inclinación sale del cuello) y la cabeza a una
-## altura razonable sobre la mesa (0,72 m), incluso mirando al tablero (pitch -35 grados).
-func test_seated_posture_is_upright() -> void:
-	var table := 0.72
-	for clip in ["sit_idle", "sit_nervous", "sit_think"]:
-		var f := _spawn(CharacterFigure.new()) as CharacterFigure
-		f.play(StringName(clip), 0.0)
-		var ap := f.animation_player()
-		ap.pause()
-		for frac in [0.0, 0.5]:
-			ap.seek(frac * ap.get_animation(clip).length, true)
-			f.set_look(0.0, deg_to_rad(-35.0), true)
-			_apply(f)
-			var tr := f.bone_global(&"Neck").origin - f.bone_global(&"Hips").origin
-			var lean := rad_to_deg(atan2(tr.z, tr.y))
-			var h := f.head_global_position().y - table
-			check(lean < 13.0, "%s: tronco a %.1f grados de la vertical (máx 13)" % [clip, lean])
-			check(h >= 0.30, "%s: cabeza a %.2f m sobre la mesa (mín 0,30)" % [clip, h])
-		f.queue_free()

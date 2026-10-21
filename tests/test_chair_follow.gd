@@ -54,12 +54,6 @@ func test_chair_clears_legs_when_standing_up() -> void:
 	check(res.r_end >= 0.40, "stand_up: la silla acaba retirada >= 0,40 m (%.2f)" % res.r_end)
 
 
-func test_chair_clears_legs_when_accusing() -> void:
-	var res := await _drive(&"stand_accuse", true)
-	check(res.max_overlap <= 0.001, "stand_accuse: sin solape (%.3f)" % res.max_overlap)
-	check(res.r_end >= 0.40, "stand_accuse: silla retirada >= 0,40 m (%.2f)" % res.r_end)
-
-
 func test_chair_returns_when_sitting_down() -> void:
 	var res := await _drive(&"sit_down", false)
 	check(res.max_overlap <= 0.001, "sit_down: la silla no toca las piernas (solape %.3f)" % res.max_overlap)
@@ -73,3 +67,33 @@ func test_seated_legs_do_not_push_chair() -> void:
 	await _tree().process_frame
 	check_eq(ChairFollow.need(f, Transform3D.IDENTITY), 0.0, "sentado no pide retirada")
 	f.queue_free()
+
+
+## Postura sentada natural: espalda casi recta (la inclinación sale del cuello) y la cabeza a una
+## altura razonable sobre la mesa (0,72 m), incluso mirando al tablero (pitch -35 grados).
+## Con la figura en el árbol y fotogramas de por medio, para que el esqueleto aplique de verdad la
+## animación (fuera del árbol queda en T-pose y la prueba no mediría nada). Antes de medir se
+## comprueba que la pose no es la T-pose (muñeca bajo el hombro), para que no pase en falso.
+func test_seated_posture_is_upright() -> void:
+	var table := 0.72
+	for clip in ["sit_idle", "sit_nervous", "sit_think"]:
+		var f := _setup(StringName(clip))
+		var ap := f.animation_player()
+		var length := ap.get_animation(clip).length
+		for frac in [0.0, 0.5]:
+			ap.seek(frac * length, true)
+			f.set_look(0.0, deg_to_rad(-35.0), true)
+			for i in 3:
+				await _tree().process_frame
+			var hips := f.bone_global(&"Hips").origin
+			var tr := f.bone_global(&"Neck").origin - hips
+			var lean := rad_to_deg(atan2(tr.z, tr.y))
+			var h := f.head_global_position().y - table
+			# T-pose: brazos en horizontal; sentado la muñeca queda muy por debajo del hombro.
+			var drop := f.bone_global(&"UpperArm.L").origin.y - f.bone_global(&"Hand.L").origin.y
+			check(drop > 0.10, "%s: la animación se aplicó (muñeca %.2f m bajo el hombro)" % [clip, drop])
+			check(hips.y < 0.7, "%s: pelvis sentada (y %.2f)" % [clip, hips.y])
+			check(lean < 13.0, "%s: tronco a %.1f grados de la vertical (máx 13)" % [clip, lean])
+			check(h >= 0.30, "%s: cabeza a %.2f m sobre la mesa (mín 0,30)" % [clip, h])
+		f.queue_free()
+
