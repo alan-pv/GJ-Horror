@@ -13,7 +13,7 @@ extends Node3D
 ## Depuración (argumentos tras `--`, ver `ArbiterModule`): --force-execution, --lose-now.
 
 ## Terminó la ejecución de quien estaba en `seat` (0 = blancas, 1 = negras) de la mesa `table`
-## (índice de `HallLayout`; la del humano es `HallLayout.HUMAN_TABLE`).
+## (índice de `HallLayout`; la del humano es `HallLayout.human_table`).
 signal executed(table: int, seat: int)
 ## Terminó de atender la acusación (veredicto dado y gesto hecho).
 signal accusation_done
@@ -88,7 +88,7 @@ func request_execution(table: int, seat: int) -> void:
 		return
 	var human_color := root.human_color if root != null else ChessPiece.WHITE
 	var spot := ArbiterRoutes.execution_spot(table, seat, human_color)
-	if queue.push(table, seat, spot, table == HallLayout.HUMAN_TABLE):
+	if queue.push(table, seat, spot, table == HallLayout.human_table):
 		_condemn(table, seat)
 
 
@@ -125,7 +125,7 @@ func pass_behind(_target: Vector3, seconds: float) -> void:
 		return
 	_forced_route = ArbiterRoutes.behind_player_route(position)
 	var xs := ArbiterRoutes.aisle_xs()
-	var cross := absf(xs[HallLayout.HUMAN_TABLE % HallLayout.COLS + 1] - xs[HallLayout.HUMAN_TABLE % HallLayout.COLS])
+	var cross := absf(xs[HallLayout.cell_of(HallLayout.human_table).x + 1] - xs[HallLayout.cell_of(HallLayout.human_table).x])
 	_forced_speed = clampf(cross / maxf(seconds, 1.0), 0.6, 1.1)
 
 
@@ -353,7 +353,7 @@ func _figure_for(table: int, seat: int) -> CharacterFigure:
 	f.rotation.y = PI if sgn > 0.0 else 0.0
 	f.play(&"sit_idle", 0.0)
 	_temp_figures[k] = f
-	if table == HallLayout.HUMAN_TABLE and seat != root.human_color and root.avatar != null:
+	if table == HallLayout.human_table and seat != root.human_color and root.avatar != null:
 		root.avatar.visible = false
 	return f
 
@@ -395,7 +395,7 @@ func _do_accusation() -> void:
 func _verdict_gesture(accuser: int, correct: bool) -> void:
 	if correct:
 		var accused := ChessPiece.opposite(accuser)
-		var sgn := ArbiterRoutes.seat_sign(HallLayout.HUMAN_TABLE, accused, root.human_color)
+		var sgn := ArbiterRoutes.seat_sign(HallLayout.human_table, accused, root.human_color)
 		await _turn_to(Vector3(0.0, 1.0, sgn * 0.8), 0.35)
 		await figure.play_once(&"point_accuse", 0.2)
 		await get_tree().create_timer(0.6).timeout
@@ -539,6 +539,7 @@ func _walk_path(path: Array[Vector3], speed: float, level: int, on_progress: Cal
 			var dt := get_process_delta_time()
 			var step := minf(speed * dt, d)
 			position += to / d * step
+			position.y = HallLayout.floor_y(position)
 			remaining = maxf(remaining - step, 0.0)
 			_face_toward(position + to, dt, 9.0)
 			if on_progress.is_valid():

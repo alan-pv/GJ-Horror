@@ -18,6 +18,10 @@ var _result_reason: Label
 var _result_restart: Label
 var _round_info: Label
 var _status: Label
+var _banner: Label
+var _banner_sub: Label
+var _banner_hint: Label
+var _banner_tween: Tween
 var _subtitle_tween: Tween
 var _arbiter_tween: Tween
 
@@ -90,6 +94,7 @@ func _ready() -> void:
 	_status.offset_top = 70
 	_status.offset_bottom = 130
 	_status.visible = false
+	_build_banner()
 	_build_result_panel()
 	set_warnings(0, 3)
 
@@ -123,6 +128,33 @@ void fragment() {
 	mat.shader = shader
 	rect.material = mat
 	add_child(rect)
+
+
+## Rótulo del paseo entre rondas: título, detalle y pista de salto. No bloquea nada (sin fondo).
+func _build_banner() -> void:
+	_banner = _label(46, Color(0.93, 0.85, 0.6))
+	_banner.anchor_left = 0.1
+	_banner.anchor_right = 0.9
+	_banner.anchor_top = 0.1
+	_banner.anchor_bottom = 0.1
+	_banner.offset_top = 0
+	_banner.offset_bottom = 64
+	_banner_sub = _label(24, TEXT_COLOR)
+	_banner_sub.anchor_left = 0.1
+	_banner_sub.anchor_right = 0.9
+	_banner_sub.anchor_top = 0.1
+	_banner_sub.anchor_bottom = 0.1
+	_banner_sub.offset_top = 66
+	_banner_sub.offset_bottom = 150
+	_banner_hint = _label(16, Color(0.7, 0.67, 0.6))
+	_banner_hint.anchor_left = 0.1
+	_banner_hint.anchor_right = 0.9
+	_banner_hint.anchor_top = 1.0
+	_banner_hint.anchor_bottom = 1.0
+	_banner_hint.offset_top = -48
+	_banner_hint.offset_bottom = -20
+	for l in [_banner, _banner_sub, _banner_hint]:
+		l.modulate.a = 0.0
 
 
 func _build_result_panel() -> void:
@@ -219,6 +251,37 @@ func is_screen_visible() -> bool:
 ## Ronda en curso (arriba a la derecha): "Round 2 / 5" o "Final". Sin nombres ni conteos.
 func set_round_info(round_no: int, total_rounds: int, is_final: bool, _players_left: int = 0) -> void:
 	_round_info.text = "Final" if is_final else "Round %d / %d" % [round_no, total_rounds]
+
+
+## Durante el paseo entre rondas se ocultan la pista de controles, las advertencias y la ronda
+## (el rótulo del paseo ya dice la nueva); la escena nueva los vuelve a mostrar.
+func set_walk_mode(on: bool) -> void:
+	for l in [_hint, _warnings, _round_info]:
+		l.visible = not on
+	if on:
+		show_capture_prompt = false
+		_capture_prompt.visible = false
+
+
+## Rótulo superpuesto del paseo entre rondas (aparece con un fundido y no tapa el salón).
+func show_banner(title: String, body: String, hint: String = "") -> void:
+	_banner.text = title
+	_banner_sub.text = body
+	_banner_hint.text = hint
+	if _banner_tween != null and _banner_tween.is_valid():
+		_banner_tween.kill()
+	_banner_tween = create_tween().set_parallel(true)
+	for l in [_banner, _banner_sub, _banner_hint]:
+		_banner_tween.tween_property(l, "modulate:a", 1.0, 0.8)
+
+
+## Desvanece el rótulo del paseo.
+func hide_banner(seconds: float = 1.0) -> void:
+	if _banner_tween != null and _banner_tween.is_valid():
+		_banner_tween.kill()
+	_banner_tween = create_tween().set_parallel(true)
+	for l in [_banner, _banner_sub, _banner_hint]:
+		_banner_tween.tween_property(l, "modulate:a", 0.0, seconds)
 
 
 ## Mensaje persistente bajo la barra superior; "" lo oculta.

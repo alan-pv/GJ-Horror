@@ -22,7 +22,7 @@ const HUMAN_SIDE_SPOT := Vector3(0.95, 0.0, 0.0)
 ## Líneas verticales de pasillo (X): entre columnas y los dos bordes.
 static func aisle_xs() -> Array[float]:
 	var out: Array[float] = []
-	var human_col := HallLayout.HUMAN_TABLE % HallLayout.COLS
+	var human_col := HallLayout.cell_of(HallLayout.human_table).x
 	for c in range(-1, HallLayout.COLS):
 		out.append(float(c - human_col) * HallLayout.SPACING_X + HallLayout.SPACING_X * 0.5)
 	return out
@@ -31,7 +31,7 @@ static func aisle_xs() -> Array[float]:
 ## Líneas horizontales de pasillo (Z): entre filas y los dos bordes.
 static func aisle_zs() -> Array[float]:
 	var out: Array[float] = []
-	var human_row := HallLayout.HUMAN_TABLE / HallLayout.COLS
+	var human_row := HallLayout.cell_of(HallLayout.human_table).y
 	for r in range(-1, HallLayout.ROWS):
 		out.append(float(r - human_row) * HallLayout.SPACING_Z + HallLayout.SPACING_Z * 0.5)
 	return out
@@ -55,14 +55,16 @@ static func behind_player_z() -> float:
 ## Signo en Z del asiento: +1 = lado +Z, -1 = lado -Z. Blancas en +Z y negras en -Z, salvo en
 ## la mesa del humano, donde el humano está siempre en +Z.
 static func seat_sign(table: int, seat: int, human_color: int) -> float:
-	if table == HallLayout.HUMAN_TABLE:
+	if table == HallLayout.human_table:
 		return 1.0 if seat == human_color else -1.0
 	return 1.0 if seat == ChessPiece.WHITE else -1.0
 
 
-## Centro del asiento (a ras de suelo) en el mundo.
+## Centro del asiento (a ras de suelo, sobre el podio si es el caso) en el mundo.
 static func seat_position(table: int, seat: int, human_color: int) -> Vector3:
-	return HallLayout.table_position(table) + Vector3(0.0, 0.0, seat_sign(table, seat, human_color) * SEAT_Z)
+	var p := HallLayout.table_position(table) + Vector3(0.0, 0.0, seat_sign(table, seat, human_color) * SEAT_Z)
+	p.y = HallLayout.floor_y(p)
+	return p
 
 
 ## Dónde se planta el árbitro para ejecutar a quien está en el asiento.
@@ -86,6 +88,11 @@ static func segment_hits_table(a: Vector3, b: Vector3) -> bool:
 		if _segment_hits_rect(Vector2(a.x, a.z), Vector2(b.x, b.z), r.grow(-0.01)):
 			return true
 	return false
+
+
+## ¿El segmento a-b (en XZ) atraviesa el interior del rectángulo `r` (en XZ)?
+static func segment_hits_rect(a: Vector3, b: Vector3, r: Rect2) -> bool:
+	return _segment_hits_rect(Vector2(a.x, a.z), Vector2(b.x, b.z), r)
 
 
 static func _segment_hits_rect(a: Vector2, b: Vector2, r: Rect2) -> bool:
@@ -253,7 +260,7 @@ static func nearest_table(p: Vector3) -> int:
 static func behind_player_route(from: Vector3) -> Array[Vector3]:
 	var xs := aisle_xs()
 	var z := behind_player_z()
-	var human_col := HallLayout.HUMAN_TABLE % HallLayout.COLS
+	var human_col := HallLayout.cell_of(HallLayout.human_table).x
 	var left := Vector3(xs[human_col], 0.0, z)       # pasillo a la izquierda de la mesa del humano
 	var right := Vector3(xs[human_col + 1], 0.0, z)  # y a la derecha
 	var first := left if _flat_dist(from, left) <= _flat_dist(from, right) else right

@@ -175,16 +175,24 @@ func _start_final_game() -> void:
 		games.append(TournamentGame.new(first.black, first.white, 2))
 
 
-## Mesas fijas del salón (`HallLayout`): el humano siempre en `HUMAN_TABLE`; las
-## demás partidas y descansos, en las mesas más cercanas a él primero.
+## Mesas del salón (`HallLayout`, numeradas del 1 al 16): la ronda usa las mesas 1..N
+## (N = partidas + descansos, con tope en el número de mesas) y el humano ocupa siempre la
+## N, la de número más alto en uso; las demás partidas y descansos llenan el resto en
+## orden. Con 32 jugadores el humano va 16 -> 8 -> 4 -> 2 -> 1 (la final).
 func _assign_tables() -> void:
-	var slots: Array[int] = HallLayout.tables_by_distance()
-	slots.erase(HallLayout.HUMAN_TABLE)
+	var total := games.size() + byes.size()
 	var human_game := game_of(human_id)
-	if human_game != null:
-		human_game.table = HallLayout.HUMAN_TABLE
-	elif byes.has(human_id):
-		bye_tables[human_id] = HallLayout.HUMAN_TABLE
+	var human_here := human_game != null or byes.has(human_id)
+	var slots: Array[int] = []
+	for i in mini(total, HallLayout.table_count()):
+		slots.append(i)
+	if human_here:
+		var ht := HallLayout.human_table_for(total)
+		slots.erase(ht)
+		if human_game != null:
+			human_game.table = ht
+		else:
+			bye_tables[human_id] = ht
 	for g in games:
 		if g == human_game:
 			continue
@@ -193,6 +201,14 @@ func _assign_tables() -> void:
 		if id == human_id:
 			continue
 		bye_tables[id] = slots.pop_front() if not slots.is_empty() else TournamentGame.TABLE_NONE
+
+
+## Mesa del humano en la ronda en curso (partida o descanso), o `TABLE_NONE` si no juega.
+func human_table() -> int:
+	var g := game_of(human_id)
+	if g != null:
+		return g.table
+	return int(bye_tables.get(human_id, TournamentGame.TABLE_NONE))
 
 
 ## Fuerza el color del humano en su partida (solo depuración, antes de jugarla).

@@ -3,7 +3,7 @@ extends RefCounted
 ## Una partida de la ronda en curso: quién juega con qué color, en qué mesa y
 ## cómo terminó. Los ids son los de `PlayerSession.id` del torneo.
 
-## Mesa del salón: índice de `HallLayout` (0..15; la del humano es `HallLayout.HUMAN_TABLE`),
+## Mesa del salón: índice de `HallLayout` (0..15; la del humano es `HallLayout.human_table`),
 ## -2 = sin mesa visible (más partidas que mesas). `TABLE_MAIN` ya no se asigna.
 const TABLE_MAIN := -1
 const TABLE_NONE := -2

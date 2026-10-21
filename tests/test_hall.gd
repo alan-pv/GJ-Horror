@@ -2,6 +2,7 @@ extends TestCase
 
 
 func test_hall_builds_sixteen_tables() -> void:
+	HallLayout.set_human_table(15)
 	var hall := Hall.new()
 	hall.build()
 	check_eq(hall.table_count(), 16)
@@ -11,8 +12,8 @@ func test_hall_builds_sixteen_tables() -> void:
 		check(hall.chair(i, 0) != null and hall.chair(i, 1) != null, "sillas %d" % i)
 	# Solo la lámpara de la mesa del humano proyecta sombras.
 	for i in 16:
-		check_eq(hall.table_lamp(i).shadow_enabled, i == HallLayout.HUMAN_TABLE, "sombras de la mesa %d" % i)
-	check_eq(hall.spot, hall.table_lamp(HallLayout.HUMAN_TABLE))
+		check_eq(hall.table_lamp(i).shadow_enabled, i == HallLayout.human_table, "sombras de la mesa %d" % i)
+	check_eq(hall.spot, hall.table_lamp(HallLayout.human_table))
 	hall.free()
 
 
@@ -72,4 +73,42 @@ func test_background_table_without_match() -> void:
 	var f := bt.condemn(0)
 	check(f != null, "condenada")
 	check_eq(bt.stage_of(0), &"condemned")
+	hall.free()
+
+
+func test_hall_shifts_room_around_human_table() -> void:
+	for h in [0, 1, 3, 7, 15]:
+		HallLayout.set_human_table(h)
+		var hall := Hall.new()
+		hall.build()
+		check_eq(hall.table_position(h), Vector3.ZERO, "la mesa %d en el origen" % (h + 1))
+		var root := hall.table_root(h)
+		check(absf(root.position.y) < 0.0001, "su suelo es el cero")
+		check_eq(hall.spot, hall.table_lamp(h), "sombras en la mesa del humano")
+		var room := hall.get_node("Sala") as Node3D
+		check(room.position.is_equal_approx(HallLayout.room_offset()), "sala desplazada")
+		# Cada mesa en su sitio y con la altura del podio relativa a la del humano.
+		for i in 16:
+			var r := hall.table_root(i)
+			check(Vector2(r.position.x, r.position.z).is_equal_approx(Vector2(HallLayout.table_position(i).x, HallLayout.table_position(i).z)))
+			var want := HallLayout.floor_height(i) - HallLayout.floor_height(h)
+			check(is_equal_approx(r.position.y, want), "altura de la mesa %d" % (i + 1))
+			check(r.get_node_or_null("Tarjeta/Numero") != null, "número en la mesa %d" % (i + 1))
+			check_eq((r.get_node("Tarjeta/Numero") as Label3D).text, str(i + 1))
+		hall.free()
+	HallLayout.set_human_table(15)
+
+
+func test_podium_and_rich_tables() -> void:
+	HallLayout.set_human_table(15)
+	var hall := Hall.new()
+	hall.build()
+	var room := hall.get_node("Sala") as Node3D
+	check(room.get_node_or_null("Podio0") != null and room.get_node_or_null("Podio1") != null, "podio en dos mallas")
+	# Las mesas ricas llevan más geometría fusionada que las sencillas.
+	var plain := (hall.table_root(15).get_node("MesaBase") as MeshInstance3D).mesh.get_faces().size()
+	var rich := (hall.table_root(1).get_node("MesaBase") as MeshInstance3D).mesh.get_faces().size()
+	check(rich > plain, "la mesa 2 tiene más detalle que la 16")
+	var mid := (hall.table_root(5).get_node("MesaBase") as MeshInstance3D).mesh.get_faces().size()
+	check(mid > plain and mid < rich, "el lujo crece por tramos")
 	hall.free()

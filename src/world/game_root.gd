@@ -24,6 +24,10 @@ extends Node3D
 ##   --start-round=N      salta a la ronda N (el humano gana las anteriores, simuladas)
 ##   --demo-screen=between|champion|eliminated  muestra esa pantalla al arrancar (capturas)
 ##   --demo-pause         abre el menú de pausa al arrancar (capturas)
+##   --walk-end-shot=ruta [--walk-start-shot=ruta]  con el paseo: guarda el último fotograma antes de recargar
+##                        y el primero de la escena nueva (verifica el corte)
+##   --walk-demo          termina la ronda al instante (el humano gana) y hace el paseo a la mesa
+##                        siguiente sin jugar (con --start-round=N se ve en esa ronda; Espacio lo salta)
 ## Sin argumentos el juego arranca en el menú principal (`src/ui/main_menu.tscn`);
 ## con cualquier argumento de usuario el menú salta directo a `main.tscn`.
 ##   --fen="..."          posición inicial distinta (pruebas)
@@ -82,6 +86,9 @@ var auto_bot: BotController
 ## animators[color]: quien mueve las piezas de ese color.
 var animators: Array[HandAnimator] = [null, null]
 
+## Captura pendiente para el primer fotograma de la escena nueva (`--walk-start-shot`).
+static var _pending_shot: String = ""
+
 var _args: Dictionary = {}
 var _scene_elapsed: float = 0.0
 var _ending: bool = false
@@ -112,6 +119,10 @@ var _press_retry: Array[bool] = [false, false]
 
 func _ready() -> void:
 	_parse_args()
+	if _pending_shot != "":
+		_args["screenshot"] = _pending_shot
+		_args["shot-delay"] = 0.3
+		_pending_shot = ""
 	var rng := RandomNumberGenerator.new()
 	if _args.has("seed"):
 		rng.seed = int(_args.seed)
@@ -122,11 +133,14 @@ func _ready() -> void:
 		Engine.time_scale = float(_args.speed)
 	_elapsed = TournamentSession.elapsed
 
+	# El torneo fija la mesa del humano (la de número más alto de la ronda) y el salón se desplaza
+	# para dejarla en el origen: hay que saberlo antes de armar el salón.
+	_setup_tournament(rng)
+	HallLayout.set_human_table(manager.human_table() if manager.human_table() >= 0 else HallLayout.human_table_for(16))
 	hall = Hall.new()
 	add_child(hall)
 	hall.build()
 	_setup_aerial_camera.call_deferred()
-	_setup_tournament(rng)
 	rival_color = ChessPiece.opposite(human_color)
 
 	board_view = BoardView.new()
@@ -194,6 +208,8 @@ func _ready() -> void:
 	else:
 		_log("El humano descansa esta ronda")
 	_show_demo_screen()
+	if _args.has("walk-demo"):
+		_start_walk_demo.call_deferred()
 
 
 func _install_modules() -> void:
@@ -423,8 +439,8 @@ func _on_game_over(winner: int, reason: String) -> void:
 		hud.show_subtitle("You lost this game of the final", 3.0)
 	if rival_dies and arbiter != null and tgame != null:
 		# El árbitro viene y ejecuta al rival frente al jugador.
-		arbiter.request_execution(HallLayout.HUMAN_TABLE, rival_color)
-		await arbiter.wait_executed(HallLayout.HUMAN_TABLE, rival_color)
+		arbiter.request_execution(HallLayout.human_table, rival_color)
+		await arbiter.wait_executed(HallLayout.human_table, rival_color)
 		if not is_inside_tree():
 			return
 		await get_tree().create_timer(1.5).timeout
@@ -491,7 +507,7 @@ func _setup_tournament(rng: RandomNumberGenerator) -> void:
 ## y las piezas de las mesas que no se usan. La atenuación llega solo con las ejecuciones.
 func _populate_hall() -> void:
 	for i in hall.table_count():
-		if i == HallLayout.HUMAN_TABLE:
+		if i == HallLayout.human_table:
 			continue
 		hall.clear_table_board(i)
 		hall.set_table_active(i, true, false)
@@ -505,12 +521,12 @@ func _start_background() -> void:
 				manager.elo[g.white], manager.elo[g.black], randi(), config.white_seconds)
 		bg.finished.connect(_on_background_finished.bind(bg))
 		background.append(bg)
-		if g.table >= 0 and g.table != HallLayout.HUMAN_TABLE:
+		if g.table >= 0 and g.table != HallLayout.human_table:
 			_make_bg_table(g.table, bg, [true, true])
 	# Quien descansa espera sentado en su mesa (el humano, en la suya, lo maneja el cliente).
 	for id in manager.byes:
 		var t: int = manager.bye_tables.get(id, TournamentGame.TABLE_NONE)
-		if t >= 0 and t != HallLayout.HUMAN_TABLE and not bg_tables.has(t):
+		if t >= 0 and t != HallLayout.human_table and not bg_tables.has(t):
 			_make_bg_table(t, null, [true, false])
 	# Cada mesa conoce a las demás (y a la del humano) para mirarlas de vez en cuando.
 	for t in bg_tables:
@@ -558,7 +574,7 @@ func _on_executed(table: int, _seat: int) -> void:
 	if not is_inside_tree():
 		return
 	# Las demás mesas reaccionan al disparo por `Distraction` (aviso `gunshot` de `Arbiter`).
-	if table != HallLayout.HUMAN_TABLE:
+	if table != HallLayout.human_table:
 		hall.set_table_level(table, 0.4, true, true)
 
 
@@ -566,7 +582,7 @@ func _on_executed(table: int, _seat: int) -> void:
 ## mesa del humano devuelve la del rival (`avatar.figure`) o el cuerpo del propio jugador
 ## (`player.body`) si existen. Null si no hay. Contrato de la oleada 2.
 func figure_at(table: int, seat: int) -> CharacterFigure:
-	if table == HallLayout.HUMAN_TABLE:
+	if table == HallLayout.human_table:
 		var node: Variant = null
 		if seat == human_color:
 			node = player.get("body") if player != null else null
@@ -581,7 +597,7 @@ func figure_at(table: int, seat: int) -> CharacterFigure:
 ## quien la va a ejecutar (el árbitro la controla desde ahí). La figura queda en su silla
 ## hasta que termine la ronda. Contrato de la oleada 2.
 func condemn_seat(table: int, seat: int) -> CharacterFigure:
-	if table != HallLayout.HUMAN_TABLE:
+	if table != HallLayout.human_table:
 		var bt: BackgroundTable = bg_tables.get(table)
 		return bt.condemn(seat) if bt != null else null
 	if seat == rival_color:
@@ -701,11 +717,50 @@ func _finish_round_flow() -> void:
 		return
 	manager.start_round()
 	_log("Siguiente: %s, quedan %d" % [manager.round_label(), manager.remaining_count()])
+	# Cambia de mesa: el humano se levanta y camina hasta ella (sin pantalla ni corte a negro).
+	var dest := manager.human_table()
+	if dest >= 0 and dest != HallLayout.human_table and player != null and player.body != null:
+		await _walk_to_next_round(dest)
+		return
+	# Misma mesa (segunda partida de la final): pantalla breve y recarga.
 	hud.show_screen(_round_title(), _next_round_text(res), "", Color(0.93, 0.85, 0.6))
 	await get_tree().create_timer(4.0).timeout
 	if not is_inside_tree():
 		return
 	_reload()
+
+
+## Paseo en primera persona hasta la mesa de la ronda siguiente (`RoundWalk`); al sentarse
+## recarga la escena, que ya viene con el salón desplazado a esa mesa.
+func _walk_to_next_round(dest: int) -> void:
+	var g := manager.game_of(manager.human_id)
+	var walk := RoundWalk.new()
+	add_child(walk)
+	walk.setup(self, dest, g.color_of(manager.human_id) if g != null else ChessPiece.WHITE,
+			g.opponent_of(manager.human_id) if g != null else -1)
+	_log("Paseo de la mesa %d a la %d (%.0f s)" % [HallLayout.number_of(HallLayout.human_table), HallLayout.number_of(dest), walk.estimated_seconds()])
+	walk.run()
+	if not walk.done:
+		await walk.finished
+	if not is_inside_tree():
+		return
+	if _args.has("walk-end-shot"):
+		# Último fotograma antes de recargar; la escena nueva guarda el primero (`_pending_shot`).
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(str(_args["walk-end-shot"]))
+		_pending_shot = str(_args.get("walk-start-shot", ""))
+	_reload()
+
+
+## `--walk-demo`: la ronda acaba ya (gana el humano, las demás se simulan) y empieza el paseo.
+func _start_walk_demo() -> void:
+	background.clear()
+	if rival_bot != null:
+		rival_bot.set_process(false)
+	manager.simulate_round(true)
+	_human_settled = true
+	_refresh_tournament_hud()
+	_finish_round_flow()
 
 
 func _next_round_text(_res: Dictionary) -> String:
@@ -798,7 +853,9 @@ func _tick_bg_tables(delta: float) -> void:
 func _setup_aerial_camera() -> void:
 	if not _args.has("aerial"):
 		return
-	var v: Array = [1.5, 13.0, 9.0, 1.5, 0.0, -2.0]
+	# Por defecto, encuadrado sobre el centro de la sala (que se desplaza con la mesa del humano).
+	var off := HallLayout.room_offset()
+	var v: Array = [1.5 + off.x, 13.0, 9.0 + off.z, 1.5 + off.x, 0.0, -2.0 + off.z]
 	if str(_args["aerial"]).contains(","):
 		var parts := str(_args["aerial"]).split(",")
 		for k in mini(parts.size(), 6):

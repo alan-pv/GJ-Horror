@@ -19,12 +19,6 @@ Un clip por acción, sin variantes (21 en `player.glb`); lo que queda es revisar
 ### Frente E — Escenificación según lo que ve el jugador
 - [ ] Calcular qué mesas están en la línea de visión directa del jugador (cono de la cámara en reposo, sin oclusión) y llevar ahí las reacciones más dramáticas (huidas, súplicas, ejecuciones con más preparación); las mesas fuera de cuadro usan reacciones discretas.
 
-### Frente F — Progreso visible en el salón
-Depende del Frente B solo para la animación de caminar del jugador.
-- [ ] Mesas numeradas: el jugador empieza en una mesa de un extremo (p. ej. la 10) y al ganar sube (5, 3, 2, 1). En el extremo opuesto, un podio con las mesas finales visualmente más ricas (mejor tablero, mantel, lámpara, piezas); las primeras son sencillas.
-- [ ] Señal visual del progreso desde el asiento (número de mesa visible, podio al fondo que se acerca).
-- [ ] Entre rondas, en lugar de fundido a negro y recarga con el rival ya sentado: animación en primera persona de levantarse y caminar por el salón hasta la siguiente mesa. Hoy `GameRoot` supone la mesa del humano en `Vector3.ZERO` (mesa 9): decidir si se mueve la mesa del humano o se desplaza el salón alrededor de ella.
-
 ### Frente H — Diseño: por qué hacer trampa (por discutir)
 Problema: si el jugador puede ganar sin trampas, el juego es solo ajedrez. Ideas para que hacer trampa sea necesario o muy tentador; se eligen y se combinan después de hablarlo:
 - **Rivales más fuertes que el jugador:** el Elo del rival sube más rápido que el del jugador medio (hoy 1000 → 1500), así que jugar limpio pierde casi siempre a partir de la ronda 2-3.
@@ -38,6 +32,7 @@ Problema: si el jugador puede ganar sin trampas, el juego es solo ajedrez. Ideas
 
 ## Pendiente
 
+- [ ] Corte de la recarga entre rondas (`RoundWalk`): al sentarse se nota un salto de luz (la lámpara de la escena nueva es más brillante y tiene sombras) y el reloj y las planillas de la mesa destino, horneados en su malla, cambian de sitio y se encienden. Comparar con `--walk-end-shot` / `--walk-start-shot`.
 - [ ] Las partidas de fondo empiezan desde la posición inicial; podrían arrancar de un medio juego (`Hall.mid_game_fen`) para que los tableros se vean avanzados.
 - [ ] Pasillo entre filas de ~1,16 m entre sillas (`HallLayout.SPACING_Z` = 3,2): subirlo si el árbitro pasa justo.
 

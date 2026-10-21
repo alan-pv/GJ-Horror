@@ -122,8 +122,8 @@ func test_behind_player_route() -> void:
 func test_seat_sign() -> void:
 	check_eq(ArbiterRoutes.seat_sign(3, ChessPiece.WHITE, ChessPiece.WHITE), 1.0, "blancas en +Z")
 	check_eq(ArbiterRoutes.seat_sign(3, ChessPiece.BLACK, ChessPiece.WHITE), -1.0, "negras en -Z")
-	check_eq(ArbiterRoutes.seat_sign(HallLayout.HUMAN_TABLE, ChessPiece.BLACK, ChessPiece.BLACK), 1.0, "el humano siempre en +Z")
-	check_eq(ArbiterRoutes.seat_sign(HallLayout.HUMAN_TABLE, ChessPiece.WHITE, ChessPiece.BLACK), -1.0, "su rival en -Z")
+	check_eq(ArbiterRoutes.seat_sign(HallLayout.human_table, ChessPiece.BLACK, ChessPiece.BLACK), 1.0, "el humano siempre en +Z")
+	check_eq(ArbiterRoutes.seat_sign(HallLayout.human_table, ChessPiece.WHITE, ChessPiece.BLACK), -1.0, "su rival en -Z")
 
 
 func test_footstep_attenuation() -> void:

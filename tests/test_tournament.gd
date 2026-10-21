@@ -25,8 +25,9 @@ func test_pairing_16() -> void:
 		seen[g.white] = true
 		seen[g.black] = true
 	check_eq(seen.size(), 16, "los 16 juegan")
-	# El humano está en la mesa principal; las demás, en mesas distintas.
-	check_eq(m.game_of(0).table, HallLayout.HUMAN_TABLE, "humano en su mesa fija")
+	# 8 partidas: mesas 1..8 y el humano en la de número más alto (índice 7); todas distintas.
+	check_eq(m.game_of(0).table, 7, "humano en la mesa 8")
+	check_eq(m.human_table(), 7)
 	var tables := {}
 	for g in games:
 		check(not tables.has(g.table), "mesas distintas")
@@ -68,18 +69,24 @@ func test_odd_players_bye() -> void:
 	check(m.is_final, "ahora es la final")
 
 
-func test_bye_for_human_uses_main_table() -> void:
-	# Con semillas distintas el humano descansa alguna vez; entonces ocupa la mesa principal.
+func test_bye_for_human_uses_highest_table() -> void:
+	# Con semillas distintas el humano descansa alguna vez; entonces ocupa la mesa de número más alto.
 	var found := false
 	for s in 40:
 		var m := TournamentManager.new(5, s)
 		m.start_round()
 		if m.byes.has(0):
 			found = true
-			check_eq(m.bye_tables[0], HallLayout.HUMAN_TABLE, "descanso del humano en su mesa")
+			# 2 partidas + 1 descanso = 3 mesas: la 3 (índice 2) es del humano.
+			check_eq(m.bye_tables[0], 2, "descanso del humano en la mesa 3")
+			check_eq(m.human_table(), 2)
 			check(m.game_of(0) == null)
+			var used := {}
 			for g in m.games:
-				check(g.table != HallLayout.HUMAN_TABLE, "ninguna partida en la del humano")
+				check(g.table != 2, "ninguna partida en la del humano")
+				used[g.table] = true
+			check_eq(used.keys().size(), 2, "partidas en mesas distintas")
+			check(used.has(0) and used.has(1), "las demás ocupan las mesas 1 y 2")
 			break
 	check(found, "el humano descansó en alguna semilla")
 
@@ -266,29 +273,70 @@ func test_background_policy_is_legal_and_prefers_free_captures() -> void:
 		check(ChessRules.find_legal(start, ChessMove.from_uci(uci)) != null, "jugada legal " + uci)
 
 
-func test_tournament_32_fixed_tables_nearest_first() -> void:
+func test_tournament_32_human_climbs_to_table_1() -> void:
 	var m := TournamentManager.new(32, 5)
 	check_eq(m.player_count, 32)
 	check_eq(TournamentManager.rounds_for(32), 5)
 	var sizes: Array[int] = []
-	var order := HallLayout.tables_by_distance()
-	order.erase(HallLayout.HUMAN_TABLE)
+	var human_tables: Array[int] = []
 	while not m.is_finished():
 		var games := m.start_round()
 		sizes.append(m.alive.size())
-		if not m.is_final:
-			check_eq(m.game_of(0).table, HallLayout.HUMAN_TABLE, "mesa del humano fija")
-			# Las demás partidas ocupan las mesas más cercanas primero.
-			var used := {}
-			for g in games:
-				if not g.involves(0):
-					used[g.table] = true
-			for i in used.size():
-				check(used.has(order[i]), "mesa cercana %d ocupada (ronda %d)" % [order[i], m.round_no])
+		human_tables.append(m.human_table())
+		# Las partidas ocupan exactamente las mesas 1..N (N = partidas + descansos), sin repetir.
+		var used := {}
+		for g in games:
+			check(not used.has(g.table), "mesa repetida en la ronda %d" % m.round_no)
+			used[g.table] = true
+		for id in m.byes:
+			used[m.bye_tables[id]] = true
+		check_eq(used.size(), games.size() + m.byes.size(), "mesas distintas")
+		for t in used:
+			check(t >= 0 and t < games.size() + m.byes.size(), "mesa %d dentro de 1..N (ronda %d)" % [t, m.round_no])
+		check_eq(m.human_table(), games.size() + m.byes.size() - 1, "el humano en la N")
 		_lowest_wins(m)
 		m.finish_round()
 	check_eq(sizes, [32, 16, 8, 4, 2, 2] as Array[int], "32, 16, 8, 4, final de 2 partidas")
+	# Mesas 16, 8, 4, 2 y 1 (índices 15, 7, 3, 1, 0); la segunda partida de la final, en la misma.
+	check_eq(human_tables, [15, 7, 3, 1, 0, 0] as Array[int], "el humano sube a la mesa 1")
 	check_eq(m.round_no, 5, "5 rondas con la final")
+
+
+func test_human_table_small_and_odd_tournaments() -> void:
+	# 6 jugadores: 3 partidas -> 2 -> 1 (con descanso, 3 jugadores: 1 partida + 1 descanso).
+	var m := TournamentManager.new(6, 9)
+	var tables: Array[int] = []
+	while not m.is_finished():
+		m.start_round()
+		var total := m.games.size() + m.byes.size()
+		tables.append(m.human_table())
+		check_eq(m.human_table(), total - 1, "humano en la N")
+		_lowest_wins(m)
+		m.finish_round()
+	check_eq(tables[0], 2, "3 partidas: mesa 3")
+	check(tables[tables.size() - 1] == 0, "la final en la mesa 1")
+	# Más jugadores que mesas: el humano nunca pasa de la mesa 16 y las que no caben quedan sin mesa.
+	var big := TournamentManager.new(40, 2)
+	big.start_round()
+	check_eq(big.human_table(), 15, "tope en la mesa 16")
+	var none := 0
+	for g in big.games:
+		if g.table == TournamentGame.TABLE_NONE:
+			none += 1
+		else:
+			check(g.table >= 0 and g.table <= 15)
+	check_eq(none, 20 - 16, "20 partidas, 16 mesas")
+	# Humano eliminado: sin mesa de humano; las demás siguen en 1..N.
+	var m2 := TournamentManager.new(4, 4)
+	m2.start_round()
+	for g in m2.pending_games():
+		var t: PackedFloat64Array = [10.0, 10.0]
+		m2.report_result(g, g.color_of(0) ^ 1 if g.involves(0) else ChessPiece.WHITE, "prueba", t)
+	m2.finish_round()
+	check(not m2.is_alive(0), "el humano perdió")
+	m2.start_round()
+	check_eq(m2.human_table(), TournamentGame.TABLE_NONE, "sin mesa")
+	check_eq(m2.games[0].table, 0, "la final en la mesa 1")
 
 
 func test_background_ends_are_spread_over_the_round() -> void:

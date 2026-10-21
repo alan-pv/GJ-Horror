@@ -43,6 +43,9 @@ var debug_camera: bool = false
 ## true durante la ejecución en primera persona: no se puede mover, hacer trampa, acusar ni mirar
 ## (la cámara la gira el árbitro hacia el cañón).
 var input_locked: bool = false
+## true durante el paseo entre rondas (`RoundWalk`): se puede girar la cabeza con el ratón, pero no
+## hay clics ni teclas de juego. Implica `input_locked`.
+var walking: bool = false
 var yaw: float = 0.0
 var pitch: float = 0.0
 ## Para los subtítulos (lo asigna `GameRoot` al crear el HUD).
@@ -76,8 +79,7 @@ func setup(p_server: MatchServer, p_board: BoardView, p_color: int, look: Dictio
 	camera.current = true
 	_head.add_child(camera)
 	# Empieza mirando el centro del tablero.
-	var to_board := BoardView.CENTER - EYE_POSITION
-	pitch = asin(to_board.normalized().y)
+	pitch = rest_pitch()
 	_apply_look()
 
 	# Cuerpo: sentado, mirando a -Z, con la cabeza oculta.
@@ -166,12 +168,33 @@ func set_input_locked(on: bool) -> void:
 		board.set_pile_hover(false)
 
 
+## Empieza el paseo entre rondas: sin juego, con el brazo libre de IK para que se levante con el
+## cuerpo. El que lo mueve es `RoundWalk`.
+func begin_walk() -> void:
+	walking = true
+	set_input_locked(true)
+	for rig in [hand_rig, idle_rig]:
+		if rig != null:
+			rig.set_ik_weight(0.0, 0.15)
+	body.set_lean(0.0)
+	body.set_twist(0.0)
+	body.set_shift(0.0)
+	body.set_lean_extra(0.0)
+
+
+## Postura de reposo de la cabeza al sentarse (mira el centro del tablero): la de `setup`.
+static func rest_pitch() -> float:
+	return asin((BoardView.CENTER - EYE_POSITION).normalized().y)
+
+
 func _unhandled_input(event: InputEvent) -> void:
-	if _headless or input_locked:
+	if _headless or (input_locked and not walking):
 		return
 	if event is InputEventMouseMotion and is_mouse_captured():
 		var k := MOUSE_SENSITIVITY * _sensitivity_scale()
 		set_look(yaw - event.relative.x * k, pitch - event.relative.y * k)
+	elif walking:
+		return
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		if not is_mouse_captured():
 			capture_mouse(true)

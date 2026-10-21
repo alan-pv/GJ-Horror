@@ -6,12 +6,20 @@ extends Node3D
 ## (`SpotLight3D` + cono falso aditivo para el haz); solo la lámpara de la mesa del
 ## humano proyecta sombras. Los modelos son los `.glb` de `assets/models/props/`.
 ##
+## La mesa del humano (`HallLayout.human_table`) está en el origen del mundo: la sala
+## (suelo, muros, techo, podio) cuelga de un nodo `Sala` que se desplaza
+## (`HallLayout.room_offset`) y cada mesa se coloca con `HallLayout.table_position`. Hay que
+## fijar `HallLayout.set_human_table` ANTES de `build()`.
+##
 ## Qué hay en cada mesa:
-##  - mesa del humano (`HallLayout.HUMAN_TABLE`): solo mesa, sillas y lámpara; lo de
-##    encima (tablero, piezas, reloj, planillas) lo ponen el cliente y las manos;
+##  - mesa del humano: solo mesa, sillas y lámpara; lo de encima (tablero, piezas, reloj,
+##    planillas) lo ponen el cliente y las manos;
 ##  - las demás: además tablero, reloj y dos planillas con pluma, fusionados en una
 ##    sola malla estática, y un nodo de piezas (`set_table_board`) que muestra una
 ##    posición cualquiera.
+## Todas llevan una tarjeta con el número de mesa (legible desde la silla del humano) y su
+## lujo crece con el número bajo (`HallLayout.richness`): mantel, marco dorado del tablero,
+## candelabros y lámpara dorada; las mesas 1 y 2 están sobre el podio (tarima con rampas).
 ## Las figuras sentadas no son de esta clase: las crea `BackgroundTable`.
 ##
 ## Renderer GL Compatibility: sin niebla volumétrica; el haz de cada lámpara es un
@@ -42,13 +50,14 @@ const FLOOR_COLOR := Color(0.075, 0.062, 0.055)
 
 ## Compatibilidad con quien lea la disposición de las mesas por índice:
 ## [posición XZ, giro Y en grados, ocupantes iniciales]. La del humano no tiene ocupantes
-## propios (los pone el cliente). Se deriva de `HallLayout`.
-const DECOR_TABLES := [
-	[Vector2(-3.0, -6.4), 0.0, 2], [Vector2(0.0, -6.4), 0.0, 2], [Vector2(3.0, -6.4), 0.0, 2], [Vector2(6.0, -6.4), 0.0, 2],
-	[Vector2(-3.0, -3.2), 0.0, 2], [Vector2(0.0, -3.2), 0.0, 2], [Vector2(3.0, -3.2), 0.0, 2], [Vector2(6.0, -3.2), 0.0, 2],
-	[Vector2(-3.0, 0.0), 0.0, 2], [Vector2(0.0, 0.0), 0.0, 0], [Vector2(3.0, 0.0), 0.0, 2], [Vector2(6.0, 0.0), 0.0, 2],
-	[Vector2(-3.0, 3.2), 0.0, 2], [Vector2(0.0, 3.2), 0.0, 2], [Vector2(3.0, 3.2), 0.0, 2], [Vector2(6.0, 3.2), 0.0, 2],
-]
+## propios (los pone el cliente). Se deriva de `HallLayout` cada vez que se lee.
+static var DECOR_TABLES: Array:
+	get:
+		var out: Array = []
+		for i in HallLayout.table_count():
+			var p := HallLayout.table_position(i)
+			out.append([Vector2(p.x, p.z), 0.0, 0 if i == HallLayout.human_table else 2])
+		return out
 
 const PROPS := "res://assets/models/props/"
 
@@ -61,17 +70,33 @@ var _scenes: Dictionary = {}
 var _stone_mat: StandardMaterial3D
 var _wall_wood_mat: StandardMaterial3D
 var _piece_mats: Array[StandardMaterial3D] = []
+## Piezas de las mesas ricas (marfil y ébano pulidos): se usan desde la riqueza 2.
+var _rich_piece_mats: Array[StandardMaterial3D] = []
+## Materiales del lujo de las mesas (mantel por riqueza, dorado, cera, llama).
+var _cloth_mats: Array[StandardMaterial3D] = []
+var _gold_mat: StandardMaterial3D
+var _wax_mat: StandardMaterial3D
+var _flame_mat: StandardMaterial3D
+var _card_mats: Array[StandardMaterial3D] = []
 var _ceiling: MeshInstance3D
+## Todo lo fijo de la sala (suelo, muros, techo, podio), desplazado para que la mesa del humano
+## quede en el origen.
+var _room: Node3D
 
 
 func build() -> void:
 	name = "Salon"
 	_stone_mat = _mat(STONE, 0.9)
 	_piece_mats = [StaticBoard.make_material(StaticBoard.WHITE_COLOR), StaticBoard.make_material(StaticBoard.BLACK_COLOR)]
+	_make_luxury_materials()
+	_room = Node3D.new()
+	_room.name = "Sala"
+	_room.position = HallLayout.room_offset()
+	add_child(_room)
 	_build_room()
 	for i in HallLayout.table_count():
 		_build_table(i)
-	spot = _tables[HallLayout.HUMAN_TABLE].light
+	spot = _tables[HallLayout.human_table].light
 
 
 # --- Consultas ---------------------------------------------------------------------
@@ -88,11 +113,11 @@ func table_count() -> int:
 	return _tables.size()
 
 
-## Posición del centro de la mesa `index` (a ras de suelo).
+## Posición del centro de la mesa `index` (a ras de suelo; sin la altura del podio).
 func table_position(index: int) -> Vector3:
 	if index < 0 or index >= _tables.size():
 		return Vector3.ZERO
-	return (_tables[index].root as Node3D).position
+	return HallLayout.table_position(index)
 
 
 ## Nodo raíz de la mesa `index` (mesa, sillas, lámpara y lo que se le cuelgue).
@@ -204,12 +229,66 @@ func set_table_board(index: int, squares: PackedInt32Array) -> void:
 	var mi: MeshInstance3D = _tables[index].pieces
 	if mi == null:
 		return
-	mi.mesh = StaticBoard.build_mesh(squares, _piece_mats[0], _piece_mats[1], BoardView.TABLE_TOP + 0.015)
+	var mats := _rich_piece_mats if HallLayout.richness(index) >= 2 else _piece_mats
+	mi.mesh = StaticBoard.build_mesh(squares, mats[0], mats[1], BoardView.TABLE_TOP + 0.015)
 	mi.visible = true
 
 
 func set_table_fen(index: int, fen: String) -> void:
 	set_table_board(index, BoardState.from_fen(fen).squares)
+
+
+## Posición inicial en la mesa `index` vista por quien se sienta en el lado +Z con el color
+## `human_color` (el tablero gira 180° si es negro, como en `BoardView`).
+func set_table_start_position(index: int, human_color: int) -> void:
+	var sq := BoardState.start_position().squares
+	if human_color == ChessPiece.BLACK:
+		var rot := PackedInt32Array()
+		rot.resize(64)
+		for i in 64:
+			rot[63 - i] = sq[i]
+		sq = rot
+	set_table_board(index, sq)
+
+
+## Deja la lámpara de la mesa `index` como la de la mesa del humano (más tenue, más ancha,
+## con relleno), animando la energía durante `seconds`. Sirve para que, al llegar caminando, la
+## luz de la mesa sea la que tendrá la escena nueva. No cambia las sombras.
+func make_lamp_like_main(index: int, seconds: float = 1.0) -> void:
+	if index < 0 or index >= _tables.size():
+		return
+	var t: Dictionary = _tables[index]
+	if t.main:
+		return
+	var l: SpotLight3D = t.light
+	l.spot_angle = SPOT_ANGLE
+	l.spot_range = 4.0
+	l.spot_attenuation = 1.0
+	l.spot_angle_attenuation = 1.6
+	l.light_color = Color(1.0, 0.9, 0.78)
+	t.base_energy = MAIN_ENERGY
+	var level: float = t.level
+	if seconds > 0.0 and is_inside_tree():
+		var tw := create_tween()
+		tw.tween_property(l, "light_energy", MAIN_ENERGY * level, seconds)
+		# El haz falso y el relleno, igual que `_build_lamp(main)`.
+		tw.parallel().tween_method(func(v: float) -> void:
+			(t.cone_mat as ShaderMaterial).set_shader_parameter("strength", v), t.cone_strength * level, 0.10 * level, seconds)
+	else:
+		l.light_energy = MAIN_ENERGY * level
+		(t.cone_mat as ShaderMaterial).set_shader_parameter("strength", 0.10 * level)
+	t.cone_strength = 0.10
+	var anchor := l.get_parent() as Node3D
+	for sgn in [-1.0, 1.0]:
+		var fill := OmniLight3D.new()
+		fill.name = "Relleno"
+		fill.position = Vector3(0.0, BoardView.TABLE_TOP + 0.38, sgn * 0.62) - Vector3(0.0, LAMP_Y, 0.0)
+		fill.omni_range = 1.5
+		fill.omni_attenuation = 1.4
+		fill.light_energy = 0.2 * level
+		fill.light_color = Color(1.0, 0.8, 0.6)
+		fill.shadow_enabled = false
+		anchor.add_child(fill)
 
 
 ## Quita las piezas de la mesa (mesa vacía).
@@ -260,6 +339,25 @@ func _bake_prop(baker: MeshBaker, prop: String, xf: Transform3D, tweak: Callable
 	n.free()
 
 
+## Mismos colores que el tablero de la partida (`BoardView._dim_materials`), para que los tableros
+## decorativos y el de la mesa del humano sean iguales al llegar a una mesa.
+static func _recolor_board(model: Node3D) -> void:
+	var colors := {"Light": BoardView.SQUARE_LIGHT, "Dark": BoardView.SQUARE_DARK, "Board_Frame": BoardView.FRAME_COLOR}
+	# Las casillas quedan coplanares con la base: se suben unas décimas de milímetro (como `BoardView`).
+	var squares := model.find_child("BoardSquares", true, false) as Node3D
+	if squares != null:
+		squares.position.y += 0.0007
+	for mi in model.find_children("*", "MeshInstance3D", true, false):
+		var mesh := (mi as MeshInstance3D).mesh
+		for i in mesh.get_surface_count():
+			var mat := mesh.surface_get_material(i) as StandardMaterial3D
+			if mat != null and colors.has(mat.resource_name):
+				var copy := mat.duplicate() as StandardMaterial3D
+				copy.albedo_color = colors[mat.resource_name]
+				copy.roughness = 0.8
+				(mi as MeshInstance3D).set_surface_override_material(i, copy)
+
+
 static func _xf(pos: Vector3, yaw: float = 0.0, scale: float = 1.0) -> Transform3D:
 	return Transform3D(Basis(Vector3.UP, yaw).scaled(Vector3.ONE * scale), pos)
 
@@ -274,18 +372,20 @@ func _build_room() -> void:
 	var cd := HallLayout.SPACING_Z
 	var tile := PlaneMesh.new()
 	tile.size = Vector2(cw, cd)
-	var x0 := HallLayout.table_position(0).x - cw * 0.5
-	var x1 := HallLayout.table_position(HallLayout.COLS - 1).x + cw * 0.5
-	var z0 := HallLayout.table_position(0).z - cd * 0.5
-	var z1 := HallLayout.table_position(HallLayout.COLS * (HallLayout.ROWS - 1)).z + cd * 0.5
+	# Extremos de la cuadrícula en el marco de la sala.
+	var x0 := HallLayout.room_position(HallLayout.index_at(0, 0)).x - cw * 0.5
+	var x1 := HallLayout.room_position(HallLayout.index_at(HallLayout.COLS - 1, 0)).x + cw * 0.5
+	var z0 := HallLayout.room_position(0).z - cd * 0.5
+	var z1 := HallLayout.room_position(HallLayout.COLS * (HallLayout.ROWS - 1)).z + cd * 0.5
 	for i in HallLayout.table_count():
 		var mi := MeshInstance3D.new()
 		mi.name = "Baldosa%d" % i
 		mi.mesh = tile
 		mi.material_override = floor_mat
-		mi.position = HallLayout.table_position(i)
+		mi.position = HallLayout.room_position(i)
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		add_child(mi)
+		_room.add_child(mi)
+	_build_podium()
 	_floor_strip(Rect2(-ROOM_HALF_X, -ROOM_HALF_Z, x0 + ROOM_HALF_X, ROOM_HALF_Z * 2.0), floor_mat)
 	_floor_strip(Rect2(x1, -ROOM_HALF_Z, ROOM_HALF_X - x1, ROOM_HALF_Z * 2.0), floor_mat)
 	_floor_strip(Rect2(x0, -ROOM_HALF_Z, x1 - x0, z0 + ROOM_HALF_Z), floor_mat)
@@ -303,7 +403,7 @@ func _build_room() -> void:
 	_ceiling.material_override = ceil_mat
 	_ceiling.position = Vector3(0.0, CEILING_Y, 0.0)
 	_ceiling.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(_ceiling)
+	_room.add_child(_ceiling)
 	_build_walls()
 
 
@@ -318,7 +418,7 @@ func _floor_strip(r: Rect2, mat: Material) -> void:
 	mi.material_override = mat
 	mi.position = Vector3(r.position.x + r.size.x * 0.5, 0.0, r.position.y + r.size.y * 0.5)
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(mi)
+	_room.add_child(mi)
 
 
 ## Cuatro muros; cada uno es una sola malla fusionada con losa, zócalo, columnas, puertas y estandartes.
@@ -385,25 +485,95 @@ func _add_wall(node_name: String, baker: MeshBaker) -> void:
 	mi.name = node_name
 	mi.mesh = baker.build()
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(mi)
+	_room.add_child(mi)
+
+
+# --- Podio -----------------------------------------------------------------------------------
+
+## Tarima de las mesas 1 y 2, con rampas en los bordes. Dos mallas (una por mesa) para no pasar el
+## límite de luces por objeto; el borde interior entre ambas queda plano.
+func _build_podium() -> void:
+	var c := HallLayout.podium_center() - HallLayout.ROOM_ORIGIN
+	var half := HallLayout.podium_half()
+	var h := HallLayout.PODIUM_HEIGHT
+	var r := HallLayout.PODIUM_RAMP
+	var top_mat := _mat(Color(0.20, 0.035, 0.04), 0.9)
+	var side_mat := _mat(Color(0.075, 0.045, 0.03), 0.8)
+	for k in 2:
+		# k = 0: mitad izquierda (mesa de la columna 1); k = 1: derecha.
+		var sgn := -1.0 if k == 0 else 1.0
+		var x_out := sgn * half.x          # borde exterior (relativo al centro)
+		var x_in := 0.0                    # borde interior (pegado a la otra mitad)
+		var zf := half.y
+		var zb := -half.y
+		var st_top := SurfaceTool.new()
+		st_top.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var st_side := SurfaceTool.new()
+		st_side.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var xo_t := x_out - sgn * r
+		# Cara superior.
+		_quad(st_top, Vector3(x_in, h, zb + r), Vector3(xo_t, h, zb + r), Vector3(xo_t, h, zf - r), Vector3(x_in, h, zf - r), Vector3.UP)
+		# Rampa exterior (X), rampa frontal (+Z) y trasera (-Z).
+		_quad(st_side, Vector3(xo_t, h, zb + r), Vector3(x_out, 0, zb), Vector3(x_out, 0, zf), Vector3(xo_t, h, zf - r), Vector3(sgn, 1.0, 0.0))
+		_quad(st_side, Vector3(x_in, h, zf - r), Vector3(xo_t, h, zf - r), Vector3(x_out, 0, zf), Vector3(x_in, 0, zf), Vector3(0.0, 1.0, 1.0))
+		_quad(st_side, Vector3(xo_t, h, zb + r), Vector3(x_in, h, zb + r), Vector3(x_in, 0, zb), Vector3(x_out, 0, zb), Vector3(0.0, 1.0, -1.0))
+		var mesh := ArrayMesh.new()
+		st_top.generate_normals()
+		st_top.commit(mesh)
+		mesh.surface_set_material(0, top_mat)
+		st_side.generate_normals()
+		st_side.commit(mesh)
+		mesh.surface_set_material(1, side_mat)
+		var mi := MeshInstance3D.new()
+		mi.name = "Podio%d" % k
+		mi.mesh = mesh
+		mi.position = Vector3(c.x, 0.0, c.z)
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_room.add_child(mi)
+
+
+## Cuadrilátero a-b-c-d como dos triángulos con el orden de vértices que deja la cara mirando
+## hacia `out` (en Godot la cara frontal es la de sentido horario).
+func _quad(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, d: Vector3, out: Vector3) -> void:
+	var flip := (b - a).cross(c - a).dot(out) > 0.0
+	var tris: Array = [[a, c, b], [a, d, c]] if flip else [[a, b, c], [a, c, d]]
+	for t in tris:
+		for v in t:
+			st.add_vertex(v)
 
 
 # --- Mesas ---------------------------------------------------------------------------------
 
+func _make_luxury_materials() -> void:
+	_rich_piece_mats = [StaticBoard.make_material(Color(0.88, 0.86, 0.79)), StaticBoard.make_material(Color(0.07, 0.045, 0.035))]
+	for m in _rich_piece_mats:
+		m.roughness = 0.3
+	_cloth_mats = [null, _mat(Color(0.06, 0.14, 0.09), 0.95), _mat(Color(0.28, 0.045, 0.06), 0.9), _mat(Color(0.36, 0.035, 0.07), 0.85)]
+	_gold_mat = _mat(Color(0.30, 0.21, 0.08), 0.8)
+	_wax_mat = _mat(Color(0.85, 0.8, 0.68), 0.7)
+	_flame_mat = StandardMaterial3D.new()
+	_flame_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_flame_mat.albedo_color = Color(1.0, 0.82, 0.45)
+	_card_mats = [_mat(Color(0.62, 0.58, 0.48), 0.8), _mat(Color(0.66, 0.62, 0.5), 0.8), _mat(Color(0.40, 0.32, 0.17), 0.85), _mat(Color(0.42, 0.32, 0.14), 0.85)]
+
+
 func _build_table(index: int) -> void:
-	var main := index == HallLayout.HUMAN_TABLE
+	var main := index == HallLayout.human_table
+	var tier := HallLayout.richness(index)
 	var root := Node3D.new()
 	root.name = "Mesa%d" % index
 	root.position = HallLayout.table_position(index)
+	root.position.y = HallLayout.floor_height(index) - HallLayout.floor_height(HallLayout.human_table)
 	add_child(root)
 
 	# Mesa (y, en las demás, tablero, reloj y planillas) fusionada en una sola malla.
 	var kit := MeshBaker.new()
 	_bake_prop(kit, "table", Transform3D.IDENTITY)
+	_dress_table(kit, tier)
 	if not main:
 		var rng := RandomNumberGenerator.new()
 		rng.seed = 7919 * (index + 1)
-		_bake_prop(kit, "board", Transform3D(Basis.IDENTITY, Vector3(0, BoardView.TABLE_TOP + 0.015, 0)))
+		_bake_prop(kit, "board", Transform3D(Basis.IDENTITY, Vector3(0, BoardView.TABLE_TOP + 0.015, 0)), _recolor_board)
 		var top := BoardView.TABLE_TOP
 		_bake_prop(kit, "chess_clock", _xf(Vector3(0.47, top, 0.0), rng.randf_range(-0.25, 0.25)))
 		# Planillas: la blanca delante-izquierda de las blancas; la negra, en diagonal opuesta.
@@ -416,6 +586,7 @@ func _build_table(index: int) -> void:
 	kit_mi.mesh = kit.build()
 	kit_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if not main else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	root.add_child(kit_mi)
+	_add_number_card(root, index, tier)
 
 	# Sillas (nodos reales: el árbitro o las figuras pueden moverlas). La de las blancas se
 	# llama "Silla" y va a +Z girada 180°; la de las negras, "Silla2", a -Z sin girar.
@@ -443,6 +614,100 @@ func _build_table(index: int) -> void:
 	t["pieces"] = pieces
 	t["main"] = main
 	_tables.append(t)
+
+
+## Lujo creciente según la riqueza: mantel (1+), ribete dorado, marco dorado del tablero y
+## candelabros (2+), segundo candelabro (3). Todo fusionado en la malla de la mesa.
+func _dress_table(kit: MeshBaker, tier: int) -> void:
+	if tier <= 0:
+		return
+	var top := BoardView.TABLE_TOP
+	var cloth := _cloth_mats[tier]
+	var w := TABLE_SIZE.x + 0.08
+	var d := TABLE_SIZE.y + 0.08
+	kit.add_box(Vector3(w, 0.006, d), Transform3D(Basis.IDENTITY, Vector3(0, top + 0.003, 0)), cloth)
+	# Faldón corto (la mesa lleva las rodillas debajo: no baja más de 5 cm).
+	for sz in [-1.0, 1.0]:
+		kit.add_box(Vector3(w, 0.05, 0.006), Transform3D(Basis.IDENTITY, Vector3(0, top - 0.022, sz * d * 0.5)), cloth)
+	for sx in [-1.0, 1.0]:
+		kit.add_box(Vector3(0.006, 0.05, d), Transform3D(Basis.IDENTITY, Vector3(sx * w * 0.5, top - 0.022, 0)), cloth)
+	if tier < 2:
+		return
+	# Ribete dorado en el borde del mantel y marco dorado alrededor del tablero.
+	var inset := 0.035
+	for sz in [-1.0, 1.0]:
+		kit.add_box(Vector3(w - 0.02, 0.0068, 0.012), Transform3D(Basis.IDENTITY, Vector3(0, top + 0.0034, sz * (d * 0.5 - inset))), _gold_mat)
+	for sx in [-1.0, 1.0]:
+		kit.add_box(Vector3(0.012, 0.0068, d - 0.02), Transform3D(Basis.IDENTITY, Vector3(sx * (w * 0.5 - inset), top + 0.0034, 0)), _gold_mat)
+	var ring := 0.262
+	for sz in [-1.0, 1.0]:
+		kit.add_box(Vector3(ring * 2.0 + 0.016, 0.011, 0.016), Transform3D(Basis.IDENTITY, Vector3(0, top + 0.0055, sz * ring)), _gold_mat)
+	for sx in [-1.0, 1.0]:
+		kit.add_box(Vector3(0.016, 0.011, ring * 2.0 - 0.016), Transform3D(Basis.IDENTITY, Vector3(sx * ring, top + 0.0055, 0)), _gold_mat)
+	# Candelabros en el costado izquierdo del jugador (-X), a los lados de la tarjeta.
+	_bake_candlestick(kit, Vector3(-0.60, top + 0.006, 0.22), 0.85 if tier == 2 else 1.0)
+	if tier >= 3:
+		_bake_candlestick(kit, Vector3(-0.60, top + 0.006, -0.30), 1.0)
+
+
+## Candelero dorado con vela y llama (la llama no es luz: material sin sombreado).
+func _bake_candlestick(kit: MeshBaker, base: Vector3, scale: float) -> void:
+	var s := scale
+	var cyl := func(radius: float, height: float, y: float, mat: Material, top_r: float = -1.0) -> void:
+		var cm := CylinderMesh.new()
+		cm.bottom_radius = radius
+		cm.top_radius = radius if top_r < 0.0 else top_r
+		cm.height = height
+		cm.radial_segments = 8
+		cm.rings = 1
+		kit.add_mesh(cm, Transform3D(Basis.IDENTITY, base + Vector3(0, y, 0)), mat)
+	cyl.call(0.045 * s, 0.012 * s, 0.006 * s, _gold_mat, 0.03 * s)
+	cyl.call(0.010 * s, 0.13 * s, 0.077 * s, _gold_mat)
+	cyl.call(0.024 * s, 0.016 * s, 0.150 * s, _gold_mat, 0.032 * s)
+	cyl.call(0.014 * s, 0.075 * s, 0.1955 * s, _wax_mat)
+	var sm := SphereMesh.new()
+	sm.radius = 0.0095 * s
+	sm.height = 0.026 * s
+	sm.radial_segments = 6
+	sm.rings = 3
+	kit.add_mesh(sm, Transform3D(Basis.IDENTITY, base + Vector3(0, 0.248 * s, 0)), _flame_mat)
+
+
+## Tarjeta con el número de mesa, en pie a la izquierda del tablero (-X), girada hacia la silla (+Z). Se lee desde el asiento. El lujo cambia su material.
+func _add_number_card(root: Node3D, index: int, tier: int) -> void:
+	var card := Node3D.new()
+	card.name = "Tarjeta"
+	card.position = Vector3(-0.40, BoardView.TABLE_TOP + 0.05, -0.16)
+	card.rotation = Vector3(deg_to_rad(-14.0), deg_to_rad(33.0), 0.0)
+	root.add_child(card)
+	var box := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(0.17, 0.10, 0.008)
+	box.mesh = bm
+	box.material_override = _card_mats[tier]
+	box.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	card.add_child(box)
+	var ink := Color(0.05, 0.035, 0.03)
+	var num := Label3D.new()
+	num.name = "Numero"
+	num.text = str(HallLayout.number_of(index))
+	num.font_size = 128
+	num.pixel_size = 0.00055
+	num.modulate = ink
+	num.outline_size = 0
+	num.shaded = false
+	num.position = Vector3(0.0, -0.008, 0.0045)
+	card.add_child(num)
+	var cap := Label3D.new()
+	cap.name = "Rotulo"
+	cap.text = "TABLE"
+	cap.font_size = 40
+	cap.pixel_size = 0.00055
+	cap.modulate = ink
+	cap.outline_size = 0
+	cap.shaded = false
+	cap.position = Vector3(0.0, 0.034, 0.0045)
+	card.add_child(cap)
 
 
 ## Lámpara del `.glb` colgada del techo, su foco y el cono falso. Devuelve el estado de la mesa.
