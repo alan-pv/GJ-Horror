@@ -30,8 +30,8 @@ func _run() -> void:
 	var fig := SeatedFigure.new()
 	world.add_child(fig)
 	fig.setup(CharacterFigure.bot_look(RandomNumberGenerator.new(), {}))
-	var cases := [["sit_idle"], ["sit_wait__crossed"], ["sit_wait__chin"], ["sit_wait__head"], ["sit_wait__lean_back"],
-		["sit_think"], ["sit_think__chin"], ["sit_think__temple"], ["sit_nervous"]]
+	var cases := [["sit_idle"],
+		["sit_think"], ["sit_nervous"]]
 	var ap := fig.animation_player()
 	for c in cases:
 		var clip := StringName(c[0])
@@ -44,7 +44,7 @@ func _run() -> void:
 		ap.pause()
 		ap.seek(0.5 * ap.get_animation(clip).length, true)
 		var line := clip
-		for case in [[0.0, 0.0, "solo clip"], [-0.61, 0.0, "mirada tablero"], [-0.61, 0.5, "mirada+lean 0.5"], [-0.61, 0.95, "mirada+lean 0.95"]]:
+		for case in [[0.0, 0.0, "solo clip"], [-0.61, 0.0, "mirada tablero"], [-0.61, 0.5, "mirada+lean 0.5"], [-0.61, 0.70, "mirada+lean 0.70 (LEAN_MAX)"]]:
 			fig.set_look(0.0, case[0], true)
 			fig.set_lean(case[1], true)
 			fig._lean_now = case[1]

@@ -19,7 +19,6 @@ Lo que quedó tras la mano de cinco dedos y el agarre por pieza.
 
 ### Frente B — Pulido de animaciones
 - [ ] El puño al máximo de los clips (`curl` ~80) no cierra del todo y entre dedos curvados se ve el canto plano de la palma.
-- [ ] La inclinación del IK encorva: `HandRig.LEAN_MAX` = 0,95 rad deja la cabeza a 4-14 cm de la mesa y `TorsoLeanModifier` la reparte solo entre Spine y Chest. Bajar el tope (~0,6), adelantar más la cadera (`SHIFT_MAX`) y repartir parte en la pelvis.
 - [ ] Poses de espera también para el cuerpo del jugador en primera persona (hoy solo el rival y las mesas de fondo usan `sit_wait`).
 - [ ] Maniquíes sin rasgos: la nariz y las orejas son geometría de `Skin` en `player.glb` y quedan como relieve; hace falta una variante sin rasgos (o separar esa geometría) en `build_player.py`.
 - [ ] `dragged`: las manos quedan en puño hacia fuera; los guardias se ven casi negros fuera del cono de luz (ropa más clara o algo de emisión).

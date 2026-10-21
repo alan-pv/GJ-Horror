@@ -13,6 +13,10 @@ const SHOULDER_REST_Y := 0.892
 
 ## Métricas de naturalidad acumuladas (una entrada por postura alcanzada).
 var _dbg := 0
+var _head_min := 99.0   # altura mínima de la cabeza sobre la mesa (m)
+var _lean_max := 0.0    # inclinación máxima pedida (rad)
+var _shift_max := 0.0   # adelanto máximo de la cadera (m)
+var _belly_min := 99.0  # distancia mínima de la columna (Spine) al borde de la mesa (m)
 var _nat_rel_sh: Array[float] = []  # altura del codo menos la del hombro (m)
 var _nat_above: Array[float] = []   # altura del codo sobre la mesa (m)
 var _nat_out: Array[float] = []     # desplazamiento lateral del codo hacia fuera (m)
@@ -67,6 +71,10 @@ func _run() -> void:
 				for i in 4:
 					await process_frame
 				var c := _clearance(fig, rig.side)
+				_head_min = minf(_head_min, fig.head_global_position().y - TABLE_TOP)
+				_lean_max = maxf(_lean_max, fig.lean_now())
+				_shift_max = maxf(_shift_max, fig.shift_now())
+				_belly_min = minf(_belly_min, absf(fig.bone_global(&"Spine").origin.z) - TABLE_HALF.y)
 				if checked % 100000 == 0:
 					print("muestra figura %d objetivo %s: codo %s mano %s holgura %.3f" % [who, t, fig.bone_global(StringName("Forearm." + rig.side)).origin, fig.bone_global(StringName("Hand." + rig.side)).origin, c])
 				checked += 1
@@ -90,6 +98,8 @@ func _run() -> void:
 		rig.queue_free()
 		board.queue_free()
 	_report_naturalness()
+	print("[tronco] %d posturas sin alcanzar (> 3 cm); cabeza mínima +%.3f m sobre la mesa; inclinación máx %.2f rad (pelvis %.1f, Spine %.1f, Chest %.1f grados); adelanto máx %.3f m; Spine a %.3f m del borde de la mesa" % [far, _head_min, _lean_max,
+		rad_to_deg(_lean_max * TorsoLeanModifier.SHARES["Hips"]), rad_to_deg(_lean_max * TorsoLeanModifier.SHARES["Spine"]), rad_to_deg(_lean_max * TorsoLeanModifier.SHARES["Chest"]), _shift_max, _belly_min])
 	await _check_rest()
 	print("[brazo] %d posturas, %d atraviesan la mesa, holgura mínima %.3f m, error máximo de pinza %.3f m" % [checked, fails, worst, max_err])
 	quit(1 if fails > 0 else 0)

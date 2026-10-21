@@ -23,6 +23,8 @@ const TEST_FILES := [
 	"res://tests/test_arbiter.gd",
 	"res://tests/test_hand_flow.gd",
 	"res://tests/test_hand_grasp.gd",
+	"res://tests/test_hand_pen.gd",
+	"res://tests/test_torso_lean.gd",
 	"res://tests/test_opponent_avatar.gd",
 	"res://tests/test_distractions.gd",
 ]
@@ -41,6 +43,7 @@ func _init() -> void:
 		if not ResourceLoader.exists(path):
 			continue
 		var suite: Object = load(path).new()
+		suite.set("tree", self)
 		for m in suite.get_method_list():
 			var name: String = m.name
 			if not name.begins_with("test_"):
@@ -48,7 +51,7 @@ func _init() -> void:
 			total += 1
 			suite.set("failures", [])
 			var t0 := Time.get_ticks_msec()
-			suite.call(name)
+			await suite.call(name)
 			var errors: Array = suite.get("failures")
 			var ms := Time.get_ticks_msec() - t0
 			if errors.is_empty():

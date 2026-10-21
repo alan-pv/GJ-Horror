@@ -18,9 +18,11 @@ enum Pose { OPEN, PINCH, GRIP, POINT }
 
 ## Alcance cómodo de la muñeca desde el hombro (el brazo mide ~0,59 m).
 const REACH_COMFORT := 0.55
-const LEAN_MAX := 0.95
-## Cuánto puede adelantarse el cuerpo entero cuando la inclinación no basta.
-const SHIFT_MAX := 0.08
+## Tope de la inclinación del tronco (rad, ~34°), repartida entre pelvis, Spine y Chest
+## (`TorsoLeanModifier.SHARES`): con más la espalda se encorva y la cabeza roza la mesa.
+const LEAN_MAX := 0.70
+## Cuánto puede adelantarse la cadera (todo el cuerpo) cuando la inclinación no basta.
+const SHIFT_MAX := 0.20
 const TWIST_MAX := 0.55
 ## Mesa (superficie) y margen mínimo del codo sobre ella cuando está sobre la mesa.
 const TABLE_TOP := 0.72
@@ -42,6 +44,7 @@ const PLAN_PITCH := 55.0
 const GRASP_NEAR := 0.02
 const GRASP_FAR := 0.11
 ## Geometría de la figura sentada (espacio local de la figura), medida con `sit_idle`.
+const HIPS := Vector3(0.0, 0.54, 0.03)
 const PIVOT := Vector3(0.0, 0.61, 0.03)
 const CHEST := Vector3(0.0, 0.7387, 0.0481)
 const UPPER_R := Vector3(-0.18, 0.8919, 0.0907)
@@ -358,10 +361,10 @@ func _effective_roll() -> float:
 ## Hombro (raíz del brazo) tras inclinar el torso `phi` radianes, en espacio local de la figura.
 func _upper_arm_after_lean(phi: float) -> Vector3:
 	var u := UPPER_R if side == &"R" else Vector3(-UPPER_R.x, UPPER_R.y, UPPER_R.z)
-	var r := Basis(Vector3.RIGHT, phi * 0.5)
-	var c1 := PIVOT + r * (CHEST - PIVOT)
-	var u1 := PIVOT + r * (u - PIVOT)
-	return c1 + r * (u1 - c1)
+	# Cinemática directa desde el hombro: primero Chest, luego Spine y por último la pelvis.
+	var p := CHEST + Basis(Vector3.RIGHT, phi * float(TorsoLeanModifier.SHARES["Chest"])) * (u - CHEST)
+	p = PIVOT + Basis(Vector3.RIGHT, phi * float(TorsoLeanModifier.SHARES["Spine"])) * (p - PIVOT)
+	return HIPS + Basis(Vector3.RIGHT, phi * float(TorsoLeanModifier.SHARES["Hips"])) * (p - HIPS)
 
 
 func _upper_x() -> float:
@@ -370,7 +373,7 @@ func _upper_x() -> float:
 
 ## Devuelve Vector2(inclinación, adelanto) mínimos para que la muñeca quede al alcance.
 func _solve_lean(w_local: Vector3, twist: float) -> Vector2:
-	for shift in [0.0, SHIFT_MAX]:
+	for shift in [0.0, SHIFT_MAX * 0.5, SHIFT_MAX]:
 		var phi := 0.0
 		while phi < LEAN_MAX:
 			var sh := _upper_arm_after_lean(phi) + Vector3(0, 0, shift - _upper_x() * sin(twist))
