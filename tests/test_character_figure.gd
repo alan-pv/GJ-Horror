@@ -223,6 +223,70 @@ func test_arbiter_gun_in_hand() -> void:
 	a.queue_free()
 
 
+## Dirección del cañón (-Z de `Muzzle`) y eje de la mano (Y del hueso `Hand.R`, hacia los dedos)
+## en el marco de la figura, en la pose final de `anim`.
+func _gun_vs_hand(anim: StringName) -> Array:
+	var f := ArbiterFigure.new()
+	f.hold_final_pose(anim)
+	_apply(f)
+	var sk := f.skeleton()
+	var to_fig := sk.global_transform.basis
+	# Fuera del árbol la pose global del esqueleto no se refresca: se compone desde las locales.
+	var hand_pose := Basis.IDENTITY
+	var chain: Array[int] = []
+	var i := sk.find_bone("Hand.R")
+	while i >= 0:
+		chain.push_front(i)
+		i = sk.get_bone_parent(i)
+	for b in chain:
+		hand_pose = hand_pose * sk.get_bone_pose(b).basis
+	# Sin árbol el BoneAttachment3D no se actualiza: la orientación del hueso se aplica a mano.
+	var barrel := -(to_fig * hand_pose * f.pistol().basis * f.muzzle().basis).z.normalized()
+	var hand := (to_fig * hand_pose.y).normalized()
+	f.free()
+	return [barrel, hand]
+
+
+func test_arbiter_barrel_follows_hand() -> void:
+	# En reposo (fin de lower_gun) la mano cuelga: el cañón apunta hacia abajo, paralelo a los dedos.
+	var idle := _gun_vs_hand(&"lower_gun")
+	check(rad_to_deg(idle[0].angle_to(idle[1])) < 3.0, "reposo: cañón paralelo a la mano")
+	check(idle[0].y < -0.9, "reposo: cañón hacia abajo %s" % idle[0])
+	# Apuntando, la mano y el cañón van hacia el blanco (horizontales, hacia +Z).
+	var aim := _gun_vs_hand(&"aim")
+	check(rad_to_deg(aim[0].angle_to(aim[1])) < 3.0, "apuntando: cañón paralelo a la mano")
+	check(aim[0].z > 0.9, "apuntando: cañón hacia delante %s" % aim[0])
+
+
+## La empuñadura queda dentro del puño: su centro está entre la palma y los dedos curvados y dentro
+## de la línea de nudillos, y la corredera apoya sobre los nudillos del índice (poses de agarre).
+func test_arbiter_grip_inside_fist() -> void:
+	var f := ArbiterFigure.new()
+	f.hold_final_pose(&"aim")
+	var sk := f.skeleton()
+	var rest := func(n: String) -> Vector3:
+		return sk.get_bone_rest(sk.find_bone(n)).origin
+	var mesh := (f.pistol() as MeshInstance3D).mesh
+	var grip := AABB()
+	for i in mesh.get_surface_count():
+		if mesh.surface_get_material(i).resource_name == "Grip":
+			var arr := mesh.surface_get_arrays(i)
+			var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			grip = AABB(vs[0], Vector3.ZERO)
+			for v in vs:
+				grip = grip.expand(v)
+	# `Pistol` ya está en el marco de Hand.R salvo su giro de 90 º sobre X (conversión de ejes).
+	var c: Vector3 = f.pistol().basis * grip.get_center()
+	var idx1: Vector3 = rest.call("Index1.R")
+	var pinky1: Vector3 = rest.call("Pinky1.R")
+	check(c.y > 0.03 and c.y < idx1.y, "empuñadura entre la palma y los nudillos (y=%.3f)" % c.y)
+	check(c.x < -0.02 and c.x > -0.055, "empuñadura en la cavidad del puño (x=%.3f)" % c.x)
+	check(c.z < idx1.z and c.z > pinky1.z - 0.01, "empuñadura a lo largo de la línea de nudillos (z=%.3f)" % c.z)
+	var m: Vector3 = f.pistol().basis * f.muzzle().position
+	check(absf(m.z - idx1.z) < 0.03, "corredera apoyada sobre el índice (z=%.3f)" % m.z)
+	f.free()
+
+
 func test_hide_for_first_person() -> void:
 	var f := _spawn(CharacterFigure.new()) as CharacterFigure
 	f.play(&"sit_idle", 0.0)

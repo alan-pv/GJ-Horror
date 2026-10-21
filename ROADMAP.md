@@ -24,6 +24,13 @@ Problema: si el jugador puede ganar sin trampas, el juego es solo ajedrez. Ideas
 - **Ventanas de oportunidad:** los eventos (apagón, acusación ajena, árbitro que pasa) son momentos claros para hacer trampa; anunciarlos o hacerlos frecuentes en los momentos críticos de la partida.
 - **Narrativa:** el torneo está amañado y los campeones anteriores fueron tramposos; la regla tácita es "que no te vean", no "no hagas trampa".
 
+## Ronda de pulido 4
+
+Pedidos del 2026-10-21.
+
+### Por pensar
+- [ ] Es aburrido esperar a que terminen todas las mesas para seguir jugando. Buscar alternativas (sin decidir aún).
+
 ## Pendiente
 
 - [ ] Corte de la recarga entre rondas (`RoundWalk`): al sentarse se nota un salto de luz (la lámpara de la escena nueva es más brillante y tiene sombras) y el reloj y las planillas de la mesa destino, horneados en su malla, cambian de sitio y se encienden. Comparar con `--walk-end-shot` / `--walk-start-shot`.

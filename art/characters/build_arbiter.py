@@ -42,20 +42,22 @@ rig = C.Rig(arm)
 HIP_Z = rig.rest["Hips"].translation.z
 
 # ----------------------------------------------------------------------------
-# Pistola (coordenadas locales de la mano: +Z = pulgar/canon, +Y = hacia los dedos/empunadura)
+# Pistola (coordenadas locales de la mano: +Y = hacia los dedos = direccion del canon, +Z = pulgar,
+# -X = lado de la palma). El canon va paralelo a la mano/antebrazo (hacia abajo en reposo, hacia el
+# blanco al apuntar) y la empunadura cruza la palma segun el eje Z, dentro del puno.
 # ----------------------------------------------------------------------------
 for nm, rgb, r in (("Metal", (.07, .07, .08), .4), ("Grip", (.03, .02, .015), .8)):
     C.make_material(nm, rgb, r, 0.6 if nm == "Metal" else 0.0)
 pb_ = C.Builder(["Hand.R"], ["Metal", "Grip"])
 W = {"Hand.R": 1}
-px = -0.022
-pb_.box(V((px, -.004, .08)), (.026, .034, .19), W, "Metal")          # corredera
-pb_.box(V((px, -.006, .2)), (.014, .018, .05), W, "Metal")           # canon
-pb_.box(V((px, .052, .02)), (.028, .095, .04), W, "Grip")            # empunadura
-pb_.box(V((px, .022, .045)), (.012, .02, .035), W, "Metal")          # guardamonte
+px = -0.035          # centro de la cavidad del puño (entre la palma y los dedos curvados)
+pb_.box(V((px, .13, .046)), (.026, .20, .032), W, "Metal")           # corredera (sobre los nudillos)
+pb_.box(V((px, .24, .046)), (.014, .03, .018), W, "Metal")           # canon
+pb_.box(V((px, .062, -.004)), (.03, .04, .096), W, "Grip")             # empunadura
+pb_.box(V((px, .1, .024)), (.012, .04, .01), W, "Metal")             # guardamonte
 pistol = pb_.to_object("Pistol", col_char)
 pistol.vertex_groups.clear()
-MUZZLE_LOCAL = V((px, -.006, .226))
+MUZZLE_LOCAL = V((px, .255, .046))
 muzzle = bpy.data.objects.new("Muzzle", None)
 muzzle.empty_display_type = 'ARROWS'
 muzzle.empty_display_size = 0.04
@@ -110,9 +112,14 @@ def stand_spec(hip_y=0.0, hz=None):
     return sp
 
 
+# Agarre de pistola: indice casi recto junto al guardamonte, medio/anular/menique cerrados sobre la
+# empunadura y pulgar por el otro lado.
+GRIP = dict(curl=58.0, thumb_curl=14.0, fcurl={"Index": 0.12})
+
+
 def gun_low(sp):
     arm_set(sp, "R", "rel", (-.12, -.12, -.58), pole=(-.6, 1, -.2), hdir=(0, -.18, -1), thumb=(0, -1, -.25),
-            curl=60.0, thumb_curl=25.0)
+            **GRIP)
     return sp
 
 
@@ -142,7 +149,7 @@ def _(t, u):
     arm_set(sp, "L", "rel", (.12, -.1 - .15 * sw, -.57), pole=(.6, 1, -.2), hdir=(0, -.1, -1), thumb=(0, -1, .1),
             curl=18.0, thumb_curl=8.0)
     arm_set(sp, "R", "rel", (-.12, -.12 + .04 * sw, -.58), pole=(-.6, 1, -.2), hdir=(0, -.18, -1), thumb=(0, -1, -.25),
-            curl=60.0, thumb_curl=25.0)
+            **GRIP)
     return sp
 
 
@@ -172,17 +179,17 @@ MUZ_BACK = 0.07          # el canon queda a 7 cm de la cabeza
 def aim_pose(kick=0.0, sway=V((0, 0, 0))):
     g = V((0.05, -1, -0.08)).normalized()
     M = TARGET_HEAD - g * MUZ_BACK + sway
-    down = V((0, 0, -1))
-    Yh = (down - g * down.dot(g)).normalized()
-    Yh = (Yh + g * 0 + V((0, 0, kick * 0.8))).normalized()
-    Zh = (g - Yh * g.dot(Yh)).normalized()
+    # el canon va a lo largo de la mano (Y): apunta a g, con el pulgar hacia arriba; el retroceso la alza
+    Yh = (g + V((0, 0, kick * 0.8))).normalized()
+    up = V((0, 0, 1))
+    Zh = (up - Yh * up.dot(Yh)).normalized()
     Xh = Yh.cross(Zh)
     Mh = C.mat_from_axes(Xh, Yh, Zh, V((0, 0, 0)))
     wrist = M - (Mh.to_3x3() @ MUZZLE_LOCAL)
     wrist = wrist - g * kick * 0.07
     sp = stand_spec()
     tw(sp, "head", (6, 0, 0)), tw(sp, "chest", (3, 0, 0)), tw(sp, "spine", (2, 0, 0))
-    arm_set(sp, "R", "abs", wrist, pole=(-.7, .6, -.3), hdir=Yh, thumb=Zh, curl=62.0, thumb_curl=25.0)
+    arm_set(sp, "R", "abs", wrist, pole=(-.7, .6, -.3), hdir=Yh, thumb=Zh, **GRIP)
     arm_set(sp, "L", "rel", (.16, -.12, -.58), pole=(.6, 1, -.2), hdir=(0, -.1, -1), thumb=(0, -1, .1),
             curl=18.0, thumb_curl=8.0)
     return sp
@@ -191,7 +198,7 @@ def aim_pose(kick=0.0, sway=V((0, 0, 0))):
 def raising():
     sp = stand_spec()
     arm_set(sp, "R", "rel", (-.14, -.42, -.36), pole=(-.7, .8, -.2), hdir=(0, -.5, -1), thumb=(0, -1, .2),
-            curl=60.0, thumb_curl=25.0)
+            **GRIP)
     return sp
 
 
