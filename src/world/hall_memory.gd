@@ -53,14 +53,22 @@ static func clear() -> void:
 	tables.clear()
 
 
-## Mesas que quedan vacías de golpe (sin figuras, cadáveres ni piezas) cuando empieza una ronda
-## que usa las mesas 0..`used_count`-1: esas, salvo `keep` (la mesa destino del humano), más las
-## que no tienen recuerdo (p. ej. donde alguien descansó). Las demás conservan su recuerdo.
+## Mesas de la ronda nueva (0..`used_count`-1) salvo `keep` (la destino del humano, que prepara el
+## paseo): se repueblan con los nuevos emparejamientos sentados y las piezas en su sitio.
+static func tables_to_fill(used_count: int, keep: int) -> Array[int]:
+	var out: Array[int] = []
+	for t in used_count:
+		if t != keep:
+			out.append(t)
+	return out
+
+
+## Mesas fuera de la ronda nueva (`used_count` en adelante, salvo `keep`) que quedan vacías porque no
+## guardan recuerdo (p. ej. donde alguien descansó). Las que sí lo tienen conservan cadáver y piezas.
+## Con `tables_to_fill` y las recordadas cubre todo el salón.
 static func tables_to_empty(table_count: int, used_count: int, keep: int) -> Array[int]:
 	var out: Array[int] = []
-	for t in table_count:
-		if t == keep:
-			continue
-		if t < used_count or not tables.has(t):
+	for t in range(used_count, table_count):
+		if t != keep and not tables.has(t):
 			out.append(t)
 	return out

@@ -26,6 +26,8 @@ extends Node3D
 ##   --demo-pause         abre el menú de pausa al arrancar (capturas)
 ##   --walk-end-shot=ruta [--walk-start-shot=ruta]  con el paseo: guarda el último fotograma antes de recargar
 ##                        y el primero de la escena nueva (verifica el corte)
+##   --walk-mid-shot=ruta   con el paseo: captura ~1 s después de abrir los ojos tras el primer parpadeo
+##                        (el salón ya debe verse como la escena nueva: igual que --walk-start-shot)
 ##   --walk-demo          termina la ronda al instante (el humano gana) y hace el paseo a la mesa
 ##                        siguiente sin jugar (con --start-round=N se ve en esa ronda; Espacio lo salta)
 ## Sin argumentos el juego arranca en el menú principal (`src/ui/main_menu.tscn`);
@@ -34,6 +36,8 @@ extends Node3D
 ##   --shot-select=e2     elige esa pieza (propia o rival) antes de capturar: muestra su mapa de calor
 ##   --no-shadows         desactiva las sombras de la lámpara
 ##   --aerial[=x,y,z,tx,ty,tz]  cámara aérea del salón entero, sin techo (capturas)
+##   --aerial-room=x,y,z,tx,ty,tz  igual, con los valores en el marco de la sala (se suman al desplazamiento
+##                        de la sala): la misma vista antes y después de recargar la escena
 ##   --no-arbiter-exec    las eliminaciones de fondo usan el respaldo sin árbitro (pruebas)
 ##   --verbose            imprime el desarrollo de la partida
 
@@ -569,23 +573,36 @@ func _remember_round() -> void:
 
 
 ## Para el paseo (`RoundWalk`), en el primer parpadeo al levantarse y después de `start_round()`:
-## oculta a los ganadores vivos de la ronda anterior y vacía del todo (figuras, cadáveres y
-## piezas) las mesas que se usarán en la ronda nueva, salvo la destino del humano (la prepara
-## el paseo). Las demás quedan como las verá la escena recargada. Idempotente.
+## deja el salón como lo verá la escena recargada, salvo la mesa destino del humano (la prepara el
+## paseo). Los ganadores vivos de la ronda anterior desaparecen de sus mesas viejas; las mesas de la
+## ronda nueva se repueblan con sus emparejamientos sentados y las piezas en la posición inicial
+## (`_seat_round_table`, el mismo código y la misma ropa por id que `_start_background`); las de
+## rondas pasadas conservan cadáver y piezas (`HallMemory`) y las sin recuerdo quedan vacías. Idempotente.
 func clear_tables_for_next_round() -> void:
 	if hall == null or manager == null:
 		return
 	var dest := manager.human_table()
 	var used := dest + 1 if dest >= 0 else 0
 	HallMemory.release_used(used)
+	var fill := HallMemory.tables_to_fill(used, dest)
 	var emptied := HallMemory.tables_to_empty(hall.table_count(), used, dest)
+	for t in fill:
+		_empty_table(t)
 	for t in emptied:
 		if t != HallLayout.human_table:
 			_empty_table(t)
 	for t in bg_tables:
-		if not emptied.has(t):
+		if not emptied.has(t) and not fill.has(t):
 			(bg_tables[t] as BackgroundTable).hide_living()
 			hall.set_table_level(t, CORPSE_LEVEL if HallMemory.has_corpse(t) else 1.0, false)
+	for g in manager.pending_games():
+		if fill.has(g.table):
+			_seat_round_table(g.table, null, [g.white, g.black])
+	for id in manager.byes:
+		var t: int = manager.bye_tables.get(id, TournamentGame.TABLE_NONE)
+		if fill.has(t) and not bg_tables.has(t):
+			_seat_round_table(t, null, [id, -1])
+	_link_bg_neighbors()
 	if avatar != null and not avatar.condemned:
 		avatar.visible = false
 
@@ -594,6 +611,8 @@ func _empty_table(table: int) -> void:
 	var bt: BackgroundTable = bg_tables.get(table)
 	if bt != null:
 		bt.hide_all()
+		bt.queue_free()
+		bg_tables.erase(table)
 	var corpse: CharacterFigure = _corpses.get(table)
 	if corpse != null:
 		corpse.queue_free()
@@ -611,13 +630,19 @@ func _start_background() -> void:
 		bg.finished.connect(_on_background_finished.bind(bg))
 		background.append(bg)
 		if g.table >= 0 and g.table != HallLayout.human_table:
-			_make_bg_table(g.table, bg, [true, true])
+			_seat_round_table(g.table, bg, [g.white, g.black])
 	# Quien descansa espera sentado en su mesa (el humano, en la suya, lo maneja el cliente).
 	for id in manager.byes:
 		var t: int = manager.bye_tables.get(id, TournamentGame.TABLE_NONE)
 		if t >= 0 and t != HallLayout.human_table and not bg_tables.has(t):
-			_make_bg_table(t, null, [true, false])
-	# Cada mesa conoce a las demás (y a la del humano) para mirarlas de vez en cuando.
+			_seat_round_table(t, null, [id, -1])
+	_link_bg_neighbors()
+	if arbiter != null and not arbiter.executed.is_connected(_on_executed):
+		arbiter.executed.connect(_on_executed)
+
+
+## Cada mesa conoce a las demás (y a la del humano) para mirarlas de vez en cuando.
+func _link_bg_neighbors() -> void:
 	for t in bg_tables:
 		var bt: BackgroundTable = bg_tables[t]
 		bt.neighbors.clear()
@@ -625,14 +650,20 @@ func _start_background() -> void:
 		for u in bg_tables:
 			if u != t:
 				bt.neighbors.append(hall.table_position(u))
-	if arbiter != null and not arbiter.executed.is_connected(_on_executed):
-		arbiter.executed.connect(_on_executed)
 
 
-func _make_bg_table(table: int, bg: BackgroundMatch, present: Array) -> void:
+## Sienta a los jugadores `ids` ([blancas, negras]; -1 = asiento vacío) en la mesa `table`, con el
+## tablero en la posición inicial y en espera. Con `bg` la partida corre de fondo; sin ella la mesa
+## solo espera (descanso, o el paseo antes de recargar). Lo usan `_start_background` y el paseo,
+## así antes y después de recargar la mesa es idéntica (la ropa sale del id).
+func _seat_round_table(table: int, bg: BackgroundMatch, ids: Array) -> void:
+	_make_bg_table(table, bg, [ids[0] >= 0, ids[1] >= 0], ids)
+
+
+func _make_bg_table(table: int, bg: BackgroundMatch, present: Array, ids: Array = []) -> void:
 	var bt := BackgroundTable.new()
 	hall.table_root(table).add_child(bt)
-	bt.setup(hall, table, bg, present, randi())
+	bt.setup(hall, table, bg, present, randi(), ids)
 	bg_tables[table] = bt
 
 
@@ -942,15 +973,27 @@ func _tick_bg_tables(delta: float) -> void:
 
 ## Cámara aérea de depuración (`--aerial`): sin techo, mirando el salón entero.
 func _setup_aerial_camera() -> void:
-	if not _args.has("aerial"):
+	if not _args.has("aerial") and not _args.has("aerial-room"):
 		return
+	# `--aerial-room=...` da los seis valores en el marco de la sala (se suman al desplazamiento de
+	# la sala), así la misma vista sirve antes y después de recargar la escena.
+	var room_frame := _args.has("aerial-room")
+	if room_frame:
+		_args["aerial"] = str(_args["aerial-room"])
 	# Por defecto, encuadrado sobre el centro de la sala (que se desplaza con la mesa del humano).
 	var off := HallLayout.room_offset()
 	var v: Array = [1.5 + off.x, 13.0, 9.0 + off.z, 1.5 + off.x, 0.0, -2.0 + off.z]
-	if str(_args["aerial"]).contains(","):
+	if str(_args.get("aerial", "")).contains(","):
 		var parts := str(_args["aerial"]).split(",")
 		for k in mini(parts.size(), 6):
 			v[k] = float(parts[k])
+		if room_frame:
+			for k in [0, 3]:
+				v[k] += off.x
+			for k in [2, 5]:
+				v[k] += off.z
+			for k in [1, 4]:
+				v[k] += off.y
 	hall.set_ceiling_visible(false)
 	var env_node := get_node_or_null("Entorno") as WorldEnvironment
 	if env_node != null and env_node.environment != null:

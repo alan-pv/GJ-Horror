@@ -154,8 +154,8 @@ func run() -> void:
 	_finish()
 
 
-## Parpadeo al levantarse: con los ojos cerrados desaparecen los ganadores y se vacían las mesas de
-## la ronda nueva (`GameRoot.clear_tables_for_next_round`).
+## Parpadeo al levantarse: con los ojos cerrados desaparecen los ganadores de sus mesas viejas y las
+## mesas de la ronda nueva se pueblan con sus emparejamientos (`GameRoot.clear_tables_for_next_round`).
 func _blink_clear_tables() -> void:
 	await get_tree().create_timer(BLINK_DELAY).timeout
 	if _aborted() or _skipping:
@@ -169,6 +169,18 @@ func _blink_clear_tables() -> void:
 	if _aborted() or _skipping:
 		return
 	await _blink.open()
+	_mid_shot()
+
+
+## `--walk-mid-shot=ruta` (depuración): ~1 s después de abrir los ojos tras el primer parpadeo guarda
+## una captura, para compararla con `--walk-start-shot` (el salón debe verse igual).
+func _mid_shot() -> void:
+	var args: Dictionary = root.get_args()
+	if not args.has("walk-mid-shot"):
+		return
+	await get_tree().create_timer(1.0).timeout
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(str(args["walk-mid-shot"]))
 
 
 ## Cierra los ojos y deja la marca para que la escena nueva los abra (`BlinkOverlay.resume_if_pending`).

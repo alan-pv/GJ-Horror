@@ -66,7 +66,10 @@ var _game_over: bool = false
 
 ## Crea las figuras. `present[color]` dice qué asientos están ocupados. Se añade como hijo
 ## de la raíz de la mesa (`hall.table_root(index)`), con transformación identidad.
-func setup(p_hall: Hall, index: int, p_bg: BackgroundMatch, present: Array, seed_value: int) -> void:
+## `ids[color]` = id del jugador sentado (-1 o ausente: aspecto al azar): su ropa sale de
+## `player_look`, igual que la del rival del humano, así que no cambia al recargar la escena.
+func setup(p_hall: Hall, index: int, p_bg: BackgroundMatch, present: Array, seed_value: int,
+		ids: Array = []) -> void:
 	hall = p_hall
 	table_index = index
 	bg = p_bg
@@ -86,7 +89,7 @@ func setup(p_hall: Hall, index: int, p_bg: BackgroundMatch, present: Array, seed
 		f.name = "Jugador%d" % color
 		f.position = Hall.seat_local(color)
 		f.rotation.y = PI if color == ChessPiece.WHITE else 0.0
-		f.setup(CharacterFigure.bot_look(_rng))
+		f.setup(player_look(int(ids[color]) if color < ids.size() else -1, _rng))
 		add_child(f)
 		var clip := f.play_role(&"sit_wait", _rng)
 		f.play(clip, 0.0)
@@ -99,6 +102,17 @@ func setup(p_hall: Hall, index: int, p_bg: BackgroundMatch, present: Array, seed
 		_refresh_board()
 	else:
 		hall.set_table_fen(index, BoardState.START_FEN)
+
+
+## Aspecto de un bot del torneo: determinista por id de jugador (la misma semilla que el rival
+## del humano en `GameRoot`), de modo que conserva su ropa en todas sus partidas y la escena
+## recargada lo viste igual. Con `id` < 0 se usa `rng`.
+static func player_look(id: int, rng: RandomNumberGenerator) -> Dictionary:
+	if id < 0:
+		return CharacterFigure.bot_look(rng)
+	var look_rng := RandomNumberGenerator.new()
+	look_rng.seed = hash("rival%d" % id)
+	return CharacterFigure.bot_look(look_rng)
 
 
 ## Figura del asiento `seat` (0 = blancas, 1 = negras); null si no hay o ya se fue.

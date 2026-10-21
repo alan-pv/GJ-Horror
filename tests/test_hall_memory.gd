@@ -57,20 +57,35 @@ func test_clear_for_new_tournament() -> void:
 	check(HallMemory.remembered().is_empty())
 
 
-func test_tables_to_empty() -> void:
+func test_table_plan_covers_hall() -> void:
 	HallMemory.clear()
 	# Ronda 2 con 8 mesas (destino = índice 7). Recuerdos en 8..13; la 14 y la 15 nunca se usaron.
 	for t in range(8, 14):
 		HallMemory.remember(t, _board(), 1, {})
+	var fill := HallMemory.tables_to_fill(8, 7)
+	check_eq(fill, [0, 1, 2, 3, 4, 5, 6] as Array[int], "la ronda nueva se puebla, salvo la destino")
 	var e := HallMemory.tables_to_empty(16, 8, 7)
-	check(not e.has(7), "la destino la prepara el paseo")
-	for t in 7:
-		check(e.has(t), "la mesa %d se vacía" % t)
-	for t in range(8, 14):
-		check(not e.has(t), "la mesa %d conserva su recuerdo" % t)
-	check(e.has(14) and e.has(15), "sin recuerdo = vacía")
+	check_eq(e, [14, 15] as Array[int], "sin recuerdo ni ronda nueva = vacía")
+	# Cada mesa cae en exactamente una categoría (destino, nueva, recordada o vacía).
+	for t in 16:
+		var n := int(t == 7) + int(fill.has(t)) + int(HallMemory.has(t)) + int(e.has(t))
+		check_eq(n, 1, "la mesa %d tiene un solo destino" % t)
 	# Idempotente: llamar otra vez da lo mismo.
 	check_eq(HallMemory.tables_to_empty(16, 8, 7), e)
+
+
+func test_player_look_is_deterministic_per_id() -> void:
+	var a := BackgroundTable.player_look(12, RandomNumberGenerator.new())
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 999
+	var b := BackgroundTable.player_look(12, rng)
+	check_eq(a, b, "mismo id = mismo aspecto, sea cual sea el rng")
+	var c := BackgroundTable.player_look(13, rng)
+	check(a != c, "otro id = otro aspecto")
+	# Es el mismo que el del rival del humano (`GameRoot._build_actors`).
+	var r := RandomNumberGenerator.new()
+	r.seed = hash("rival%d" % 12)
+	check_eq(a, CharacterFigure.bot_look(r))
 
 
 func test_hold_final_pose_is_instant_and_held() -> void:
