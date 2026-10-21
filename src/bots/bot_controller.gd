@@ -202,7 +202,7 @@ func _play_turn() -> void:
 			var res := server.submit_move(color, uci)
 			# Mientras el rival humano piensa, la ayuda para principiantes analiza su posición
 			# en trozos de fotograma: así el clic de soltar su jugada no se congela.
-			if res.ok and server.config.beginner_help and server.sessions[1 - color].beginner_help and not server.is_over():
+			if res.ok and server.beginner_help_active(1 - color) and not server.is_over():
 				BeginnerHelper.precompute_async(server.board.clone())
 	_thinking = false
 

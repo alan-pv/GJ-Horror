@@ -26,6 +26,8 @@ extends Resource
 @export var correct_accusation_clears_warning: bool = false
 ## Ayuda para principiantes (siempre activa en el prototipo).
 @export var beginner_help: bool = true
+## Con menos de estos segundos en el reloj propio no hay ayuda (0 = siempre hay ayuda).
+@export var beginner_help_min_clock: float = 30.0
 ## Umbral de la ayuda en centipeones.
 @export var blunder_threshold_cp: int = 300
 ## Coseno del medio ángulo del cono de visión (0.82 ≈ 35°).

@@ -295,7 +295,7 @@ Descartados a propósito (no hacen voltear): lámpara a media luz tras una ejecu
 
 ### 4.10 Ayuda para principiantes (`beginner_helper.gd`)
 
-- Solo para sesiones humanas (`PlayerSession.beginner_help`) y con `config.beginner_help`. Los bots no la usan; `--autoplay` la desactiva.
+- Solo para sesiones humanas (`PlayerSession.beginner_help`) con `config.beginner_help` y con al menos `beginner_help_min_clock` = 30 s en el reloj propio (`MatchServer.beginner_help_active`): con menos tiempo se juega lo que se quiera, sin aviso ni titubeo. Los bots no la usan; `--autoplay` la desactiva.
 - Antes de aceptar la jugada, `check_move` evalúa sobre el tablero físico: para cada jugada, el peor caso tras la mejor respuesta rival (más la mejor recaptura estimada), con material en centipeones.
 - Bloquea si la jugada **permite mate en 1** ("...espera, eso permite mate.") o si pierde al menos `blunder_threshold_cp` = 300 centipeones frente a la mejor alternativa ("...no, eso deja la dama colgada." según la pieza; "...mmm, no. Eso pierde material." si no hay pieza concreta). No avisa si solo hay una jugada legal. Nunca sugiere la mejor.
 - Solo la primera vez por posición y jugada (`_warned`): al repetir la misma, se permite. Emite `beginner_warning`; la vista muestra el subtítulo y la mano titubea (`enqueue_hesitate`: se acerca a la pieza y se detiene ~1 s). `submit_move` devuelve `reason = "advertencia"`.
@@ -484,6 +484,7 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (1, 3) s, `
 | `gaze_cos_threshold` | 0,82 | Coseno del medio ángulo del cono (≈ 35°). |
 | `board_center` | `Vector3.ZERO` (`GameRoot` pone `BoardView.CENTER`) | Centro del tablero para la mirada. |
 | `cheats` | `[]` (`GameRoot` carga las 4) | Trampas disponibles. |
+| `beginner_help_min_clock` | 30 s | Por debajo de este tiempo en el reloj propio no hay ayuda. |
 | `rival_event_cooldown` | 20 s | Espera por color y evento del rival. |
 | `blackout_hides_cheats` | `true` | Durante un apagón nadie ve las trampas y una acusación no prospera por las hechas a oscuras (ver 4.5 y 4.9). |
 

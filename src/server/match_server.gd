@@ -175,6 +175,13 @@ func _can_act(color: int) -> String:
 
 # --- Intenciones -----------------------------------------------------------
 
+## ¿Aplica la ayuda de principiantes a `color` ahora? Requiere la opción, sesión con ayuda
+## y más de `beginner_help_min_clock` segundos en su reloj.
+func beginner_help_active(color: int) -> bool:
+	return config.beginner_help and sessions[color].beginner_help \
+		and clock.remaining[color] >= config.beginner_help_min_clock
+
+
 ## La jugada se registra al soltar la pieza (clic). La animación es solo visual.
 ## Devuelve {ok, reason, warning}.
 func submit_move(color: int, uci: String) -> Dictionary:
@@ -191,7 +198,7 @@ func submit_move(color: int, uci: String) -> Dictionary:
 	if move == null:
 		return {"ok": false, "reason": "illegal move", "warning": ""}
 
-	if config.beginner_help and sessions[color].beginner_help:
+	if beginner_help_active(color):
 		var key := board.position_key() + "|" + move.uci()
 		if not _warned.has(key):
 			var text := BeginnerHelper.check_move(board, move, config.blunder_threshold_cp)

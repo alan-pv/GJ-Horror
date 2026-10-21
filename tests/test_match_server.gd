@@ -75,6 +75,21 @@ func test_beginner_warning_then_allowed() -> void:
 	check(r.ok, "segundo intento permitido")
 
 
+func test_beginner_help_off_with_low_clock() -> void:
+	var fen := "rnbqkbnr/ppp2ppp/4p3/3p4/3P4/8/PPPQPPPP/RNB1KBNR w KQkq - 0 3"
+	var m := _make(fen, true)
+	m.board.squares[ChessPiece.square_from_name("d2")] = ChessPiece.NONE
+	m.board.squares[ChessPiece.square_from_name("d3")] = ChessPiece.make(ChessPiece.WHITE, ChessPiece.QUEEN)
+	m.clock.remaining[ChessPiece.WHITE] = 20.0
+	check(not m.beginner_help_active(ChessPiece.WHITE), "sin ayuda con poco tiempo")
+	check(m.submit_move(ChessPiece.WHITE, "d3h7").ok, "con poco tiempo se acepta a la primera")
+	m = _make(fen, true)
+	m.board.squares[ChessPiece.square_from_name("d2")] = ChessPiece.NONE
+	m.board.squares[ChessPiece.square_from_name("d3")] = ChessPiece.make(ChessPiece.WHITE, ChessPiece.QUEEN)
+	m.clock.remaining[ChessPiece.WHITE] = 40.0
+	check(not m.submit_move(ChessPiece.WHITE, "d3h7").ok, "con tiempo suficiente sigue avisando")
+
+
 func test_beginner_help_off_for_bots() -> void:
 	var m := _make("4k3/8/8/8/8/8/2q5/3QK3 b - - 0 1", true)
 	# Negras (bot) cambian damas mal a propósito: no debe haber aviso.
