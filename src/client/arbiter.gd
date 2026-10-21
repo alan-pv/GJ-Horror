@@ -56,6 +56,11 @@ var _preset: Dictionary = {}        # clave -> Condemned.Mode forzado (depuraci�
 var _running: bool = false
 var _fp_audio: Array[AudioStreamPlayer] = []
 var _black: CanvasLayer
+## Mesas con partida en juego que patrulla; `_active_set` false = aún no se informó (todas).
+var _active_tables: Array[int] = []
+var _active_set: bool = false
+## Mesas ya revisadas (por una acusación o antes de una ejecución): no se repite.
+var _reviewed: Dictionary = {}
 
 
 ## Arma la figura y empieza a patrullar. `p_root` puede ser null (pruebas).
@@ -90,6 +95,23 @@ func request_execution(table: int, seat: int) -> void:
 	var spot := ArbiterRoutes.execution_spot(table, seat, human_color)
 	if queue.push(table, seat, spot, table == HallLayout.human_table):
 		_condemn(table, seat)
+
+
+## Informa qué mesas tienen partida en juego: la patrulla y sus pausas se limitan a los
+## pasillos que las rodean. Sin mesas activas se queda quieto donde está.
+func set_active_tables(tables: Array[int]) -> void:
+	_active_tables = tables.duplicate()
+	_active_set = true
+
+
+## Mesas que patrulla ahora (todas mientras no se haya informado).
+func patrol_tables() -> Array[int]:
+	if _active_set:
+		return _active_tables
+	var all: Array[int] = []
+	for i in HallLayout.table_count():
+		all.append(i)
+	return all
 
 
 ## Fuerza la reacción del condenado de (`table`, `seat`) (depuración); antes de pedir su ejecución.
@@ -204,10 +226,15 @@ func _run() -> void:
 
 
 func _patrol_step() -> void:
-	var target := ArbiterRoutes.patrol_target(_rng, position)
-	var path := ArbiterRoutes.route(position, target)
-	# De vez en cuando rodea por la espalda del jugador.
-	if _rng.randf() < 0.12:
+	var tables := patrol_tables()
+	if tables.is_empty():
+		# Nada en juego: espera donde está.
+		_idle()
+		await get_tree().create_timer(0.5).timeout
+		return
+	var path := ArbiterRoutes.patrol_route(_rng, position, tables)
+	# De vez en cuando rodea por la espalda del jugador (si su mesa sigue en juego).
+	if tables.has(HallLayout.human_table) and _rng.randf() < 0.12:
 		path = ArbiterRoutes.behind_player_route(position)
 	var speed := PATROL_SPEED * _rng.randf_range(0.9, 1.1)
 	if not await _walk_path(path, speed, Urgency.NONE):
@@ -219,7 +246,7 @@ func _patrol_step() -> void:
 ## Se detiene y mira el centro de la mesa más cercana.
 func _pause_looking(seconds: float) -> void:
 	_idle()
-	var table := HallLayout.table_position(ArbiterRoutes.nearest_table(position))
+	var table := HallLayout.table_position(ArbiterRoutes.nearest_table(position, patrol_tables()))
 	var t := 0.0
 	while t < seconds and _urgency() == Urgency.NONE and _forced_route.is_empty() and is_inside_tree():
 		await get_tree().process_frame
@@ -246,12 +273,25 @@ func _do_execution(e: Dictionary) -> void:
 	var human_color := root.human_color if root != null else ChessPiece.WHITE
 	var seat_pos := ArbiterRoutes.seat_position(table, seat, human_color)
 	var spot := seat_pos + Vector3(ArbiterRoutes.SIDE_OFFSET, 0.0, 0.0)
-	var path := ArbiterRoutes.route(position, spot)
+	# Primero llega al costado de la mesa para revisarla; después se coloca junto al condenado.
+	var review_spot := HallLayout.table_position(table) + ArbiterRoutes.HUMAN_SIDE_SPOT
+	var path: Array[Vector3] = []
+	if not _reviewed.has(table):
+		path = ArbiterRoutes.route(position, review_spot)
+	else:
+		path = ArbiterRoutes.route(position, spot)
 	_log("va a ejecutar mesa %d asiento %d (%s, cola %d)" % [table, seat, Condemned.Mode.keys()[cond.mode] if cond != null else "-", queue.size()])
 	var speed := clampf(BRISK_SPEED + 0.12 * float(queue.size()), BRISK_SPEED, MAX_SPEED)
 	if not await _walk_path(path, speed, Urgency.QUEUE):
 		queue.requeue(e)
 		return
+	if not _reviewed.has(table):
+		await _review_table(table)
+		if not is_inside_tree():
+			return
+		if not await _walk_path(ArbiterRoutes.route(position, spot), BRISK_SPEED, Urgency.QUEUE):
+			queue.requeue(e)
+			return
 	var head := _victim_head(cond, seat_pos)
 	await _turn_to(head, 0.35)
 	# Amartilla, apunta y se toma un instante antes de disparar.
@@ -342,6 +382,62 @@ func _figure_for(table: int, seat: int) -> CharacterFigure:
 	return f
 
 
+# --- Revisión de la mesa -----------------------------------------------------------------------
+
+## El árbitro revisa la mesa antes de decidir: mira el tablero, las dos planillas y a cada
+## jugador (~3 s). Reutiliza `inspect_sheets` y la mirada. `on_frame(dt)` se llama cada
+## fotograma (la ejecución en primera persona gira la cámara del jugador). Solo una vez por mesa.
+func _review_table(table: int, on_frame: Callable = Callable()) -> void:
+	_reviewed[table] = true
+	_log("revisa la mesa %d" % table)
+	var center := HallLayout.table_position(table)
+	var human_color := root.human_color if root != null else ChessPiece.WHITE
+	var seats: Array[Vector3] = []
+	for s in [ChessPiece.WHITE, ChessPiece.BLACK]:
+		seats.append(ArbiterRoutes.seat_position(table, s, human_color) + Vector3(0.0, 1.15, 0.0))
+	_idle()
+	# Tablero, luego las planillas (clip) y por último cada jugador.
+	var phases: Array = [[center + Vector3(0.0, 0.8, 0.0), 0.7], [center + Vector3(0.0, 0.8, 0.0), 0.0],
+			[seats[0], 0.55], [seats[1], 0.55], [center + Vector3(0.0, 0.8, 0.0), 0.35]]
+	var clip_started := false
+	for ph in phases:
+		var look: Vector3 = ph[0]
+		var secs: float = ph[1]
+		if secs <= 0.0:
+			# Fase de planillas: la animación manda el tiempo.
+			if not clip_started:
+				clip_started = true
+				figure.play_once(&"inspect_sheets", 0.3)
+			var guard := 0.0
+			while not figure.is_finished() and guard < 3.0 and is_inside_tree():
+				await get_tree().process_frame
+				if not is_inside_tree():
+					return
+				var dt := get_process_delta_time()
+				guard += dt
+				_face_toward(center, dt)
+				figure.look_at_point(center + Vector3(0.0, 0.8, 0.0))
+				if on_frame.is_valid():
+					on_frame.call(dt)
+			continue
+		var t := 0.0
+		while t < secs and is_inside_tree():
+			await get_tree().process_frame
+			if not is_inside_tree():
+				return
+			var dt := get_process_delta_time()
+			t += dt
+			_face_toward(center, dt)
+			figure.look_at_point(look)
+			if on_frame.is_valid():
+				on_frame.call(dt)
+	if not is_inside_tree():
+		return
+	figure.set_look(0.0, 0.0)
+	_log("termina de revisar la mesa %d" % table)
+	_idle()
+
+
 # --- Acusación -------------------------------------------------------------------------------
 
 func _do_accusation() -> void:
@@ -361,6 +457,7 @@ func _do_accusation() -> void:
 	# Revisa las dos planillas (la del jugador, en +Z, y la del rival).
 	await figure.play_once(&"inspect_sheets", 0.3)
 	_idle()
+	_reviewed[HallLayout.human_table] = true
 	var waited := 0.0
 	while _acc.get("verdict") == null and waited < 8.0 and is_inside_tree():
 		await get_tree().process_frame
@@ -421,6 +518,12 @@ func _do_player_execution() -> void:
 			_turn_player_view(get_process_delta_time(), 0.9)
 	var path := ArbiterRoutes.route(position, spot)
 	await _walk_path(path, 1.05, Urgency.PLAYER + 1, progress)
+	if not is_inside_tree():
+		return
+	if not _reviewed.has(HallLayout.human_table):
+		await _review_table(HallLayout.human_table, func(dt: float) -> void: _turn_player_view(dt, 0.9))
+		if not is_inside_tree():
+			return
 	# Apunta a la cara del jugador.
 	var eye := player.global_position
 	var t := 0.0

@@ -135,3 +135,50 @@ func test_footstep_attenuation() -> void:
 	check(Arbiter.footstep_gain_db(2.0) - Arbiter.footstep_gain_db(16.0) > 12.0, "diferencia audible al acercarse")
 	check(Arbiter.footstep_gain_db(10.0) > -15.0, "a 10 m aún se oye")
 	check(Arbiter.footstep_gain_db(40.0) <= -80.0, "más allá del máximo, silencio")
+
+
+func test_patrol_only_around_active_tables() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var xs := ArbiterRoutes.aisle_xs()
+	var zs := ArbiterRoutes.aisle_zs()
+	var sets: Array = [[0], [5, 10], [HallLayout.human_table, 1, 14], [3]]
+	for tables_v in sets:
+		var tables: Array[int] = []
+		for t in tables_v:
+			tables.append(t)
+		var allowed: Array[Rect2] = []
+		for t in tables:
+			var c := HallLayout.cell_of(t)
+			allowed.append(Rect2(xs[c.x], zs[c.y], xs[c.x + 1] - xs[c.x], zs[c.y + 1] - zs[c.y]))
+		var from := ArbiterRoutes.node_at(ArbiterRoutes.table_corners(tables[0])[0])
+		for _i in 20:
+			var path := ArbiterRoutes.patrol_route(rng, from, tables)
+			var prev := from
+			for p in path:
+				check(not ArbiterRoutes.segment_hits_table(prev, p), "no cruza mesas")
+				# Cada tramo recorre el borde de alguna mesa activa.
+				var mid := (prev + p) * 0.5
+				var on_edge := false
+				for r in allowed:
+					var g := r.grow(0.02)
+					if g.has_point(Vector2(mid.x, mid.z)) and not r.grow(-0.02).has_point(Vector2(mid.x, mid.z)):
+						on_edge = true
+				check(on_edge, "tramo %s -> %s junto a una mesa activa" % [prev, p])
+				prev = p
+			if not path.is_empty():
+				from = path[path.size() - 1]
+
+
+func test_patrol_no_active_tables() -> void:
+	var rng := RandomNumberGenerator.new()
+	var none: Array[int] = []
+	check(ArbiterRoutes.patrol_route(rng, Vector3.ZERO, none).is_empty(), "sin mesas activas no patrulla")
+	var a := Arbiter.new()
+	a.set_active_tables(none)
+	check(a.patrol_tables().is_empty(), "el árbitro no tiene mesas que patrullar")
+	var one: Array[int] = [4]
+	a.set_active_tables(one)
+	check_eq(a.patrol_tables().size(), 1)
+	a.free()
+	check_eq(ArbiterRoutes.nearest_table(Vector3(100, 0, 100), one), 4, "mira solo mesas activas")

@@ -243,11 +243,13 @@ static func patrol_target(rng: RandomNumberGenerator, avoid: Vector3) -> Vector3
 	return ns[rng.randi() % ns.size()]
 
 
-## Índice de la mesa cuyo centro está más cerca de `p`.
-static func nearest_table(p: Vector3) -> int:
+## Índice de la mesa cuyo centro está más cerca de `p`. Con `only` no vacío, solo entre esas mesas.
+static func nearest_table(p: Vector3, only: Array[int] = []) -> int:
 	var best := 0
 	var best_d := INF
 	for i in HallLayout.table_count():
+		if not only.is_empty() and not only.has(i):
+			continue
 		var d := _flat_dist(HallLayout.table_position(i), p)
 		if d < best_d:
 			best_d = d
@@ -267,4 +269,97 @@ static func behind_player_route(from: Vector3) -> Array[Vector3]:
 	var second := right if first == left else left
 	var out := route(from, first)
 	out.append(second)
+	return out
+
+
+# --- Patrulla alrededor de las partidas activas ------------------------------------------------
+
+## Índices (columna de pasillo, fila de pasillo) de las cuatro esquinas de la mesa `table`.
+static func table_corners(table: int) -> Array[Vector2i]:
+	var c := HallLayout.cell_of(table)
+	return [Vector2i(c.x, c.y), Vector2i(c.x + 1, c.y), Vector2i(c.x, c.y + 1), Vector2i(c.x + 1, c.y + 1)]
+
+
+## Posición en el mundo de un nodo de la red por sus índices (columna, fila de pasillo).
+static func node_at(ij: Vector2i) -> Vector3:
+	return Vector3(aisle_xs()[ij.x], 0.0, aisle_zs()[ij.y])
+
+
+## Tramos de pasillo permitidos: los cuatro lados de cada mesa activa. Devuelve la adyacencia
+## {Vector2i: Array[Vector2i]} entre nodos vecinos de la cuadrícula de pasillos.
+static func active_adjacency(tables: Array[int]) -> Dictionary:
+	var adj: Dictionary = {}
+	for t in tables:
+		var co := table_corners(t)  # (x,y), (x+1,y), (x,y+1), (x+1,y+1)
+		for pair in [[0, 1], [2, 3], [0, 2], [1, 3]]:
+			var a: Vector2i = co[pair[0]]
+			var b: Vector2i = co[pair[1]]
+			if not adj.has(a):
+				adj[a] = []
+			if not adj.has(b):
+				adj[b] = []
+			if not (adj[a] as Array).has(b):
+				(adj[a] as Array).append(b)
+			if not (adj[b] as Array).has(a):
+				(adj[b] as Array).append(a)
+	return adj
+
+
+## Nodo permitido más cercano a `p`.
+static func nearest_active_node(p: Vector3, adj: Dictionary) -> Vector2i:
+	var best := Vector2i(-1, -1)
+	var best_d := INF
+	for ij: Vector2i in adj:
+		var d := _flat_dist(node_at(ij), p)
+		if d < best_d:
+			best_d = d
+			best = ij
+	return best
+
+
+## Camino por nodos permitidos (BFS por número de tramos; la cuadrícula es regular).
+## Vacío si no hay conexión. Incluye ambos extremos.
+static func active_path(a: Vector2i, b: Vector2i, adj: Dictionary) -> Array[Vector2i]:
+	var prev: Dictionary = {a: a}
+	var open: Array[Vector2i] = [a]
+	while not open.is_empty():
+		var cur: Vector2i = open.pop_front()
+		if cur == b:
+			break
+		for nb: Vector2i in adj.get(cur, []):
+			if not prev.has(nb):
+				prev[nb] = cur
+				open.append(nb)
+	var out: Array[Vector2i] = []
+	if not prev.has(b):
+		return out
+	var k := b
+	out.append(k)
+	while k != a:
+		k = prev[k]
+		out.append(k)
+	out.reverse()
+	return out
+
+
+## Ruta de patrulla desde `from`: va a una esquina al azar de una mesa activa (distinta de
+## donde está, si puede) y solo usa pasillos que bordean mesas activas. Hasta el primer nodo
+## permitido sale por la red normal. Vacía si no hay mesas activas.
+static func patrol_route(rng: RandomNumberGenerator, from: Vector3, tables: Array[int]) -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	if tables.is_empty():
+		return out
+	var adj := active_adjacency(tables)
+	var start := nearest_active_node(from, adj)
+	var keys: Array = adj.keys()
+	var target := start
+	for _i in 12:
+		var cand: Vector2i = keys[rng.randi() % keys.size()]
+		if _flat_dist(node_at(cand), from) >= 2.0:
+			target = cand
+			break
+	out.append_array(route(from, node_at(start)))
+	var path := active_path(start, target, adj)
+	for i in range(1, path.size()):
+		out.append(node_at(path[i]))
 	return out

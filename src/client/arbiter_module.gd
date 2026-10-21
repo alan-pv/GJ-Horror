@@ -24,6 +24,7 @@ const GLANCE_COOLDOWN := 18.0
 var root: GameRoot
 var arbiter: Arbiter
 
+var _active_key: String = "?"
 var _near: bool = false
 var _glance_in: bool = false
 var _glance_ready: float = 0.0
@@ -67,6 +68,7 @@ func _process(delta: float) -> void:
 	if server == null or not server.started:
 		return
 	_time += delta
+	_update_active_tables(server)
 	_update_near(server)
 	_update_glance(server)
 	if _time >= _force_at:
@@ -112,3 +114,28 @@ func _update_glance(server: MatchServer) -> void:
 		_glance_ready = _time + GLANCE_COOLDOWN
 		Distraction.broadcast(self, &"arbiter_pass", arbiter.global_position + Vector3(0.0, 1.5, 0.0))
 	_glance_in = inside
+
+
+## Mesas con partida en juego: la del humano (si no terminó) y las de fondo sin terminar.
+## Solo informa al árbitro cuando cambian. Sin torneo no se limita la patrulla.
+func active_tables() -> Array[int]:
+	var out: Array[int] = []
+	if root.server != null and not root.server.is_over():
+		out.append(HallLayout.human_table)
+	for bg in root.background:
+		if bg.table >= 0 and bg.server != null and not bg.server.is_over() and not out.has(bg.table):
+			out.append(bg.table)
+	return out
+
+
+func _update_active_tables(server: MatchServer) -> void:
+	if root.tgame == null:
+		return
+	var tables := active_tables()
+	var key := str(tables)
+	if key == _active_key:
+		return
+	_active_key = key
+	arbiter.set_active_tables(tables)
+	if root.get_args().has("verbose"):
+		print("[arbitro %.1f] mesas activas: %s" % [_time, key])
