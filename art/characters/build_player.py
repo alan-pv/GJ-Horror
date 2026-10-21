@@ -333,7 +333,7 @@ def arms_rel(sp, l, r, curl=10.0, hands_up=True):
 # ----------------------------------------------------------------------------
 def slump_final():
     sp = clone(SIT)
-    sp.update(spine=(24, 0, 0), chest=(26, 0, 0), neck=(10, 0, 0), head=(4, 0, -14))
+    sp.update(spine=(30, 0, 0), chest=(34, 0, 0), neck=(14, 0, 0), head=(14, 0, -14))
     tw(sp, "hips_off", (0, 0.035, 0.02))
     arm_set(sp, "R", "abs", (-.20, -.60, .79), pole=(-.9, .4, .2), hdir=(.1, -1, -.05), thumb=(1, 0, .3),
             curl=20.0, thumb_curl=8.0)
@@ -358,7 +358,7 @@ def _(t, u):
     mid = clone(slump_final())
     mid.update(spine=(16, 0, 0), chest=(14, 0, 0), neck=(4, 0, 0), head=(-4, 0, -6))
     over = clone(slump_final())
-    over.update(spine=(30, 0, 0), chest=(34, 0, 0), neck=(12, 0, 0), head=(10, 0, -10))
+    over.update(spine=(28, 0, 0), chest=(32, 0, 0), neck=(12, 0, 0), head=(10, 0, -10))
     keys = [(0.0, clone(SIT)), (0.07, shot_snap()), (0.2, shot_snap()), (0.5, mid), (0.85, over),
             (1.1, slump_final()), (1.5, slump_final())]
     return seq(t, keys)

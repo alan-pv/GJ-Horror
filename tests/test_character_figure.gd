@@ -340,3 +340,44 @@ func test_role_loops_close_without_jump() -> void:
 			check(worst < 0.6, "%s cierra el ciclo (salto %.2f)" % [c, worst])
 	f.free()
 
+
+
+## Punto más bajo (en el marco de la figura, y=0 el suelo) de los vértices de la cabeza con la
+## pose local actual del esqueleto (se encadena a mano: la figura de la prueba no está en el árbol).
+func _head_lowest_y(f: FigureBase) -> float:
+	var sk: Skeleton3D = f._skeleton
+	var hb := sk.find_bone("Head")
+	var g := Transform3D.IDENTITY
+	var chain: Array[int] = []
+	var i := hb
+	while i >= 0:
+		chain.push_front(i)
+		i = sk.get_bone_parent(i)
+	for b in chain:
+		g = g * sk.get_bone_pose(b)
+	var mi := f._find_named(f._model, "Body") as MeshInstance3D
+	var to_pose := g * sk.get_bone_global_rest(hb).affine_inverse()
+	var low := INF
+	for s in mi.mesh.get_surface_count():
+		var arr := mi.mesh.surface_get_arrays(s)
+		var v: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var bones: PackedInt32Array = arr[Mesh.ARRAY_BONES]
+		var w: PackedFloat32Array = arr[Mesh.ARRAY_WEIGHTS]
+		for j in v.size():
+			for k in 4:
+				if bones[j * 4 + k] == hb and w[j * 4 + k] > 0.5:
+					low = minf(low, (to_pose * v[j]).y)
+	return low
+
+
+## La cabeza del ejecutado queda apoyada en la mesa (cara superior en y = BoardView.TABLE_TOP):
+## sin holgura apreciable ni atravesarla.
+func test_death_slump_head_rests_on_table() -> void:
+	var f := CharacterFigure.new()
+	f.setup(CharacterFigure.random_look(RandomNumberGenerator.new()))
+	f.hold_final_pose(&"death_slump_table")
+	_apply(f)
+	var gap := _head_lowest_y(f) - BoardView.TABLE_TOP
+	check(gap <= 0.01, "la cabeza no flota sobre la mesa (holgura %.3f m)" % gap)
+	check(gap >= -0.02, "la cabeza no atraviesa la mesa (%.3f m)" % gap)
+	f.free()
