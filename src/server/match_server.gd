@@ -50,8 +50,9 @@ var winner: int = -1
 var end_reason: String = ""
 
 ## Historial de trampas: {color, cheat_id, from, to, start, end, ply, seen, status,
-## level, evidence, as_move}. status: "active", "done" o "aborted". Sirve para
-## resolver acusaciones. `to` es `CheatRules.TO_PILE` en un robo.
+## level, evidence, as_move, dark}. status: "active", "done" o "aborted". Sirve para
+## resolver acusaciones. `dark`: la trampa estuvo en curso durante un apagón sin haber
+## sido vista antes (con `blackout_hides_cheats`); no cuenta en una acusación. `to` es `CheatRules.TO_PILE` en un robo.
 var cheat_log: Array[Dictionary] = []
 var move_log: Array[Dictionary] = []
 var ply: int = 0
@@ -75,6 +76,7 @@ var _rng := RandomNumberGenerator.new()
 ## Cuándo (tiempo de servidor) puede repetir cada color cada evento: "color:id" -> segundos.
 var _rival_event_ready: Dictionary = {}
 var _arbiter_near: bool = false
+var _blackout: bool = false
 ## Jugadas legales de la posición actual (caché; se invalida al cambiar el tablero).
 var _legal_cache: Array[ChessMove] = []
 var _legal_key: String = ""
@@ -295,9 +297,10 @@ func start_cheat(color: int, from: int, to: int) -> Dictionary:
 	var entry := {
 		"color": color, "cheat_id": def.id, "from": from, "to": to,
 		"start": time, "end": time + duration, "ply": ply,
-		"seen": _looking[ChessPiece.opposite(color)] or _arbiter_near, "status": "active",
-		"level": v.level, "evidence": evidence, "as_move": v.as_move,
+		"seen": false, "status": "active",
+		"level": v.level, "evidence": evidence, "as_move": v.as_move, "dark": false,
 	}
+	_observe(entry, color)
 	cheat_log.append(entry)
 	_active_cheat[color] = entry
 	cheat_started.emit(color, def.id, from, to, duration)
@@ -346,6 +349,33 @@ func is_arbiter_near() -> bool:
 	return _arbiter_near
 
 
+## Las luces se apagaron de verdad (`dark` = true) o volvieron. El cliente solo informa;
+## mientras dura, con `blackout_hides_cheats` nadie ve una trampa nueva ni en curso.
+func set_blackout(dark: bool) -> void:
+	_blackout = dark
+	if dark and config.blackout_hides_cheats:
+		for e in _active_cheat:
+			if e != null and not e.seen:
+				e.dark = true
+
+
+func is_blackout() -> bool:
+	return _blackout
+
+
+## Aplica la vigilancia a una trampa en curso: la ve el rival que mira o el árbitro cerca.
+## A oscuras no se ve nada (si no la habían visto antes, queda marcada `dark`); si sigue
+## en curso al volver la luz y alguien mira, pasa a vista y deja de ser `dark`.
+func _observe(entry: Dictionary, color: int) -> void:
+	if entry.seen:
+		return
+	if _blackout and config.blackout_hides_cheats:
+		entry.dark = true
+	elif _looking[ChessPiece.opposite(color)] or _arbiter_near:
+		entry.seen = true
+		entry.dark = false
+
+
 ## Inicio de la ventana de acusación de `color`: la N-ésima jugada más reciente
 ## propia (`config.accusation_window_moves`; si ha jugado menos, el inicio de la
 ## partida), pero nunca antes de su última acusación falsa.
@@ -373,7 +403,7 @@ func accuse(color: int) -> Dictionary:
 	var correct := false
 	var window_start := accusation_window_start(color)
 	for e in cheat_log:
-		if e.color == accused and e.status != "aborted" and e.start >= window_start:
+		if e.color == accused and e.status != "aborted" and e.start >= window_start and not e.get("dark", false):
 			correct = true
 			break
 	_pending_accusation = {"accuser": color, "correct": correct, "resolve_at": time + config.arbiter_delay}
@@ -401,8 +431,7 @@ func tick(delta: float) -> void:
 		var entry: Variant = _active_cheat[color]
 		if entry == null:
 			continue
-		if _looking[ChessPiece.opposite(color)] or _arbiter_near:
-			entry.seen = true
+		_observe(entry, color)
 		if time >= entry.end and not accusation_pending():
 			_finish_cheat(color, entry)
 

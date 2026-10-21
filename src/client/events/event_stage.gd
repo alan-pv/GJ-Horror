@@ -23,6 +23,7 @@ var _emissives: Array = []     # [StandardMaterial3D, multiplicador base]
 var _cones: Array = []         # [ShaderMaterial, fuerza base]
 var _env: Environment
 var _env_ambient: float = 0.2
+var _dark: bool = false
 
 
 func setup(p_hall: Hall, env_node: Node) -> void:
@@ -90,6 +91,15 @@ func _collect_lights() -> void:
 		_env_ambient = _env.ambient_light_energy
 
 
+## ¿Un nivel de luz cuenta como oscuridad (las trampas no se ven)?
+static func is_dark_level(level: float) -> bool:
+	return level < DARK_LEVEL
+
+
+func is_dark() -> bool:
+	return _dark
+
+
 ## Multiplicador de luz según el avance (0..1): parpadeo, oscuridad y parpadeo de regreso.
 static func blackout_level(u: float) -> float:
 	if u >= 1.0:
@@ -105,6 +115,10 @@ static func blackout_level(u: float) -> float:
 
 func _blackout_step(u: float) -> void:
 	var m := blackout_level(u)
+	var dark := is_dark_level(m)
+	if dark != _dark:
+		_dark = dark
+		darkness_changed.emit(dark)
 	for e in _lights:
 		if is_instance_valid(e[0]):
 			(e[0] as Light3D).light_energy = e[1] * m

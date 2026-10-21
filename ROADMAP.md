@@ -39,11 +39,6 @@ Depende del Frente B solo para la animación de caminar del jugador.
 - [ ] Señal visual del progreso desde el asiento (número de mesa visible, podio al fondo que se acerca).
 - [ ] Entre rondas, en lugar de fundido a negro y recarga con el rival ya sentado: animación en primera persona de levantarse y caminar por el salón hasta la siguiente mesa. Hoy `GameRoot` supone la mesa del humano en `Vector3.ZERO` (mesa 9): decidir si se mueve la mesa del humano o se desplaza el salón alrededor de ella.
 
-### Frente G — Apagón: trampas invisibles
-- [ ] Durante el apagón nadie puede "cachar" una trampa, aunque mire al tablero: el servidor no cuenta como vista ninguna trampa hecha (o en curso) mientras dura la oscuridad, ni para el humano ni para los bots, y la acusación de esa trampa no prospera.
-- [ ] En el cliente, la mano y las piezas del rival no se distinguen a oscuras (sin luz de relleno ni emisivos que las delaten); solo al volver la luz se ve el tablero cambiado.
-- [ ] Como opción en `MatchConfig` (p. ej. `blackout_hides_cheats`, por defecto sí).
-
 ### Frente H — Diseño: por qué hacer trampa (por discutir)
 Problema: si el jugador puede ganar sin trampas, el juego es solo ajedrez. Ideas para que hacer trampa sea necesario o muy tentador; se eligen y se combinan después de hablarlo:
 - **Rivales más fuertes que el jugador:** el Elo del rival sube más rápido que el del jugador medio (hoy 1000 → 1500), así que jugar limpio pierde casi siempre a partir de la ronda 2-3.
@@ -60,7 +55,7 @@ Problema: si el jugador puede ganar sin trampas, el juego es solo ajedrez. Ideas
 - [ ] Las partidas de fondo empiezan desde la posición inicial; podrían arrancar de un medio juego (`Hall.mid_game_fen`) para que los tableros se vean avanzados.
 - [ ] Pasillo entre filas de ~1,16 m entre sillas (`HallLayout.SPACING_Z` = 3,2): subirlo si el árbitro pasa justo.
 
-- [ ] El humano no tiene tecla para sus eventos de distracción (toser, tirar una pieza).
+- [ ] El humano no tiene tecla para su evento de distracción (toser).
 
 - [ ] **Repo público el día que se publique el juego** en itch.io (AGPL de Maia-3).
 - [ ] Exportación web real (plantillas de Godot) y prueba de Maia-3 en navegador.

@@ -224,6 +224,7 @@ Duración = `base_time + time_per_square × distancia de rey recorrida` (el robo
 - El humano manda su cámara cada 0,1 s (`PlayerController`); el bot manda la de su cabeza virtual cada 0,1 s. El servidor guarda `_looking[color]`.
 - **Exposición:** `cheat.seen` se marca al empezar si el rival mira (o el árbitro está cerca) y se actualiza en cada `tick` mientras la trampa dura. Una trampa "vista" no acusa sola: el rival aún debe acusar.
 - Con `set_arbiter_near(true)` toda trampa en curso cuenta como vista (ver 4.9).
+- **Apagón** (`MatchConfig.blackout_hides_cheats`, por defecto sí): `set_blackout(dark)` / `is_blackout()` los llama `EventModule` (el cliente solo informa). Mientras está oscuro ninguna trampa se marca `seen` (ni por mirada ni por árbitro cerca). Toda entrada que esté en curso durante la oscuridad sin haber sido vista antes lleva `dark = true`; si al volver la luz sigue en curso y alguien mira, pasa a `seen = true` y `dark = false` (se la ve terminar). Una trampa vista antes del apagón sigue vista. En `accuse`, una entrada `dark` no cuenta para que la acusación sea correcta; los bots solo acusan con `entry.seen` y no juzgan trampas `dark`. Con la opción en `false` el apagón no cambia nada.
 - Jugador: ratón capturado (clic para capturar, `Esc` suelta), sensibilidad 0,0022, giro ±120°, inclinación −80° a +55°, FOV 62°. Los ojos están en (0; 1,13; 0,52).
 
 ### 4.6 Abortar
@@ -267,19 +268,18 @@ Duración = `base_time + time_per_square × distancia de rey recorrida` (el robo
 
 | Id | Tipo | Origen | Duración | Peso | Espera | Intensidad | Tensión mín. | Sonido | Qué ocurre |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `apagon` | Global | Centro | 4,5 | 1,0 | 60 | 0,9 | 0 | `bulb_pop` | Todas las luces, emisivos, conos y ambiente parpadean, se apagan y vuelven (`blackout`). |
+| `apagon` | Global | Centro | 4,5 | 1,0 | 60 | 0,9 | 0 | `bulb_pop` | Todas las luces, emisivos, conos y ambiente parpadean, se apagan y vuelven (`blackout`). `EventStage.blackout_level` da el nivel de luz; por debajo de `EventStage.DARK_LEVEL` (0,3) emite `darkness_changed(true)` y `EventModule` llama `server.set_blackout(true)` (false al volver la luz). Con el nivel en 0 no queda luz de relleno ni emisivos: mano y piezas del rival no se distinguen. Con `--cheat-demo=rival` se prueba con una trampa del rival en curso. |
 | `ruido_detras` | Global | Detrás | 2,0 | 1,4 | 25 | 1,0 | 0 | `slam` | Una banqueta cae y rueda a las espaldas del jugador. |
 | `acusacion_ajena` | Global | Mesa | 3,5 | 1,2 | 35 | 0,7 | 0 | `shout` | Una figura real de otra mesa (prestada) retira la silla (`ChairFollow`, ver abajo; acaba a 0,5 m), hace `stand_accuse` → `stand_accuse_hold`, grita y vuelve a sentarse (`sit_down`); subtítulo "¡Trampa!". |
 | `eliminacion` | Global (peso 0: ya no sale solo; solo `--event=eliminacion`) | Mesa | 9,0 | 0,0 | 70 | 0,8 | 0,3 | `struggle` | Dos guardias (`CharacterFigure` de ropa gris azulada oscura, legible en la penumbra, con `walk`) llegan, la víctima hace `stand_up` y se la llevan en `dragged` a 1,1 m/s. Es también la salida real de los eliminados de las mesas de fondo. |
 | `arbitro_pasa` | Disuasivo | Detrás | 8,0 | 1,0 | 45 | 0,3 | 0 | `steps` | El árbitro pasa detrás del jugador (ver abajo). |
 | `cough` | Rival | Centro | 1,2 | 1,0 | 20 | 0,5 | 0 | `cough` | El personaje tose (cabeza y torso se doblan). |
-| `drop_piece` | Rival | Centro | 1,6 | 1,0 | 25 | 0,6 | 0 | `clack` | Una pieza cae sobre la mesa, rueda y cae al suelo; el personaje mira abajo. |
 
-**Eventos del rival:** `cough` y `drop_piece` no los sortea el director; los provoca un jugador sobre sí mismo con `MatchServer.trigger_rival_event(color, id)`. Espera por color y evento: `rival_event_cooldown` = 20 s. Rechazado si hay acusación pendiente, la partida no empieza/terminó o (`drop_piece`) la mano está ocupada. `rival_event_wait()` informa la espera restante. Son sospechosos en sí mismos. Solo los provocan los bots; el humano no tiene tecla para ello.
+**Eventos del rival:** `cough` no lo sortea el director; lo provoca un jugador sobre sí mismo con `MatchServer.trigger_rival_event(color, id)`. Espera por color y evento: `rival_event_cooldown` = 20 s. Rechazado si hay acusación pendiente, la partida no empieza/terminó. `rival_event_wait()` informa la espera restante. Son sospechosos en sí mismos. Solo los provocan los bots; el humano no tiene tecla para ello.
 
 **Disuasivo:** mientras el árbitro esté a menos de 1,5 m del centro de la mesa (`ARBITER_NEAR_RADIUS`), `EventModule` llama `server.set_arbiter_near(true)` y toda trampa en curso (también las que empiecen entonces) queda marcada como vista.
 
-**Distracciones** (`src/server/events/distraction.gd`, lógica pura): cada `EventDef` lleva `turn_chance` y `distraction`; `apagon` 0,8 (`blackout`), `acusacion_ajena` 0,8 (`accusation`), `arbitro_pasa` 0,45 (`arbiter_pass`); `ruido_detras`, `eliminacion`, `cough` y `drop_piece` valen 0. Los avisos que no son `EventDef` están en `Distraction.SPECS`:
+**Distracciones** (`src/server/events/distraction.gd`, lógica pura): cada `EventDef` lleva `turn_chance` y `distraction`; `apagon` 0,8 (`blackout`), `acusacion_ajena` 0,8 (`accusation`), `arbitro_pasa` 0,45 (`arbiter_pass`); `ruido_detras`, `eliminacion` y `cough` valen 0. Los avisos que no son `EventDef` están en `Distraction.SPECS`:
 
 | Tipo | Origen | Prob. base | Mirada (s) | Respingo | Radio |
 | --- | --- | --- | --- | --- | --- |
@@ -479,6 +479,7 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (1, 3) s, `
 | `board_center` | `Vector3.ZERO` (`GameRoot` pone `BoardView.CENTER`) | Centro del tablero para la mirada. |
 | `cheats` | `[]` (`GameRoot` carga las 4) | Trampas disponibles. |
 | `rival_event_cooldown` | 20 s | Espera por color y evento del rival. |
+| `blackout_hides_cheats` | `true` | Durante un apagón nadie ve las trampas y una acusación no prospera por las hechas a oscuras (ver 4.5 y 4.9). |
 
 `MatchServer._init(config, white, black, start_fen, seed_value)` acepta una posición inicial y una semilla (para el descentrado de las trampas).
 
@@ -533,7 +534,8 @@ godot --headless --path . --script res://tests/run_tests.gd -- --filter=cheats
 | `test_maia_encoding.gd` | Vocabulario, Elo continuo, codificación idéntica al fixture de PyTorch, índices de jugadas legales, espejado, reconstrucción del historial (captura, al paso, enroque, cambios por trampa, cerebro compartido) y respaldo sin web. |
 | `test_distractions.gd` | Probabilidades por tipo con semilla, descartados que no voltean, retardo y duraciones en rango, respingo solo en fuertes, radios, datos de `EventDef`, factor de personalidad, el bot que voltea deja de mirar el tablero. |
 | `test_tension_director.gd` | Carga de definiciones, primer evento, separación y no repetición, frecuencia según jugadores, misma semilla, esperas, orígenes, disparo forzado, desactivado. |
-| `test_rival_events.gd` | Señal de evento del rival, esperas por color y evento, rechazo durante acusación y con mano ocupada, árbitro cerca marca trampas como vistas. |
+| `test_rival_events.gd` | Señal de evento del rival, esperas por color y evento, rechazo durante acusación, toser con la mano ocupada, árbitro cerca marca trampas como vistas. |
+| `test_blackout.gd` | Apagón: trampa a oscuras no se ve ni prospera la acusación, vista antes sí, la que sigue tras volver la luz y se ve, opción desactivada, el bot no juzga trampas oscuras y el umbral de oscuridad del cliente. |
 | `test_hand_flow.gd` | Perfil de mínimo jerk, spline que pasa por los puntos de paso con tangente continua, `is_busy_for_action` y escritura a medias de `ScoresheetView`. |
 | `test_tournament.gd` | Emparejamiento de 16, colores aleatorios, descansos (también del humano), progresión de rondas, espera de todas las partidas, final con colores invertidos y desempate, advertencias que persisten y se reinician, eliminación del humano y torneo nuevo, torneos completos simulados con un solo campeón, `BackgroundMatch` y su política. |
 

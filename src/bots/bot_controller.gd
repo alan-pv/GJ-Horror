@@ -356,6 +356,9 @@ func _watch_for_cheats() -> void:
 	var entry: Variant = server.active_cheat(cheater)
 	if entry == null:
 		return
+	# A oscuras no ve nada: sin juicio, por si la trampa sigue al volver la luz.
+	if entry.get("dark", false):
+		return
 	var key := _entry_key(entry)
 	if _judged.has(key):
 		return

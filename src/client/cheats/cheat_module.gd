@@ -9,7 +9,7 @@ extends Node
 ##
 ## Depuración (argumentos tras `--`):
 ##   --cheat-demo=NOMBRE   guion automático de trampas: own, ownlong, enemy, steal, abort,
-##                         accuse, asmove, input o all (ver `_demo_steps`).
+##                         rival (solo la trampa del rival), accuse, asmove, input o all (ver `_demo_steps`).
 ##                         Usar `--human=white` y `--fen="r3k3/p7/2n1p3/8/8/8/PPPP1PPP/R3K2R w - - 0 1"`.
 
 signal installed
@@ -155,6 +155,8 @@ func _demo_steps(name_: String) -> Array[Dictionary]:
 			return [steal]
 		"abort":
 			return [enemy_far, {"t": 1.7, "who": "human", "kind": "abort"}]
+		"rival":
+			return [rival_own]
 		"accuse":
 			return [rival_own, {"t": 3.6, "who": "human", "kind": "accuse"}]
 		"input":

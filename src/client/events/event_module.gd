@@ -58,6 +58,8 @@ func install(p_root: GameRoot) -> void:
 	stage.root = root
 	stage.setup(root.hall, root.get_node_or_null("Entorno"))
 	add_to_group(Distraction.GROUP)
+	# El cliente solo informa de la oscuridad; el servidor decide qué deja de verse.
+	stage.darkness_changed.connect(root.server.set_blackout)
 
 	root.server.rival_event.connect(_on_rival_event)
 	root.players_remaining_changed.connect(set_players_remaining)

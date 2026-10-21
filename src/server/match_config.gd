@@ -34,5 +34,8 @@ extends Resource
 @export var board_center: Vector3 = Vector3.ZERO
 ## Las trampas disponibles en esta partida.
 @export var cheats: Array[CheatDef] = []
-## Segundos de espera para repetir un evento propio (toser, tirar una pieza), por jugador.
+## Segundos de espera para repetir un evento propio (toser), por jugador.
 @export var rival_event_cooldown: float = 20.0
+## Durante un apagón nadie ve las trampas (ni por mirada ni por árbitro cerca) y una
+## acusación no prospera por las que ocurrieron a oscuras.
+@export var blackout_hides_cheats: bool = true
