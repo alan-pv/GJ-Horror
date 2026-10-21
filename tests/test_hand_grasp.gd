@@ -45,26 +45,28 @@ func _global_of(sk: Skeleton3D, bone: int) -> Transform3D:
 	return t
 
 
-## Pone `mod` en un agarre de `piece` con la mano orientada como en el juego y lo deja converger.
-## Devuelve {base, basis, hand_origin}.
-func _grasp_pose(f: SeatedFigure, mod: ArmPoseModifier, piece: int) -> Dictionary:
+## Pone `mod` (mano de `side`) en un agarre de `piece` con la mano orientada y los datos de dedos
+## como en el juego (plan de pinza incluido) y lo deja converger. Devuelve {base, basis, origin}.
+func _grasp_pose(f: SeatedFigure, mod: ArmPoseModifier, piece: int, side: StringName = &"R") -> Dictionary:
 	var g := PieceFactory.grasp_for(piece)
-	var basis := HandRig.basis_for(Vector3(0, 0, -1), deg_to_rad(float(g.pitch)), deg_to_rad(float(g.roll)), 1.0)
+	var pal := 1.0 if side == &"R" else -1.0
+	var basis := HandRig.basis_for(Vector3(0, 0, -1), deg_to_rad(float(g.pitch)), deg_to_rad(float(g.roll)) * pal, pal)
 	mod.hand_basis = basis
 	mod.controlled = true
 	var sk := f.skeleton()
-	var hand_idx := sk.find_bone("Hand.R")
+	var hand_idx := sk.find_bone("Hand." + side)
 	mod._process_modification()  # fija la rotación de la mano
 	var origin := _global_of(sk, hand_idx).origin
-	var plan := mod.pinch_plan(float(g.radius), deg_to_rad(float(g.pitch)), deg_to_rad(float(g.roll)))
+	var plan := mod.pinch_plan(float(g.radius), deg_to_rad(float(g.pitch)), deg_to_rad(float(g.roll)), 0.0, Vector3.ZERO, float(g.opposition))
 	var pinch: Vector3 = origin + basis * (plan.a as Vector3)
 	var base := pinch - Vector3(0, float(g.height), 0)
 	var gd := {
 		"axis_point": base, "axis_dir": Vector3.UP, "profile": g.profile, "step": g.step,
 		"contact": g.contact, "weight": 1.0, "relax": 0.7,
+		"thumb_swing": float(plan.sw), "plan_ci": float(plan.ci), "plan_ct": float(plan.ct),
 	}
 	mod.grasp = gd
-	for i in 6:
+	for i in 12:
 		mod._process_modification()
 	return {"base": base, "basis": basis, "origin": origin}
 
@@ -160,6 +162,95 @@ func test_palm_faces_piece() -> void:
 		var to_piece := ((pose.base as Vector3) + Vector3(0, float(g.height), 0) - palm_c).normalized()
 		var cosang := palm_n.dot(to_piece)
 		check(cosang > 0.5, "la palma mira a la pieza %s (cos %.2f)" % [ChessPiece.to_char(t), cosang])
+		f.free()
+
+
+## Posición del contacto de la yema de `finger` en el mundo, tras `_grasp_pose`.
+func _pad_world(f: SeatedFigure, mod: ArmPoseModifier, finger: int) -> Vector3:
+	var ch := mod.chain(finger)
+	return _global_of(f.skeleton(), ch.bones[2]) * ch.contact_local
+
+
+func test_thumb_opposes_index_by_piece() -> void:
+	# Oposición pulgar-índice: ángulo, visto desde el eje de la pieza, entre los contactos de ambas
+	# yemas. Debe quedar entre 80 y 160 grados, cerca de lo pedido por pieza (no como garra).
+	for side in [&"R", &"L"]:
+		for t in TYPES:
+			var f := _figure()
+			var mod := f.arm_pose_modifier(side)
+			var pose := _grasp_pose(f, mod, t, side)
+			var g := PieceFactory.grasp_for(t)
+			var base: Vector3 = pose.base
+			var vi := _pad_world(f, mod, ArmPoseModifier.INDEX) - base
+			var vt := _pad_world(f, mod, ArmPoseModifier.THUMB) - base
+			var opp := rad_to_deg(Vector2(vi.x, vi.z).angle_to(Vector2(vt.x, vt.z)))
+			opp = absf(opp)
+			var tag := "%s %s (pedida %.0f)" % [side, ChessPiece.to_char(t), float(g.opposition)]
+			check(opp >= 80.0 and opp <= 160.0, "oposición %.0f° en 80-160 %s" % [opp, tag])
+			check(absf(opp - float(g.opposition)) < 20.0, "oposición %.0f° cerca de la pedida %s" % [opp, tag])
+			f.free()
+
+
+## Altura mínima (mundo) de las articulaciones y las puntas de todos los dedos de la mano de `mod`.
+func _lowest_finger_point(f: SeatedFigure, mod: ArmPoseModifier) -> float:
+	var low := 1e9
+	for finger in 5:
+		var ch := mod.chain(finger)
+		for k in range(1, 3):
+			low = minf(low, _global_of(f.skeleton(), ch.bones[k]).origin.y)
+		low = minf(low, (_global_of(f.skeleton(), ch.bones[2]) * Vector3(0, ch.tip_len, 0)).y)
+	return low
+
+
+func test_no_finger_goes_below_the_table() -> void:
+	# Con agarres bajos (la torre, a 16 mm) los dedos que no tocan podían quedar bajo la mesa: con el
+	# límite de suelo ninguna articulación ni punta baja de la superficie y los que tocan siguen tocando.
+	for side in [&"R", &"L"]:
+		for t in TYPES:
+			var f := _figure()
+			var mod := f.arm_pose_modifier(side)
+			var pose := _grasp_pose(f, mod, t, side)
+			var surface: float = (pose.base as Vector3).y
+			mod.floor_y = surface
+			for i in 12:
+				mod._process_modification()
+			var tag := "%s %s" % [side, ChessPiece.to_char(t)]
+			var low := _lowest_finger_point(f, mod)
+			check(low >= surface - 0.0003, "%s: ningún dedo bajo la mesa (%.1f mm)" % [tag, (low - surface) * 1000.0])
+			var g := PieceFactory.grasp_for(t)
+			for finger in [ArmPoseModifier.THUMB, ArmPoseModifier.INDEX]:
+				var d := _surface_dist(g, pose.base, _pad_world(f, mod, finger))
+				check(d < TOUCH_TOL and d > -PENETRATION, "%s %s sigue tocando con el suelo (%.2f mm)" % [tag, ArmPoseModifier.FINGER_NAMES[finger], d * 1000.0])
+			f.free()
+
+
+func test_floor_limit_acts_on_the_free_fingers() -> void:
+	# Sensibilidad: con la superficie 3 mm más alta de lo que dejan los dedos libres de la torre, sin el
+	# límite alguno baja de ella; con el límite, ninguno.
+	var f := _figure()
+	var mod := f.arm_pose_modifier(&"R")
+	var pose := _grasp_pose(f, mod, ChessPiece.ROOK)
+	var surface: float = (pose.base as Vector3).y + 0.003
+	var free_low := _lowest_finger_point(f, mod)
+	check(free_low < surface, "sin límite un dedo queda a %.1f mm de la superficie elevada" % ((free_low - surface) * 1000.0))
+	mod.floor_y = surface
+	for i in 12:
+		mod._process_modification()
+	var low := _lowest_finger_point(f, mod)
+	check(low >= surface - 0.0003, "con límite ninguno baja de ella (%.1f mm)" % ((low - surface) * 1000.0))
+	f.free()
+
+
+func test_thumb_stays_at_grip_height() -> void:
+	# Dama y rey: el pulgar no queda alto sobre la corona, sino a la altura de la pinza (el pulgar
+	# del plan toca a la altura del índice, no más arriba que la corona).
+	for t in TYPES:
+		var f := _figure()
+		var mod := f.arm_pose_modifier(&"R")
+		var pose := _grasp_pose(f, mod, t)
+		var g := PieceFactory.grasp_for(t)
+		var y: float = (_pad_world(f, mod, ArmPoseModifier.THUMB) - (pose.base as Vector3)).y
+		check(absf(y - float(g.height)) < 0.006, "%s: yema del pulgar a %.1f mm (pinza a %.1f)" % [ChessPiece.to_char(t), y * 1000.0, float(g.height) * 1000.0])
 		f.free()
 
 

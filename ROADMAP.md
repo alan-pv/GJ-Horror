@@ -8,27 +8,13 @@ Pedidos del 2026-10-19 que no entran en la tanda de arreglos rápidos. Cada fren
 
 El arte (modelado y animación) también lo hacen los agentes con scripts de Blender: el usuario no anima. El código pide **roles** de animación (`<rol>` o `<rol>__<variante>`) con respaldo, para que añadir variantes no exija tocar código.
 
-### Frente A — Mano del jugador: retoques del agarre
-Lo que quedó tras la mano de cinco dedos y el agarre por pieza.
-- [ ] Oposición pulgar-índice de 80° a 160° según la pieza: el pulgar cierra a lo largo de los dedos y no de lado, así que se ve como garra sobre la cabeza, no como pinza diametral.
-- [ ] Con agarres bajos (torre) los dedos que no tocan pueden quedar hasta 5 mm bajo la mesa: falta límite de suelo para ellos.
-- [ ] Dama y rey: el pulgar queda alto sobre la corona.
-- [ ] Reloj: variante de pulsar con los dedos juntos.
-- [ ] Medir el coste de la resolución de dedos en el juego (dos brazos con IK, 16 mesas) en una máquina modesta.
-
 ### Frente B — Pulido de animaciones
 Un clip por acción, sin variantes (21 en `player.glb`); lo que queda es revisarlo en el juego.
 - [ ] Revisar en el juego la silla que sigue al cuerpo (`ChairFollow`) en la acusación y en la eliminación: la prueba no ve solape, pero no hay captura que encuadre la mesa del evento (falta una opción de cámara hacia `--event-table`).
 - [ ] Revisar en el juego `sit_cough`, `sit_pick_up` (la mano baja hasta ~10 cm del suelo) y `sit_press_clock` (el preview no dibuja el reloj) con el IK del brazo apagado.
 - [ ] Inclinación del torso: el tope quedó en 0,70 rad (con 0,6 había posturas sin alcanzar) y 3 posturas extremas en la esquina lejana no llegan por 3,5-4,5 cm; el vientre puede rozar ~1 cm el canto a máxima inclinación (estimado). Revisar en primera persona.
 - [ ] `test_seated_posture_is_upright` casi no comprueba nada (sin fotogramas el esqueleto queda en T-pose): rehacerla como `test_chair_follow`, dentro del árbol.
-- [ ] **Agarre de la pluma (trípode):** hoy los dedos quedan cerrados en puño detrás de la pluma. Como se agarra de verdad:
-  - la pluma descansa sobre el costado de la última falange del **medio**;
-  - la sujetan las **yemas de pulgar e índice**, a 2-3 cm de la punta, una frente a la otra;
-  - el cuerpo de la pluma se apoya en la base del índice (entre pulgar e índice) y apunta hacia atrás, por encima del dorso, hacia el hombro, a ~45-55° del papel;
-  - anular y meñique se recogen bajo la palma, y el canto de la mano (meñique) se apoya en el papel;
-  - la muñeca va recta y los trazos salen de los dedos y de un leve deslizamiento de la mano, no del brazo.
-  Hace falta una pose de mano propia para escribir (no `PINCH`), con el medio como apoyo, y revisarla con capturas de cerca, en la mano del jugador y en la del rival.
+- [ ] **Agarre de la pluma (trípode), lo que falta:** ya están la pinza de pulgar e índice a 2,5 cm de la punta, el medio como apoyo y la pluma a ~50° hacia el hombro (ver `docs/arquitectura.md` 4.14). Pero anular y meñique quedan semiestirados sobre la hoja en vez de recogidos bajo la palma (recogidos atravesarían el papel 1-2 cm con la mano actual: hay que tocar la malla o el esqueleto en `art/`) y la pluma parece salir entre índice y medio. Falta una captura de la pose estable de escritura en el juego, en la mano del jugador y en la del rival.
 
 ### Frente E — Escenificación según lo que ve el jugador
 - [ ] Calcular qué mesas están en la línea de visión directa del jugador (cono de la cámara en reposo, sin oclusión) y llevar ahí las reacciones más dramáticas (huidas, súplicas, ejecuciones con más preparación); las mesas fuera de cuadro usan reacciones discretas.

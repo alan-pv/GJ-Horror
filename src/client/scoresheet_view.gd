@@ -23,7 +23,7 @@ const INK := Color(0.07, 0.08, 0.20)
 ## Pluma en reposo (local de la hoja): la punta y la dirección, sobre la franja de arriba.
 const PEN_REST_TIP := Vector3(-0.07, 0.0085, -0.078)
 ## Distancia de la yema a la punta cuando se escribe.
-const PEN_GRIP := 0.04
+const PEN_GRIP := 0.025
 
 var near_color: int = ChessPiece.WHITE
 ## Por color: {root, sheet, pen, labels: Array[Label3D], pending: Array[Dictionary], written: int}.

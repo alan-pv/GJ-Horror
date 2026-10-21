@@ -53,7 +53,7 @@ func test_pen_axis_clears_the_fingers() -> void:
 		var sgn := 1.0 if side == &"R" else -1.0
 		for writing in [false, true]:
 			var u := _axis(writing, sgn)
-			var plan := mod.pinch_plan(HandRig.PEN_R, 0.0, 0.0, 0.0, u)
+			var plan := mod.pinch_plan(HandRig.PEN_R, 0.0, 0.0, 0.0, u, HandRig.PEN_WRITE_OPP if writing else 180.0)
 			var a: Vector3 = plan.a
 			var ix := mod.chain(ArmPoseModifier.INDEX)
 			var th := mod.chain(ArmPoseModifier.THUMB)
@@ -85,3 +85,37 @@ func test_pen_pivot_is_continuous() -> void:
 		check(rad_to_deg(prev.x.angle_to(b.x)) < total * 0.04, "paso %d continuo" % i)
 		prev = b
 	check(prev.x.angle_to(w.x) < 1e-3, "termina en la postura de escribir")
+
+
+func test_tripod_geometry() -> void:
+	# Agarre trípode: yemas de pulgar e índice a 2-3 cm de la punta, la pluma a 45-55 grados del papel
+	# y apuntando hacia atrás (hacia el hombro), en las dos manos y con cualquier dirección de la mano.
+	check(ScoresheetView.PEN_GRIP >= 0.02 and ScoresheetView.PEN_GRIP <= 0.03, "yemas a 2-3 cm de la punta")
+	for pal in [1.0, -1.0]:
+		for yaw in [0.0, 0.4, -0.4, PI, PI + 0.4]:
+			var dir_h := Vector3(0, 0, -1).rotated(Vector3.UP, yaw)
+			var b := HandRig.basis_for(dir_h, deg_to_rad(HandAnimator.WRITE_PITCH), deg_to_rad(HandAnimator.WRITE_ROLL * pal), pal)
+			var uw := b * _axis(true, pal)
+			var elev := rad_to_deg(asin(uw.y))
+			var tag := "pal %.0f yaw %.1f" % [pal, yaw]
+			check(elev >= 45.0 and elev <= 55.5, "pluma a %.0f grados del papel %s" % [elev, tag])
+			var back := Vector3(uw.x, 0, uw.z).normalized().dot(-dir_h)
+			check(back > 0.3, "la pluma apunta hacia atrás (%.2f) %s" % [back, tag])
+
+
+func test_tripod_pads_face_each_other_across_the_pen() -> void:
+	# Las yemas de pulgar e índice quedan a ambos lados de la pluma (oposición cercana a la pedida) y
+	# la pluma pasa a menos de 2,5 cm de la base del índice (la membrana entre pulgar e índice).
+	var f := _figure()
+	for side in [&"R", &"L"]:
+		var mod := f.arm_pose_modifier(side)
+		var sgn := 1.0 if side == &"R" else -1.0
+		var u := _axis(true, sgn)
+		var plan := mod.pinch_plan(HandRig.PEN_R, 0.0, 0.0, 0.0, u, HandRig.PEN_WRITE_OPP)
+		check(float(plan.cost) < 25.0, "%s: plan de pinza de la pluma viable (coste %.1f)" % [side, float(plan.cost)])
+		check(absf(float(plan.opp) - HandRig.PEN_WRITE_OPP) < 20.0, "%s: oposición %.0f cerca de %.0f" % [side, float(plan.opp), HandRig.PEN_WRITE_OPP])
+		var ix := mod.chain(ArmPoseModifier.INDEX)
+		var base: Vector3 = ix.rest[0].origin
+		var d := _seg_line(base, base, plan.a, u)
+		check(d < 0.025, "%s: pluma a %.1f mm de la base del índice" % [side, d * 1000.0])
+	f.free()

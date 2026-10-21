@@ -52,8 +52,10 @@ const WRITE_STROKE_WEIGHT := 0.1
 ## Duración del gesto rápido con que se deja la pluma al interrumpir la escritura.
 const WRITE_ABORT_TIME := 0.25
 ## Postura de la mano derecha al escribir (pitch y giro, grados); en la izquierda el giro se invierte.
-const WRITE_PITCH := 60.0
-const WRITE_ROLL := 10.0
+const WRITE_PITCH := 10.0
+const WRITE_ROLL := 50.0
+## Cuánto se desliza la mano a lo largo del renglón (m): los trazos salen de los dedos, no del brazo.
+const WRITE_SLIDE := 0.025
 ## Valor de `roll` de `_wp` que significa "sin giro pedido".
 const NO_ROLL := -1000.0
 
@@ -649,10 +651,10 @@ func _press_clock() -> void:
 	_set_phase(&"press")
 	var top := clock.button_top_world(color)
 	var wps := _lift_wps(rig)
-	wps.append(_wp(top + Vector3(0, 0.08, 0), 70.0, 1.0))
-	wps.append(_wp(top + Vector3(0, 0.025, 0), 73.0, 0.6))
-	wps.append(_wp(top + Vector3(0, 0.004, 0), 75.0, 0.4))
-	await _flow(rig, wps, _dur(0.7), {"fitts": true, "events": [_ev(0.05, func() -> void: rig.set_pose(HandRig.Pose.POINT, _dur(0.2)))]})
+	wps.append(_wp(top + Vector3(0, 0.08, 0), 55.0, 1.0))
+	wps.append(_wp(top + Vector3(0, 0.025, 0), 52.0, 0.6))
+	wps.append(_wp(top + Vector3(0, 0.004, 0), 50.0, 0.4))
+	await _flow(rig, wps, _dur(0.7), {"fitts": true, "events": [_ev(0.05, func() -> void: rig.set_pose(HandRig.Pose.PRESS, _dur(0.2)))]})
 	clock.press_button(color)
 	clock_hit.emit(color)
 	_at_contact = true
@@ -711,11 +713,11 @@ func _run_write(_job: Dictionary) -> void:
 	var strokes := 7
 	var first := wps.size() + 1
 	for k in strokes:
-		var x := 0.05 * float(k + 1) / float(strokes)
+		var x := WRITE_SLIDE * float(k + 1) / float(strokes)
 		var lift := 0.0035 if k % 2 == 0 else 0.0
 		wps.append(_wp(start + dir * x + off + Vector3(0, lift, _rng.randf_range(-0.003, 0.003)), ow.x, WRITE_STROKE_WEIGHT, ow.y))
 	var last := wps.size()
-	wps.append(_wp(start + dir * 0.05 + off + up * 0.03, ow.x, 1.0, ow.y))
+	wps.append(_wp(start + dir * WRITE_SLIDE + off + up * 0.03, ow.x, 1.0, ow.y))
 	wps.append(_wp(pen_grip + up * 0.035, mid.x, 1.0, mid.y))
 	var i_down := wps.size()
 	wps.append(_wp(pen_grip + up * 0.012, og.x, 0.6, og.y))

@@ -14,7 +14,7 @@ extends Node3D
 ## Cuando no hay trabajo (`set_active(false)`) el IK se desvanece y el brazo vuelve a la
 ## animación del personaje (reposo, pensar, etc.).
 
-enum Pose { OPEN, PINCH, GRIP, POINT }
+enum Pose { OPEN, PINCH, GRIP, PRESS }
 
 ## Alcance cómodo de la muñeca desde el hombro (el brazo mide ~0,59 m).
 const REACH_COMFORT := 0.55
@@ -36,16 +36,22 @@ const ELBOW_BACK := 0.35
 ## Radio del eje de pinza cuando no hay agarre, y de la pluma.
 const DEFAULT_R := 0.014
 const PEN_R := 0.0045
-## Flexión del índice al pulsar con la yema (casi extendido).
-const POINT_C := 0.12
+## Flexión de índice, medio y anular al pulsar con los dedos juntos (casi extendidos, algo curvos).
+const PRESS_C := 0.2
 ## Pitch con el que se planea la pinza de la pluma y la mano sin agarre (grados).
 const PLAN_PITCH := 55.0
+## Superficie bajo la mano, para que los dedos no la atraviesen: la mesa, el tablero (sobre su huella,
+## con el marco) o la hoja de la planilla (al escribir).
+const BOARD_HALF := 0.24
+const PAPER_TOP := TABLE_TOP + 0.008
 ## Eje de la pluma (de la punta hacia atrás) en el espacio de la mano derecha, al tomarla de la mesa
 ## (cruzada ante los dedos, pinza de frente) y al escribir (apoyada en la membrana entre pulgar e
 ## índice, en diagonal sobre los dedos sin atravesarlos). En la mano izquierda se reflejan (X
 ## invertida). Entre una y otra la pluma pivota en la pinza (`set_tool_blend`).
+## Oposición pulgar-índice al escribir (grados): las yemas sujetan la pluma de lado, no diametrales; el medio la sostiene por debajo.
+const PEN_WRITE_OPP := 150.0
 const PEN_AXIS_GRASP := Vector3(0.0, 0.2, -0.98)
-const PEN_AXIS_WRITE := Vector3(0.5, -0.5, -0.7)
+const PEN_AXIS_WRITE := Vector3(0.91, -0.34, 0.23)
 ## Distancia (m) del punto de pinza a la pieza a la que la mano ya adopta la orientación de agarre.
 const GRASP_NEAR := 0.02
 const GRASP_FAR := 0.11
@@ -60,7 +66,7 @@ const POSE_CURLS := {
 	Pose.OPEN: [0.05, 0.12, 0.16, 0.20, 0.26],
 	Pose.PINCH: [0.55, 0.60, 0.9, 1.2, 1.3],
 	Pose.GRIP: [0.90, 1.20, 1.30, 1.35, 1.40],
-	Pose.POINT: [0.70, 0.12, 1.10, 1.25, 1.30],
+	Pose.PRESS: [0.70, 0.20, 0.20, 0.24, 0.32],
 }
 
 var figure: SeatedFigure
@@ -85,9 +91,9 @@ var _time: float = 0.0
 var _active: bool = false
 var _influence: float = 0.0
 var _curls := PackedFloat32Array([0.05, 0.12, 0.16, 0.2, 0.26])
-## Cuánto se cierra la mano sobre el agarre activo (0 = abierta, 1 = tocando) y cuánto señala.
+## Cuánto se cierra la mano sobre el agarre activo (0 = abierta, 1 = tocando) y cuánto pulsa con los dedos juntos.
 var _grasp_w: float = 0.0
-var _point_w: float = 0.0
+var _press_w: float = 0.0
 ## Agarre activo: datos de `PieceFactory.grasp_for` (o de una herramienta); vacío = ninguno.
 var _grasp: Dictionary = {}
 var _grasp_kind: StringName = &""
@@ -102,6 +108,9 @@ var _tool_local_w := Basis.IDENTITY
 var _tool_blend: float = 0.0
 var _tool_rigid: bool = false
 var _plan_swing: float = 0.0
+## Flexión de índice y pulgar del plan de pinza actual (`_pinch_target`): los dedos que tocan parten de ella.
+var _plan_ci: float = -1.0
+var _plan_ct: float = -1.0
 var _pose_tween: Tween
 var _influence_tween: Tween
 var _hand_basis := Basis.IDENTITY
@@ -138,10 +147,10 @@ func setup(p_figure: SeatedFigure, p_side: StringName) -> void:
 func _prewarm_plans() -> void:
 	for t in [ChessPiece.PAWN, ChessPiece.ROOK, ChessPiece.KNIGHT, ChessPiece.BISHOP, ChessPiece.QUEEN, ChessPiece.KING]:
 		var g := PieceFactory.grasp_for(t)
-		hand_modifier.pinch_plan(maxf(float(g.radius), 0.0045), deg_to_rad(float(g.pitch)), deg_to_rad(float(g.roll)))
+		hand_modifier.pinch_plan(maxf(float(g.radius), 0.0045), deg_to_rad(float(g.pitch)), deg_to_rad(float(g.roll)), 0.0, Vector3.ZERO, float(g.opposition))
 	hand_modifier.pinch_plan(DEFAULT_R, deg_to_rad(PLAN_PITCH), 0.0)
 	hand_modifier.pinch_plan(PEN_R, deg_to_rad(PLAN_PITCH), 0.0, 0.0, pen_axis(false))
-	hand_modifier.pinch_plan(PEN_R, deg_to_rad(PLAN_PITCH), 0.0, 0.0, pen_axis(true))
+	hand_modifier.pinch_plan(PEN_R, deg_to_rad(PLAN_PITCH), 0.0, 0.0, pen_axis(true), PEN_WRITE_OPP)
 
 
 func shoulder_position() -> Vector3:
@@ -323,14 +332,16 @@ func _pinch_local() -> Vector3:
 
 ## Punto de pinza deseado (espacio de la mano): el eje de la pieza entre las yemas de pulgar e
 ## índice, derivado de la geometría real de los dedos (`ArmPoseModifier.pinch_plan`). Con la pose
-## POINT es la yema del índice.
+## PRESS es el punto de las yemas de índice, medio y anular juntas.
 func _pinch_target() -> Vector3:
 	var r: float = DEFAULT_R
 	# Pitch y giro fijos (los del agarre o unos por defecto): el plan se calcula una vez por radio.
 	var pitch := deg_to_rad(PLAN_PITCH)
 	var roll := 0.0
+	var opp := 180.0
 	if not _grasp.is_empty():
 		r = maxf(float(_grasp.get("radius", DEFAULT_R)), 0.0045)
+		opp = float(_grasp.get("opposition", 180.0))
 		if float(_grasp.get("pitch", -1.0)) > 0.0:
 			pitch = deg_to_rad(float(_grasp.pitch))
 			roll = deg_to_rad(float(_grasp.get("roll", 0.0)))
@@ -338,17 +349,31 @@ func _pinch_target() -> Vector3:
 	if _grasp_kind == &"tool":
 		# La pinza se mueve del plan de la toma al del agarre de escritura según la pluma pivota.
 		var pg: Dictionary = hand_modifier.pinch_plan(r, pitch, roll, 0.0, pen_axis(false))
-		var pw: Dictionary = hand_modifier.pinch_plan(r, pitch, roll, 0.0, pen_axis(true))
+		var pw: Dictionary = hand_modifier.pinch_plan(r, pitch, roll, 0.0, pen_axis(true), PEN_WRITE_OPP)
 		plan = pg.duplicate()
 		plan["a"] = (pg.a as Vector3).lerp(pw.a as Vector3, _tool_blend)
 		plan["sw"] = lerpf(float(pg.sw), float(pw.sw), _tool_blend)
+		plan["ci"] = lerpf(float(pg.ci), float(pw.ci), _tool_blend)
+		plan["ct"] = lerpf(float(pg.ct), float(pw.ct), _tool_blend)
 	else:
-		plan = hand_modifier.pinch_plan(r, pitch, roll)
+		plan = hand_modifier.pinch_plan(r, pitch, roll, 0.0, Vector3.ZERO, opp)
 	_plan_swing = float(plan.get("sw", 0.0))
+	_plan_ci = float(plan.get("ci", -1.0))
+	_plan_ct = float(plan.get("ct", -1.0))
 	var a: Vector3 = plan.a
-	if _point_w > 0.001:
-		a = a.lerp(hand_modifier.fingertip_point(ArmPoseModifier.INDEX, POINT_C), _point_w)
+	if _press_w > 0.001:
+		a = a.lerp(hand_modifier.press_point(PRESS_C), _press_w)
 	return a
+
+
+## Altura de la superficie sobre la que está la mano en `p` (mundo): hoja con la pluma, tablero sobre
+## su huella, y la mesa en el resto.
+func surface_height(p: Vector3) -> float:
+	if _grasp_kind == &"tool":
+		return PAPER_TOP
+	if absf(p.x) < BOARD_HALF and absf(p.z) < BOARD_HALF:
+		return BoardView.BOARD_TOP
+	return TABLE_TOP
 
 
 func _axis_dir() -> Vector3:
@@ -599,6 +624,7 @@ func _feed_fingers(dt: float) -> void:
 	m.time = _time
 	m.dt = dt
 	m.tremor = lerpf(0.006, 0.07, pow(clampf(stress, 0.0, 1.0), 1.5))
+	m.floor_y = surface_height(_grip)
 	if _grasp.is_empty():
 		m.grasp = {}
 		return
@@ -619,27 +645,29 @@ func _feed_fingers(dt: float) -> void:
 	_grasp_data["weight"] = _grasp_w
 	_grasp_data["relax"] = 0.7
 	_grasp_data["thumb_swing"] = _plan_swing
+	_grasp_data["plan_ci"] = _plan_ci
+	_grasp_data["plan_ct"] = _plan_ct
 	m.grasp = _grasp_data
 
 
 # --- Poses de dedos -----------------------------------------------------------------
 
 ## Mezcla hacia una pose en `duration` segundos (corrutina: se puede esperar). PINCH con un
-## agarre activo cierra los dedos hasta tocar la pieza; POINT estira el índice (pulsar el reloj).
+## agarre activo cierra los dedos hasta tocar la pieza; PRESS estira los dedos juntos (pulsar el reloj).
 func set_pose(pose: Pose, duration: float = 0.2) -> void:
 	if _pose_tween != null and _pose_tween.is_valid():
 		_pose_tween.kill()
 	var goal := PackedFloat32Array(POSE_CURLS[pose])
 	var g_goal := 1.0 if pose == Pose.PINCH else 0.0
-	var p_goal := 1.0 if pose == Pose.POINT else 0.0
+	var p_goal := 1.0 if pose == Pose.PRESS else 0.0
 	if duration <= 0.0 or not is_inside_tree():
 		_set_curls(goal)
 		_grasp_w = g_goal
-		_point_w = p_goal
+		_press_w = p_goal
 		return
 	var from := _curls.duplicate()
 	var g0 := _grasp_w
-	var p0 := _point_w
+	var p0 := _press_w
 	_pose_tween = create_tween()
 	_pose_tween.tween_method(func(t: float) -> void:
 		var c := PackedFloat32Array()
@@ -648,7 +676,7 @@ func set_pose(pose: Pose, duration: float = 0.2) -> void:
 			c[i] = lerpf(from[i], goal[i], t)
 		_set_curls(c)
 		_grasp_w = lerpf(g0, g_goal, t)
-		_point_w = lerpf(p0, p_goal, t), 0.0, 1.0, duration) \
+		_press_w = lerpf(p0, p_goal, t), 0.0, 1.0, duration) \
 			.set_trans(Tween.TRANS_SINE)
 	await _pose_tween.finished
 

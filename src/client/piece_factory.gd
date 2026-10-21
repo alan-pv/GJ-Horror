@@ -34,20 +34,23 @@ const HEIGHTS := {
 const PROFILE_STEP := 0.001
 ## Por encima de la altura del agarre + esto no cuenta como superficie de contacto (cruz del rey...).
 const CONTACT_BAND := 0.012
-## Agarre por tipo: altura de la pinza (m), dedos que tocan y pitch de la mano (grados).
+## Agarre por tipo: altura de la pinza (m), dedos que tocan, pitch y giro de la mano (grados) y
+## `opposition`: el ángulo (grados, entre 80 y 180) que forman, visto desde el eje de la pieza, los
+## contactos de pulgar e índice (180 = pinza diametral, a ambos lados). Las piezas pequeñas se toman
+## casi de frente (150) y las de corona, con el medio de apoyo, con el pulgar más al costado (120).
 ## Peón por la cabeza; torre y alfil por el cuerpo; caballo por el cuello; dama y rey por la corona.
 const GRASPS := {
-	ChessPiece.PAWN: {"style": &"pinch", "height": 0.024, "pitch": 15.0, "roll": 15.0,
+	ChessPiece.PAWN: {"style": &"pinch", "height": 0.024, "pitch": 15.0, "roll": 15.0, "opposition": 150.0,
 		"contact": [ArmPoseModifier.THUMB, ArmPoseModifier.INDEX]},
-	ChessPiece.ROOK: {"style": &"pinch", "height": 0.016, "pitch": 15.0, "roll": 15.0,
+	ChessPiece.ROOK: {"style": &"pinch", "height": 0.016, "pitch": 15.0, "roll": 15.0, "opposition": 140.0,
 		"contact": [ArmPoseModifier.THUMB, ArmPoseModifier.INDEX]},
-	ChessPiece.KNIGHT: {"style": &"pinch", "height": 0.028, "pitch": 15.0, "roll": 15.0,
+	ChessPiece.KNIGHT: {"style": &"pinch", "height": 0.028, "pitch": 15.0, "roll": 15.0, "opposition": 150.0,
 		"contact": [ArmPoseModifier.THUMB, ArmPoseModifier.INDEX]},
-	ChessPiece.BISHOP: {"style": &"pinch", "height": 0.024, "pitch": 15.0, "roll": 15.0,
+	ChessPiece.BISHOP: {"style": &"pinch", "height": 0.024, "pitch": 15.0, "roll": 15.0, "opposition": 150.0,
 		"contact": [ArmPoseModifier.THUMB, ArmPoseModifier.INDEX]},
-	ChessPiece.QUEEN: {"style": &"crown", "height": 0.058, "pitch": 15.0, "roll": 15.0,
+	ChessPiece.QUEEN: {"style": &"crown", "height": 0.058, "pitch": 15.0, "roll": 15.0, "opposition": 112.0,
 		"contact": [ArmPoseModifier.THUMB, ArmPoseModifier.INDEX, ArmPoseModifier.MIDDLE]},
-	ChessPiece.KING: {"style": &"crown", "height": 0.062, "pitch": 15.0, "roll": 15.0,
+	ChessPiece.KING: {"style": &"crown", "height": 0.062, "pitch": 15.0, "roll": 15.0, "opposition": 120.0,
 		"contact": [ArmPoseModifier.THUMB, ArmPoseModifier.INDEX, ArmPoseModifier.MIDDLE]},
 }
 
@@ -70,7 +73,7 @@ static func grip_height(piece: int) -> float:
 ## Datos del agarre de una pieza (por código o tipo). Claves: `style` (&"pinch" pinza de pulgar,
 ## índice y medio sobre el cuerpo; &"crown" mano sobre la corona), `height` (m desde la base),
 ## `radius` (radio medido en la malla a esa altura), `contact` (dedos de `ArmPoseModifier` cuya
-## yema toca), `pitch` (grados de la mano al agarrar), `top`, `profile` y `step` (radio de la
+## yema toca), `pitch`, `roll` y `opposition` (grados de la mano y de la pinza al agarrar), `top`, `profile` y `step` (radio de la
 ## malla cada `step` m desde la base).
 static func grasp_for(piece: int) -> Dictionary:
 	var type := ChessPiece.type_of(piece)
@@ -82,7 +85,7 @@ static func grasp_for(piece: int) -> Dictionary:
 			"type": type, "style": def.style, "height": h, "radius": radius_at(type, h),
 			"contact": PackedInt32Array(def.contact), "pitch": def.pitch,
 			"top": HEIGHTS[type], "profile": prof.slice(0, mini(int(round((h + CONTACT_BAND) / PROFILE_STEP)) + 1, prof.size())), "step": PROFILE_STEP,
-			"roll": def.roll,
+			"roll": def.roll, "opposition": def.opposition,
 		}
 	return _grasps[type]
 

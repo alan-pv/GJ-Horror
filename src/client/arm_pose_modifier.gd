@@ -42,6 +42,14 @@ const BISECT_STEPS := 6
 const C_SLEW := 14.0
 ## Margen de la yema (m) por debajo del cual se considera tocando.
 const CONTACT_EPS := 0.0004
+## Con el plan de pinza, hasta qué distancia (m) de la superficie se da por buena la flexión del plan.
+const PLAN_TOL := 0.0015
+## Fracción del semigrosor del dedo que sus articulaciones (la línea central) mantienen sobre la superficie.
+const FLOOR_MARGIN := 0.8
+## Si la muñeca está más alto que esto sobre la superficie ningún dedo puede tocarla (se omite el cálculo).
+const FLOOR_REACH := 0.20
+## Flexión máxima de un dedo que ni abierto cabe sobre la superficie.
+const FLOOR_LOW_CURL := 0.5
 ## Longitud de yema y grosor de respaldo (sin malla de piel).
 const FALLBACK_TIP_RATIO := 0.8
 const FALLBACK_PAD := 0.006
@@ -67,7 +75,7 @@ class Chain:
 			var b := Basis(Vector3(0, 0, 1), a) * rest[k].basis
 			if k == 0 and sw != 0.0:
 				# Abducción (solo pulgar): lo acerca o aleja de los demás dedos, sobre X de la mano.
-				b = Basis(Vector3(1, 0, 0), -sgn * sw) * b
+				b = Basis(Vector3(1, 0, 0), -sw) * b
 			t = t * Transform3D(b, rest[k].origin)
 		return t
 
@@ -123,6 +131,9 @@ var tremor: float = 0.0
 var time: float = 0.0
 ## Paso de tiempo para limitar la rapidez de los dedos (lo fija el dueño; 0 = sin límite).
 var dt: float = 0.0
+## Altura (mundo) de la superficie bajo la mano (mesa, tablero o papel): ningún dedo la atraviesa
+## (`_floor_cap` limita su flexión). `-INF` = sin límite (pruebas).
+var floor_y: float = -INF
 
 var _sk: Skeleton3D
 var _hand: int = -1
@@ -151,6 +162,11 @@ func _process_modification() -> void:
 	sk.set_bone_pose_rotation(_hand, (pb.inverse() * want).orthonormalized().get_rotation_quaternion())
 	var sgn := _sign()
 	var targets := _targets(sk, sk_xf)
+	var hand_world := Transform3D.IDENTITY
+	var use_floor := floor_y > -1e8
+	if use_floor:
+		hand_world = sk_xf * _global(sk, parent) * Transform3D(Basis(sk.get_bone_pose_rotation(_hand)), sk.get_bone_pose_position(_hand))
+		use_floor = hand_world.origin.y < floor_y + FLOOR_REACH
 	if _legacy:
 		# Un solo hueso para los cuatro dedos: promedio de sus flexiones.
 		targets[INDEX] = (targets[1] + targets[2] + targets[3] + targets[4]) * 0.25
@@ -159,12 +175,48 @@ func _process_modification() -> void:
 		if ch == null:
 			continue
 		var c: float = targets[f]
+		if use_floor:
+			c = minf(c, _floor_cap(ch, hand_world, c, sgn, _swing if f == THUMB else 0.0))
 		if dt > 0.0:
 			c = move_toward(_c_out[f], c, C_SLEW * dt) if c > _c_out[f] else c
 		if _touch[f] >= 0.0:
 			c = minf(c, _touch[f])
 		_c_out[f] = c
 		_apply(sk, ch, c - _tremor(f), sgn, _swing if f == THUMB else 0.0)
+
+
+## Mayor flexión (hasta `c`) con la que las articulaciones y la punta del dedo quedan sobre la
+## superficie `floor_y` (con el margen `FLOOR_MARGIN` de su semigrosor). Búsqueda por bisección.
+func _floor_cap(ch: Chain, hand_world: Transform3D, c: float, sgn: float, sw: float) -> float:
+	var margin := ch.pad * FLOOR_MARGIN
+	if _lowest(ch, hand_world, c, sgn, sw) - margin >= floor_y:
+		return c
+	if _lowest(ch, hand_world, 0.0, sgn, sw) - margin < floor_y:
+		# Ni abierto cabe (mano muy baja, p. ej. escribiendo): se deja a medio doblar, apoyado, en vez de estirado.
+		return minf(c, FLOOR_LOW_CURL)
+	var lo := 0.0
+	var hi := c
+	for i in BISECT_STEPS:
+		var mid := 0.5 * (lo + hi)
+		if _lowest(ch, hand_world, mid, sgn, sw) - margin >= floor_y:
+			lo = mid
+		else:
+			hi = mid
+	return lo
+
+
+## Altura mundo del punto más bajo (articulaciones 2 y 3 y la punta) del dedo con flexión `c`.
+func _lowest(ch: Chain, hand_world: Transform3D, c: float, sgn: float, sw: float) -> float:
+	var t := Transform3D.IDENTITY
+	var low := 1e9
+	for k in ch.bones.size():
+		var b := Basis(Vector3(0, 0, 1), c * ch.w[k] * sgn) * ch.rest[k].basis
+		if k == 0 and sw != 0.0:
+			b = Basis(Vector3(1, 0, 0), -sw) * b
+		t = t * Transform3D(b, ch.rest[k].origin)
+		if k > 0:
+			low = minf(low, (hand_world * t.origin).y)
+	return minf(low, (hand_world * (t * Vector3(0, ch.tip_len, 0))).y)
 
 
 ## Transformación global (espacio del esqueleto) de un hueso. Fuera del árbol (pruebas) el esqueleto
@@ -304,7 +356,7 @@ func _apply(sk: Skeleton3D, ch: Chain, c: float, sgn: float, sw: float = 0.0) ->
 		var a := c * ch.w[k] * sgn
 		var q := Quaternion(Vector3(0, 0, 1), a) * ch.rest[k].basis.get_rotation_quaternion()
 		if k == 0 and sw != 0.0:
-			q = Quaternion(Vector3(1, 0, 0), -sgn * sw) * q
+			q = Quaternion(Vector3(1, 0, 0), -sw) * q
 		sk.set_bone_pose_rotation(ch.bones[k], q.normalized())
 
 
@@ -339,6 +391,13 @@ func _targets(sk: Skeleton3D, sk_xf: Transform3D) -> PackedFloat32Array:
 	var u: Vector3 = (inv.basis * (grasp.axis_dir as Vector3)).normalized()
 	var relax: float = grasp.get("relax", 0.7)
 	var contact: PackedInt32Array = grasp.contact
+	# El plan de pinza (`pinch_plan`) da la flexión de índice y pulgar con las yemas a ambos lados de la
+	# pieza: se parte de ella, así el pulgar no se cierra por el camino más corto (a lo largo de los
+	# dedos, como garra) sino frente al índice. -1 = sin plan (búsqueda desde el fotograma anterior).
+	var plan_c := [-1.0, float(grasp.get("plan_ci", -1.0)), -1.0, -1.0, -1.0]
+	plan_c[THUMB] = float(grasp.get("plan_ct", -1.0))
+	if plan_c[THUMB] >= 0.0:
+		_swing_goal = float(grasp.get("thumb_swing", 0.0))
 	var dir_i := Vector3.ZERO
 	# Primero los dedos largos (el índice marca de qué lado queda el pulgar), el pulgar al final.
 	for f in [INDEX, MIDDLE, RING, PINKY, THUMB]:
@@ -350,9 +409,15 @@ func _targets(sk: Skeleton3D, sk_xf: Transform3D) -> PackedFloat32Array:
 			continue
 		var ct := -1.0
 		if f == THUMB:
-			ct = _solve_thumb(ch, sgn, p0, u, dir_i)
+			if plan_c[THUMB] >= 0.0:
+				ct = _solve_planned_thumb(ch, sgn, p0, u, plan_c[THUMB])
+			else:
+				ct = _solve_thumb(ch, sgn, p0, u, dir_i)
 		else:
-			ct = _solve_touch(ch, sgn, p0, u, f)
+			if plan_c[f] >= 0.0:
+				ct = _solve_planned(ch, sgn, p0, u, f, plan_c[f])
+			else:
+				ct = _solve_touch(ch, sgn, p0, u, f)
 			if f == INDEX and ct >= 0.0:
 				var rel := ch.pad_point(ct, sgn) - p0
 				dir_i = (rel - u * u.dot(rel)).normalized()
@@ -363,6 +428,65 @@ func _targets(sk: Skeleton3D, sk_xf: Transform3D) -> PackedFloat32Array:
 		_touch[f] = ct
 		out[f] = lerpf(curls[f], ct, gw)
 	return out
+
+
+## Pulgar con plan de pinza: la abducción del plan (con su rapidez limitada) y la flexión del plan
+## ajustada al contacto. Nunca deja la yema dentro de la pieza (la abducción se adelanta si hace falta).
+func _solve_planned_thumb(ch: Chain, sgn: float, p0: Vector3, u: Vector3, plan_ct: float) -> float:
+	_swing = move_toward(_swing, _swing_goal, 4.0 * maxf(dt, 0.016))
+	var guard := 0
+	while _swing != _swing_goal and guard < 64 and _dist(ch, sgn, 0.0, p0, u, _swing) < -CONTACT_EPS:
+		_swing = move_toward(_swing, _swing_goal, 0.01)
+		guard += 1
+	return _solve_planned(ch, sgn, p0, u, THUMB, plan_ct, _swing)
+
+
+## Flexión de un dedo que toca, partiendo de la del plan de pinza `c0` (yema al otro lado de la pieza
+## respecto del índice). Si la yema ya queda en la superficie (a menos de `PLAN_TOL`) se queda ahí; si
+## queda dentro se abre hasta salir; si queda fuera, se cierra un poco. A diferencia de `_solve_touch`
+## no toma el primer contacto desde el dedo abierto, que sería el lado cercano (garra).
+func _solve_planned(ch: Chain, sgn: float, p0: Vector3, u: Vector3, f: int, c0: float, sw: float = 0.0) -> float:
+	c0 = clampf(c0, 0.0, C_MAX)
+	var d := _dist(ch, sgn, c0, p0, u, sw)
+	if d >= -CONTACT_EPS and d <= PLAN_TOL:
+		_c_prev[f] = c0
+		return c0
+	var lo := -1.0
+	var hi := -1.0
+	if d < -CONTACT_EPS:
+		# Dentro: se abre hasta salir de la pieza.
+		hi = c0
+		var x := c0
+		while x > 0.0:
+			x = maxf(x - C_STEP, 0.0)
+			if _dist(ch, sgn, x, p0, u, sw) > -CONTACT_EPS:
+				lo = x
+				break
+			hi = x
+		if lo < 0.0:
+			_c_prev[f] = 0.0
+			return 0.0
+	else:
+		# Fuera por más de la tolerancia: se cierra (poco) hasta cruzar la superficie.
+		lo = c0
+		var x2 := c0
+		while x2 < minf(c0 + 0.3, C_MAX):
+			x2 = minf(x2 + C_STEP, C_MAX)
+			if _dist(ch, sgn, x2, p0, u, sw) <= CONTACT_EPS:
+				hi = x2
+				break
+			lo = x2
+		if hi < 0.0:
+			_c_prev[f] = c0
+			return c0
+	for i in BISECT_STEPS:
+		var mid := 0.5 * (lo + hi)
+		if _dist(ch, sgn, mid, p0, u, sw) > CONTACT_EPS:
+			lo = mid
+		else:
+			hi = mid
+	_c_prev[f] = hi
+	return hi
 
 
 ## Distancia con signo de la yema (flexión `c`) a la superficie de revolución del agarre.
@@ -478,21 +602,23 @@ func chain(f: int) -> Chain:
 ## Plan de la pinza pulgar-índice sobre un eje vertical (el de la pieza) de radio `radius`, con la
 ## mano inclinada `pitch` rad (dedos hacia abajo) y girada `roll` rad sobre los dedos (0 = palma
 ## abajo; 90° = palma de lado, pulgar arriba; el signo ya se ajusta al lado). Busca las flexiones de
-## pulgar e índice cuyas yemas quedan a ambos lados del eje (separación horizontal ≈ 2·radius) y
-## devuelve `{a, ct, ci}`: el punto del eje en el espacio de la mano (donde van la pieza y la
-## pinza), y las flexiones del pulgar y el índice. `lateral` (0..1) desplaza el eje del carril del
-## índice hacia el del medio (corona: la mano rodea con dos dedos). Se deriva de la geometría real
-## de los dedos y se guarda por parámetros. Con `axis` (unitario, en el espacio de la mano; la
-## pluma) el eje es ese en vez del vertical y `pitch`/`roll` no se usan.
-func pinch_plan(radius: float, pitch: float, roll: float = 0.0, lateral: float = 0.0, axis: Vector3 = Vector3.ZERO) -> Dictionary:
-	var key := "%s_%d_%d_%d_%d_%d_%d_%d" % [side, roundi(radius * 10000.0), roundi(pitch * 100.0), roundi(roll * 100.0), roundi(lateral * 10.0),
-			roundi(axis.x * 1000.0), roundi(axis.y * 1000.0), roundi(axis.z * 1000.0)]
+## pulgar e índice cuyas yemas tocan la pieza con una OPOSICIÓN de `opposition` grados: el ángulo,
+## visto desde el eje, entre el contacto del índice y el del pulgar (180° = pinza diametral, a ambos
+## lados; menos = el pulgar más hacia el lado del índice). Devuelve `{a, ct, ci, sw, opp, cost}`: el
+## punto del eje en el espacio de la mano (donde van la pieza y la pinza), las flexiones del pulgar
+## y el índice, la abducción del pulgar y la oposición lograda. `lateral` (0..1) desplaza el eje del
+## carril del índice hacia el del medio. Se deriva de la geometría real de los dedos y se guarda
+## por parámetros. Con `axis` (unitario, en el espacio de la mano; la pluma) el eje es ese en vez
+## del vertical y `pitch`/`roll` no se usan.
+func pinch_plan(radius: float, pitch: float, roll: float = 0.0, lateral: float = 0.0, axis: Vector3 = Vector3.ZERO, opposition: float = 180.0, ci_max: float = 1.1) -> Dictionary:
+	var key := "%s_%d_%d_%d_%d_%d_%d_%d_%d_%d" % [side, roundi(radius * 10000.0), roundi(pitch * 100.0), roundi(roll * 100.0), roundi(lateral * 10.0),
+			roundi(axis.x * 1000.0), roundi(axis.y * 1000.0), roundi(axis.z * 1000.0), roundi(opposition), roundi(ci_max * 100.0)]
 	if _plans.has(key):
 		return _plans[key]
 	var th := chain(THUMB)
 	var ix := chain(INDEX)
 	var sgn := _sign()
-	var plan := {"a": Vector3(-sgn * 0.045, 0.09, 0.034), "ct": 0.25, "ci": PINCH_C, "sw": 0.0}
+	var plan := {"a": Vector3(-sgn * 0.045, 0.09, 0.034), "ct": 0.25, "ci": PINCH_C, "sw": 0.0, "opp": 0.0}
 	if th == null or ix == null:
 		return plan
 	# Eje vertical en el espacio de la mano para esa inclinación y giro (la yaw no importa).
@@ -502,7 +628,8 @@ func pinch_plan(radius: float, pitch: float, roll: float = 0.0, lateral: float =
 	var best := 1e18
 	var ci := 0.3
 	var a := Vector3.ZERO
-	while ci <= 1.1:
+	var rot := [Basis(u, deg_to_rad(opposition)), Basis(u, -deg_to_rad(opposition))]
+	while ci <= ci_max:
 		# El índice toca de frente: el eje queda a un radio de su yema, hacia donde mira la yema.
 		var fr := ix.last_frame(ci, sgn)
 		var ip := fr * ix.contact_local
@@ -511,25 +638,29 @@ func pinch_plan(radius: float, pitch: float, roll: float = 0.0, lateral: float =
 		if n.length() > 0.001:
 			n = n.normalized()
 			var ax := ip + n * radius
+			# Punto del contacto del pulgar: el del índice girado `opposition` sobre el eje (a un lado u otro).
+			var want: Array[Vector3] = [ax + rot[0] * (ip - ax), ax + rot[1] * (ip - ax)]
 			var ct := 0.0
 			while ct <= 0.7:
 				var sw := 0.0
 				while sw <= 0.9:
 					var tp := th.pad_point(ct, sgn, sw)
-					# La yema del pulgar debe quedar al otro lado del eje (frente a la del índice) y fuera.
-					var rel := tp - (ax * 2.0 - ip)
-					var up := u.dot(rel)
-					var hz := (rel - u * up).length()
 					var rr := tp - ax
 					var dd := (rr - u * u.dot(rr)).length()
-					var cost := pow(hz * 1000.0, 2.0) + pow(up * 1000.0 * 0.5, 2.0) \
-							+ 4.0 * pow(ct - 0.25, 2.0) + 2.0 * pow(ci - 0.6, 2.0) + 30.0 * sw * sw
-					if dd < radius - 0.0005:
-						cost += 1e4  # dentro de la pieza
-					if cost < best:
-						best = cost
-						a = ax
-						plan = {"ct": ct, "ci": ci, "sw": sw}
+					for wp in want:
+						var rel := tp - wp
+						var up := u.dot(rel)
+						var hz := (rel - u * up).length()
+						var cost := pow(hz * 1000.0, 2.0) + pow(up * 1000.0 * 0.5, 2.0) \
+								+ 4.0 * pow(ct - 0.25, 2.0) + 2.0 * pow(ci - 0.6, 2.0) + 30.0 * sw * sw
+						if dd < radius - 0.0005:
+							cost += 1e4  # dentro de la pieza
+						if cost < best:
+							best = cost
+							a = ax
+							var v1 := rr - u * u.dot(rr)
+							var v2 := (ip - ax) - u * u.dot(ip - ax)
+							plan = {"ct": ct, "ci": ci, "sw": sw, "opp": rad_to_deg(v1.angle_to(v2))}
 					sw += 0.15
 				ct += 0.1
 		ci += 0.06
@@ -542,12 +673,20 @@ func pinch_plan(radius: float, pitch: float, roll: float = 0.0, lateral: float =
 	return plan
 
 
-## Punto de la yema (pulsar un botón con el dedo extendido) del dedo `finger` con flexión `c`.
-func fingertip_point(finger: int, c: float) -> Vector3:
-	var ch := chain(finger)
-	if ch == null:
+## Punto de contacto al pulsar con los dedos juntos (índice, medio y anular con flexión `c`): el
+## promedio de sus yemas, en el espacio de la mano.
+func press_point(c: float) -> Vector3:
+	var sgn := _sign()
+	var sum := Vector3.ZERO
+	var n := 0
+	for f in [INDEX, MIDDLE, RING]:
+		var ch := chain(f)
+		if ch != null:
+			sum += ch.pad_point(c, sgn)
+			n += 1
+	if n == 0:
 		return Vector3(0.0, 0.17, 0.0)
-	return ch.tip_point(c, _sign())
+	return sum / float(n)
 
 
 ## Flexión que cada dedo tiene ahora (para pruebas).
