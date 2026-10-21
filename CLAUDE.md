@@ -55,7 +55,7 @@ godot --headless --path . --script res://tests/run_tests.gd -- --filter=cheats
 xvfb-run -a -s "-screen 0 1280x720x24" godot --path . --rendering-driver opengl3   # ver la escena sin pantalla
 GODOT=/ruta/a/godot tools/build_web.sh                               # exportar a web
 ```
-En la máquina de Alan, `godot` no está en el PATH: es `"/home/alanpv/.local/share/Steam/steamapps/common/Godot Engine/godot.x11.opt.tools.64"` (4.7.2); no hay Xvfb, las capturas usan la pantalla real (`DISPLAY=:0`). Blender 5.2 sí está en el PATH: `blender --background --python art/<...>.py`.
+En la máquina de Alan, `godot` no está en el PATH: es `"/home/alanpv/.local/share/Steam/steamapps/common/Godot Engine/godot.x11.opt.tools.64"` (4.7.2); no hay Xvfb. Las capturas se hacen **sin ventana** con gamescope sin pantalla (usa la GPU): `gamescope --backend headless -W 1280 -H 720 -- "<godot>" --path . --rendering-driver opengl3 -- --screenshot=<png> ...`. Nunca abrir ventanas en la pantalla real (`DISPLAY=:0`): interrumpen al usuario. Blender 5.2 sí está en el PATH: `blender --background --python art/<...>.py`.
 En la nube no hay Godot instalado: descargar `Godot_v4.6-stable_linux.x86_64.zip` de los releases de GitHub al scratchpad.
 
 Toda funcionalidad nueva de lógica lleva pruebas; los cambios visuales se verifican con capturas (Xvfb) antes de entregar.
