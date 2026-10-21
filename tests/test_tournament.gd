@@ -404,3 +404,34 @@ func test_human_rival_gets_round_elo() -> void:
 		m.finish_round()
 		if m.is_finished():
 			break
+
+
+## Victorias de cada color en `n` partidas de fondo con Elo iguales y semillas fijas.
+## `natural` = sin fin previsto (llegan a mate, ahogado, material, 50 jugadas...).
+func _bg_color_wins(n: int, natural: bool) -> Array[int]:
+	var wins: Array[int] = [0, 0]
+	for i in n:
+		var m := TournamentManager.new(4, 100 + i)
+		var g := m.start_round()[0]
+		var bg := BackgroundMatch.new(g, m.sessions[g.white], m.sessions[g.black], 1200, 1200, 1000 + i * 7)
+		if natural:
+			bg.planned_end = 1.0e9
+		var guard := 0
+		while not bg.is_over() and guard < 3000:
+			bg.tick(1.0)
+			guard += 1
+		check(bg.is_over(), "la partida de fondo termina")
+		wins[bg.server.winner] += 1
+		check(not BackgroundMatch.is_draw_reason(bg.server.end_reason), "sin tablas a favor de las negras")
+	return wins
+
+
+func test_background_no_color_bias_planned_end() -> void:
+	var w := _bg_color_wins(60, false)
+	check(w[0] >= 21 and w[0] <= 39, "blancas ganan %d/60 con Elo iguales" % w[0])
+
+
+func test_background_no_color_bias_natural_endings() -> void:
+	# Antes las tablas (ahogado, 50 jugadas...) iban todas a las negras: ~5/40 blancas.
+	var w := _bg_color_wins(30, true)
+	check(w[0] >= 11 and w[0] <= 19, "blancas ganan %d/30 con Elo iguales" % w[0])

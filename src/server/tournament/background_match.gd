@@ -12,6 +12,9 @@ extends RefCounted
 ## resuelve con un resultado simulado (abandono o mate) según el Elo. Así las
 ## eliminaciones se reparten a lo largo de la ronda en vez de juntarse al final.
 ##
+## Las tablas (ahogado, material, 50 jugadas, repetición) darían la victoria a las
+## negras en el servidor; aquí se re-sortean por Elo para no sesgar por color.
+##
 ## El nivel (Elo) sesga la política: los fuertes capturan mejor, no regalan
 ## piezas y piensan algo más rápido, así que ganan más a menudo.
 
@@ -94,10 +97,24 @@ func tick(delta: float, can_move: bool = true) -> bool:
 ## Cierra la partida con un resultado simulado: gana el favorito del Elo con
 ## más frecuencia; el perdedor abandona o recibe mate.
 func _resolve_simulated() -> void:
+	var win := _pick_winner()
+	server.force_end(win, _pick_reason())
+
+
+## Ganador al azar ponderado por Elo (logística), sin sesgo de color.
+func _pick_winner() -> int:
 	var p_white := 1.0 / (1.0 + pow(10.0, (elo[1] - elo[0]) / 400.0))
-	var win := ChessPiece.WHITE if _rng.randf() < p_white else ChessPiece.BLACK
-	var reason := MatchServer.REASON_RESIGNED if _rng.randf() < RESIGN_CHANCE else MatchServer.REASON_CHECKMATE
-	server.force_end(win, reason)
+	return ChessPiece.WHITE if _rng.randf() < p_white else ChessPiece.BLACK
+
+
+func _pick_reason() -> String:
+	return MatchServer.REASON_RESIGNED if _rng.randf() < RESIGN_CHANCE else MatchServer.REASON_CHECKMATE
+
+
+## Motivos con que el servidor da la partida a las negras por ser tablas.
+static func is_draw_reason(reason: String) -> bool:
+	return reason in [MatchServer.REASON_STALEMATE, MatchServer.REASON_REPETITION,
+			MatchServer.REASON_FIFTY, MatchServer.REASON_MATERIAL]
 
 
 func _think_time(color: int) -> float:
@@ -170,5 +187,12 @@ static func choose_move(board: BoardState, elo_value: int, rng: RandomNumberGene
 
 
 func _on_game_over(winner: int, reason: String) -> void:
+	# En el torneo las tablas se las lleva siempre el negro; en una mesa de fondo eso
+	# sesgaría los resultados, así que se re-sortean por Elo como un final simulado.
+	if is_draw_reason(reason):
+		winner = _pick_winner()
+		reason = _pick_reason()
+		server.winner = winner
+		server.end_reason = reason
 	game.reason = reason
 	finished.emit(game)
