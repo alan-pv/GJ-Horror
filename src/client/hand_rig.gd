@@ -40,6 +40,12 @@ const PEN_R := 0.0045
 const POINT_C := 0.12
 ## Pitch con el que se planea la pinza de la pluma y la mano sin agarre (grados).
 const PLAN_PITCH := 55.0
+## Eje de la pluma (de la punta hacia atrás) en el espacio de la mano derecha, al tomarla de la mesa
+## (cruzada ante los dedos, pinza de frente) y al escribir (apoyada en la membrana entre pulgar e
+## índice, en diagonal sobre los dedos sin atravesarlos). En la mano izquierda se reflejan (X
+## invertida). Entre una y otra la pluma pivota en la pinza (`set_tool_blend`).
+const PEN_AXIS_GRASP := Vector3(0.0, 0.2, -0.98)
+const PEN_AXIS_WRITE := Vector3(0.5, -0.5, -0.7)
 ## Distancia (m) del punto de pinza a la pieza a la que la mano ya adopta la orientación de agarre.
 const GRASP_NEAR := 0.02
 const GRASP_FAR := 0.11
@@ -89,6 +95,12 @@ var _grasp_node: Node3D = null
 var _grasp_data: Dictionary = {}
 var _pinch_cur := Vector3(-0.012, 0.165, 0.0)
 var _pinch_init: bool = false
+## Pluma sujeta: orientación de la pluma respecto de la mano (fija mientras se sujeta) y si la
+## mano la lleva rígida (`hold_tool`).
+var _tool_local := Basis.IDENTITY
+var _tool_local_w := Basis.IDENTITY
+var _tool_blend: float = 0.0
+var _tool_rigid: bool = false
 var _plan_swing: float = 0.0
 var _pose_tween: Tween
 var _influence_tween: Tween
@@ -128,7 +140,8 @@ func _prewarm_plans() -> void:
 		var g := PieceFactory.grasp_for(t)
 		hand_modifier.pinch_plan(maxf(float(g.radius), 0.0045), deg_to_rad(float(g.pitch)), deg_to_rad(float(g.roll)))
 	hand_modifier.pinch_plan(DEFAULT_R, deg_to_rad(PLAN_PITCH), 0.0)
-	hand_modifier.pinch_plan(PEN_R, deg_to_rad(PLAN_PITCH), 0.0)
+	hand_modifier.pinch_plan(PEN_R, deg_to_rad(PLAN_PITCH), 0.0, 0.0, pen_axis(false))
+	hand_modifier.pinch_plan(PEN_R, deg_to_rad(PLAN_PITCH), 0.0, 0.0, pen_axis(true))
 
 
 func shoulder_position() -> Vector3:
@@ -148,6 +161,10 @@ func get_grip() -> Vector3:
 
 func get_pitch_deg() -> float:
 	return rad_to_deg(_pitch)
+
+
+func get_roll_deg() -> float:
+	return rad_to_deg(_roll)
 
 
 ## Activa el IK (con un fundido de `fade` s) o devuelve el brazo a la animación del personaje.
@@ -317,7 +334,16 @@ func _pinch_target() -> Vector3:
 		if float(_grasp.get("pitch", -1.0)) > 0.0:
 			pitch = deg_to_rad(float(_grasp.pitch))
 			roll = deg_to_rad(float(_grasp.get("roll", 0.0)))
-	var plan: Dictionary = hand_modifier.pinch_plan(r, pitch, roll)
+	var plan: Dictionary
+	if _grasp_kind == &"tool":
+		# La pinza se mueve del plan de la toma al del agarre de escritura según la pluma pivota.
+		var pg: Dictionary = hand_modifier.pinch_plan(r, pitch, roll, 0.0, pen_axis(false))
+		var pw: Dictionary = hand_modifier.pinch_plan(r, pitch, roll, 0.0, pen_axis(true))
+		plan = pg.duplicate()
+		plan["a"] = (pg.a as Vector3).lerp(pw.a as Vector3, _tool_blend)
+		plan["sw"] = lerpf(float(pg.sw), float(pw.sw), _tool_blend)
+	else:
+		plan = hand_modifier.pinch_plan(r, pitch, roll)
 	_plan_swing = float(plan.get("sw", 0.0))
 	var a: Vector3 = plan.a
 	if _point_w > 0.001:
@@ -400,6 +426,11 @@ func _update_anchor() -> void:
 	var hand := figure.bone_global(StringName("Hand." + side))
 	var hb := hand.basis.orthonormalized()
 	carry_anchor.global_position = hand.origin + hb * _pinch_local()
+	if _tool_rigid and carried != null and is_instance_valid(carried) and carried.get_parent() == carry_anchor:
+		# La pluma va fija en la mano: su orientación sale de la de la mano y el punto de agarre
+		# (a `PEN_GRIP` de la punta) queda en la pinza.
+		var pb := (hb * _tool_local.slerp(_tool_local_w, _tool_blend)).orthonormalized()
+		carried.transform = Transform3D(pb, -pb.x * ScoresheetView.PEN_GRIP)
 
 
 # --- Pieza sujeta -----------------------------------------------------------------
@@ -447,6 +478,8 @@ func begin_grasp(piece: Node3D) -> void:
 
 ## Fin del agarre (se llama sola al soltar con `release_piece`).
 func end_grasp() -> void:
+	_tool_rigid = false
+	_tool_blend = 0.0
 	_grasp = {}
 	_grasp_kind = &""
 	_grasp_node = null
@@ -465,6 +498,88 @@ func _begin_tool_grasp(tool_node: Node3D) -> void:
 	}
 	_grasp_kind = &"tool"
 	_grasp_node = tool_node
+
+
+## Eje de la pluma en el espacio de ESTA mano (reflejado en la izquierda): el de la toma o el de
+## escribir.
+func pen_axis(writing: bool) -> Vector3:
+	var u := PEN_AXIS_WRITE if writing else PEN_AXIS_GRASP
+	return Vector3(u.x * _pal, u.y, u.z).normalized()
+
+
+## Pivote de la pluma entre los dedos: 0 = como se tomó, 1 = en postura de escribir. La pluma gira
+## sobre la pinza (el ángulo respecto de los dedos cambia, como al reacomodar el lápiz).
+func set_tool_blend(k: float) -> void:
+	_tool_blend = clampf(k, 0.0, 1.0)
+
+
+## Prepara el agarre de la pluma (en la mesa o ya en la mano) para que la mano se oriente y los
+## dedos la rodeen desde la aproximación.
+func begin_tool(tool_node: Node3D) -> void:
+	_begin_tool_grasp(tool_node)
+
+
+## La pluma pasa a la mano sin saltos: cuelga del ancla y mantiene su orientación actual respecto
+## de la mano; desde aquí la mano la lleva rígida (la orientación de la pluma sale de la de la
+## mano, así gira al girar la muñeca).
+func hold_tool(tool_node: Node3D) -> void:
+	if _grasp_kind != &"tool" or _grasp_node != tool_node:
+		_begin_tool_grasp(tool_node)
+	var hb := figure.bone_global(StringName("Hand." + side)).basis.orthonormalized()
+	_tool_local = (hb.inverse() * tool_node.global_basis).orthonormalized()
+	# Postura de escribir: el giro más corto del eje actual al de escribir, sobre la pinza.
+	var ax := _tool_local.x.normalized()
+	_tool_local_w = (Basis(Quaternion(ax, pen_axis(true))) * _tool_local).orthonormalized()
+	_tool_blend = 0.0
+	tool_node.reparent(carry_anchor, true)
+	carried = tool_node
+	_tool_rigid = true
+
+
+## Pitch y roll (grados) con los que ESTA mano, mirando hacia `dir_h` (horizontal), lleva el eje de
+## toma de la pluma hacia `want` (dirección mundo de la punta hacia atrás). `z` del resultado es el
+## error angular en grados.
+func orient_for_pen(want: Vector3, dir_h: Vector3, pitch_pref: float = 55.0) -> Vector3:
+	return orient_for_axis(pen_axis(false), want, dir_h, _pal, pitch_pref)
+
+
+## Dirección mundo del eje de escribir de la pluma con la mano a `dir_h`, `pitch` y `roll` (grados).
+func pen_write_axis_world(dir_h: Vector3, pitch_deg: float, roll_deg: float) -> Vector3:
+	return basis_for(dir_h, deg_to_rad(pitch_deg), deg_to_rad(roll_deg), _pal) * pen_axis(true)
+
+
+## Busca (pitch, roll) en grados con los que una mano con `pal` (+1 R / -1 L), mirando a `dir_h`,
+## lleva el eje `u` (espacio de la mano) hacia `want` (mundo). Devuelve Vector3(pitch, roll, error
+## en grados). Rejilla más refinamiento; prefiere posturas cerca de `pitch_pref` y sin giros
+## exagerados.
+static func orient_for_axis(u: Vector3, want: Vector3, dir_h: Vector3, pal: float, pitch_pref: float = 62.0) -> Vector3:
+	var w := want.normalized()
+	var best := Vector3(pitch_pref, 0.0, 180.0)
+	var best_cost := 1e18
+	var step := 4.0
+	var p0 := 5.0
+	var r0 := -120.0
+	var p1 := 85.0
+	var r1 := 120.0
+	for _pass in 3:
+		var p := p0
+		while p <= p1:
+			var r := r0
+			while r <= r1:
+				var b := basis_for(dir_h, deg_to_rad(p), deg_to_rad(r), pal)
+				var err := rad_to_deg((b * u).angle_to(w))
+				var cost := err * err * 10.0 + pow((p - pitch_pref) * 0.05, 2.0) + pow(r * 0.03, 2.0)
+				if cost < best_cost:
+					best_cost = cost
+					best = Vector3(p, r, err)
+				r += step
+			p += step
+		step *= 0.25
+		p0 = best.x - step * 4.0
+		p1 = best.x + step * 4.0
+		r0 = best.y - step * 4.0
+		r1 = best.y + step * 4.0
+	return best
 
 
 ## Si algo cuelga de la mano sin pasar por `attach_*`, se deduce el agarre (pieza o herramienta).
@@ -489,9 +604,9 @@ func _feed_fingers(dt: float) -> void:
 		return
 	var base := Vector3.ZERO
 	var dir := Vector3.UP
-	if _grasp_kind == &"tool" and carried != null and is_instance_valid(carried):
-		base = carried.global_position
-		dir = carried.global_basis.x.normalized()
+	if _grasp_kind == &"tool" and _grasp_node != null and is_instance_valid(_grasp_node):
+		base = _grasp_node.global_position
+		dir = _grasp_node.global_basis.x.normalized()
 	elif _grasp_node != null and is_instance_valid(_grasp_node):
 		base = _grasp_node.global_position
 	else:

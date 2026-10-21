@@ -475,9 +475,11 @@ func chain(f: int) -> Chain:
 ## devuelve `{a, ct, ci}`: el punto del eje en el espacio de la mano (donde van la pieza y la
 ## pinza), y las flexiones del pulgar y el índice. `lateral` (0..1) desplaza el eje del carril del
 ## índice hacia el del medio (corona: la mano rodea con dos dedos). Se deriva de la geometría real
-## de los dedos y se guarda por parámetros.
-func pinch_plan(radius: float, pitch: float, roll: float = 0.0, lateral: float = 0.0) -> Dictionary:
-	var key := "%s_%d_%d_%d_%d" % [side, roundi(radius * 10000.0), roundi(pitch * 100.0), roundi(roll * 100.0), roundi(lateral * 10.0)]
+## de los dedos y se guarda por parámetros. Con `axis` (unitario, en el espacio de la mano; la
+## pluma) el eje es ese en vez del vertical y `pitch`/`roll` no se usan.
+func pinch_plan(radius: float, pitch: float, roll: float = 0.0, lateral: float = 0.0, axis: Vector3 = Vector3.ZERO) -> Dictionary:
+	var key := "%s_%d_%d_%d_%d_%d_%d_%d" % [side, roundi(radius * 10000.0), roundi(pitch * 100.0), roundi(roll * 100.0), roundi(lateral * 10.0),
+			roundi(axis.x * 1000.0), roundi(axis.y * 1000.0), roundi(axis.z * 1000.0)]
 	if _plans.has(key):
 		return _plans[key]
 	var th := chain(THUMB)
@@ -488,6 +490,8 @@ func pinch_plan(radius: float, pitch: float, roll: float = 0.0, lateral: float =
 		return plan
 	# Eje vertical en el espacio de la mano para esa inclinación y giro (la yaw no importa).
 	var u := HandRig.basis_for(Vector3(0, 0, 1), pitch, roll * sgn, sgn).transposed() * Vector3.UP
+	if axis != Vector3.ZERO:
+		u = axis.normalized()
 	var best := 1e18
 	var ci := 0.3
 	var a := Vector3.ZERO
@@ -526,6 +530,7 @@ func pinch_plan(radius: float, pitch: float, roll: float = 0.0, lateral: float =
 	if mid != null and lateral > 0.0:
 		a.z += lateral * (mid.pad_point(float(plan.ci), sgn).z - ix.pad_point(float(plan.ci), sgn).z)
 	plan["a"] = a
+	plan["cost"] = best
 	_plans[key] = plan
 	return plan
 

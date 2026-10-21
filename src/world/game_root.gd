@@ -18,6 +18,7 @@ extends Node3D
 ##   --shot-after=S       con shot-when, segundos extra tras empezar a llevar la pieza
 ##   --shot-rel=dx,dy,dz[,fov]  cámara a ese desplazamiento del punto de pinza al capturar
 ##   --shot-phase=F       espera a esa fase de la mano (reach|grab|carry|release|press|write); --shot-rival = la del rival
+##   --shot-write         la cámara de --shot-rel apunta a la mano que escribe (la del rival no es la que juega)
 ##   --players=N          jugadores del torneo (32 por defecto)
 ##   --clock=S            segundos por jugador en cada partida (180 por defecto)
 ##   --start-round=N      salta a la ronda N (el humano gana las anteriores, simuladas)
@@ -862,7 +863,9 @@ func _update_screenshot() -> void:
 
 func _take_screenshot() -> void:
 	var shooter := animators[rival_color] if _args.has("shot-rival") else animators[human_color]
-	var at := shooter.rig.carry_anchor.global_position
+	# Con --shot-write la cámara apunta a la mano que escribe (la otra mano en el rival).
+	var hand: HandRig = shooter.write_rig if _args.has("shot-write") and shooter.write_rig != null else shooter.rig
+	var at := hand.carry_anchor.global_position
 	print("[captura] punto de pinza de la mano: ", at)
 	if _args.has("shot-rel"):
 		# Cámara pegada a la mano: desplazamiento dx,dy,dz[,fov] respecto del punto de pinza.

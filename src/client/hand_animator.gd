@@ -51,6 +51,11 @@ const FLOW_STEPS := 10
 const WRITE_STROKE_WEIGHT := 0.1
 ## Duración del gesto rápido con que se deja la pluma al interrumpir la escritura.
 const WRITE_ABORT_TIME := 0.25
+## Postura de la mano derecha al escribir (pitch y giro, grados); en la izquierda el giro se invierte.
+const WRITE_PITCH := 60.0
+const WRITE_ROLL := 10.0
+## Valor de `roll` de `_wp` que significa "sin giro pedido".
+const NO_ROLL := -1000.0
 
 var rig: HandRig
 ## Mano que escribe en la planilla (por defecto la misma `rig`).
@@ -658,6 +663,12 @@ func _press_clock() -> void:
 ## aparece en la hoja. Es interrumpible: si llega una jugada o una trampa a la cola, deja la
 ## pluma en su sitio de forma rápida (`_write_abort`) y la entrada sigue pendiente, así que se
 ## vuelve a encolar un trabajo "write" tras el nuevo. No toma el cerrojo de movimiento.
+##
+## Toda la anotación es UN gesto continuo (`_flow`): la mano baja con la orientación de la pinza
+## de frente sobre la pluma tumbada (`HandRig.orient_for_pen`), la cierra sin detenerse y sube
+## llevándola; la pluma va fija en la mano (`HandRig.hold_tool`) y pivota en la pinza hasta la
+## postura de escribir (`set_tool_blend`) acoplada al avance de la curva, mientras la muñeca gira
+## de la postura de toma a la de escribir. Al terminar hace lo inverso y la deja tumbada.
 func _run_write(_job: Dictionary) -> void:
 	if sheet == null or not sheet.has_pending(color):
 		return
@@ -674,59 +685,60 @@ func _run_write(_job: Dictionary) -> void:
 	var pen_grip := sheet.pen_rest_grip(color)
 	var up := Vector3.UP
 	var abort := func() -> bool: return _write_should_abort()
-	var st := {"held": false, "committed": false, "tween": null}
-
-	# 1) Tomar la pluma: baja vertical y despacio; los dedos se cierran justo antes.
-	var wps := _lift_wps(w)
-	wps.append(_wp(pen_grip + up * 0.07, 55.0, 1.0))
-	wps.append(_wp(pen_grip + up * 0.025, 58.0, 0.7))
-	wps.append(_wp(pen_grip + up * 0.004, 60.0, 0.45))
-	var events := [
-		_ev(0.04, func() -> void: w.set_pose(HandRig.Pose.OPEN, _dur(0.2))),
-		_ev(0.84, func() -> void: w.set_pose(HandRig.Pose.PINCH, _dur(0.14))),
-	]
-	if not await _flow(w, wps, _dur(0.75), {"fitts": true, "events": events, "abort": abort}):
-		await _write_abort(w, st)
-		return
-	await _pause(0.04)
-	# La pluma pasa a la mano, inclinada como al escribir (punta abajo, hacia el cuerpo).
+	var pal := 1.0 if w.side == &"R" else -1.0
 	var start := sheet.write_point(color)
-	var toward_body := w.shoulder_position() - start
-	toward_body.y = 0.0
-	toward_body = toward_body.normalized()
-	var axis := (toward_body * 0.62 + up * 0.78).normalized()
-	var perp := (up - axis * axis.dot(up)).normalized()
-	var held_basis := Basis(axis, perp, axis.cross(perp))
-	pen.reparent(w.carry_anchor, true)
-	w.carried = pen
-	st.held = true
-	var from_t := pen.transform
-	var to_t := Transform3D(held_basis, -axis * ScoresheetView.PEN_GRIP)
-	var tw := create_tween()
-	tw.tween_method(func(k: float) -> void: pen.transform = from_t.interpolate_with(to_t, k), 0.0, 1.0, _dur(0.25))
-	st.tween = tw
+	# Posturas de la mano: la de la toma (pluma tumbada) y la de escribir.
+	var og := w.orient_for_pen(pen.global_basis.x, _flat_dir(w, pen_grip))
+	var ow := Vector2(WRITE_PITCH, WRITE_ROLL * pal)
+	var axis := w.pen_write_axis_world(_flat_dir(w, start), ow.x, ow.y)
+	var off := axis * ScoresheetView.PEN_GRIP
+	var mid := Vector2(lerpf(og.x, ow.x, 0.4), lerpf(og.y, ow.y, 0.4))
+	var st := {"held": false, "closing": false, "committed": false, "grip": pen_grip, "og": Vector2(og.x, og.y), "blend": 0.0}
+	w.begin_tool(pen)
+	w.set_pose(HandRig.Pose.OPEN, _dur(0.2))
 
-	# 2) Un solo gesto continuo: sube con la pluma, cruza a la hoja, escribe los trazos y
-	# regresa a dejarla (solo se detiene al posar la pluma). Los trazos van a velocidad
-	# casi constante (`cruise`) y repartidos por peso para que duren ~2 s.
+	# Puntos de paso: aproximación de frente, toma (sin parar), subida con giro, trazos y regreso.
+	var wps := _lift_wps(w)
+	wps.append(_wp(pen_grip + up * 0.07, og.x, 1.0, og.y))
+	wps.append(_wp(pen_grip + up * 0.025, og.x, 0.7, og.y))
+	wps.append(_wp(pen_grip, og.x, 0.3, og.y))
+	var i_grasp := wps.size()
+	wps.append(_wp(pen_grip + up * 0.035, mid.x, 0.8, mid.y))
+	wps.append(_wp(start + off + up * 0.03, ow.x, 1.0, ow.y))
+	var i_start := wps.size()
 	var dir := sheet.line_direction(color)
 	var total := _rng.randf_range(1.7, 2.3) / (SPEED * rig_speed())
 	var strokes := 7
-	var off := axis * ScoresheetView.PEN_GRIP
-	var wps2: Array = [
-		_wp(pen_grip + up * 0.05, 55.0, 1.3),
-		_wp(start + off + up * 0.03, 62.0, 1.0),
-	]
-	var first := wps2.size() + 1
+	var first := wps.size() + 1
 	for k in strokes:
 		var x := 0.05 * float(k + 1) / float(strokes)
 		var lift := 0.0035 if k % 2 == 0 else 0.0
-		wps2.append(_wp(start + dir * x + off + Vector3(0, lift, _rng.randf_range(-0.003, 0.003)), 62.0, WRITE_STROKE_WEIGHT))
-	var last := wps2.size()
-	wps2.append(_wp(pen_grip + up * 0.03, 58.0, 1.1))
-	wps2.append(_wp(pen_grip + up * 0.004, 60.0, 0.5))
+		wps.append(_wp(start + dir * x + off + Vector3(0, lift, _rng.randf_range(-0.003, 0.003)), ow.x, WRITE_STROKE_WEIGHT, ow.y))
+	var last := wps.size()
+	wps.append(_wp(start + dir * 0.05 + off + up * 0.03, ow.x, 1.0, ow.y))
+	wps.append(_wp(pen_grip + up * 0.035, mid.x, 1.0, mid.y))
+	var i_down := wps.size()
+	wps.append(_wp(pen_grip + up * 0.012, og.x, 0.6, og.y))
+	wps.append(_wp(pen_grip, og.x, 0.4, og.y))
+
 	var color_c := color
 	var step := func(_s: float, seg: float) -> void:
+		# Dedos: se cierran justo antes de llegar a la pluma.
+		if not st.closing and seg >= float(i_grasp) - 1.0:
+			st.closing = true
+			w.set_pose(HandRig.Pose.PINCH, _dur(0.16))
+		# La pluma pasa a la mano al llegar al punto de toma, sin saltos.
+		if not st.held and seg >= float(i_grasp):
+			st.held = true
+			w.hold_tool(pen)
+		if st.held:
+			if seg < float(i_start):
+				st.blend = smoothstep(float(i_grasp), float(i_start), seg)
+			elif seg > float(last):
+				st.blend = 1.0 - smoothstep(float(last), float(i_down), seg)
+			else:
+				st.blend = 1.0
+			w.set_tool_blend(st.blend)
 		if st.committed or seg < float(first):
 			return
 		if seg >= float(last):
@@ -734,13 +746,13 @@ func _run_write(_job: Dictionary) -> void:
 			sheet.reveal_next(color_c, 0.0)
 		else:
 			sheet.show_partial(color_c, (seg - float(first)) / float(last - first))
-	var dur2 := _dur(0.45) + total + _dur(0.5)
-	if not await _flow(w, wps2, dur2, {"abort": abort, "cruise": 0.5, "on_step": step}):
+	var dur := _dur(1.3) + total + _dur(0.6)
+	if not await _flow(w, wps, dur, {"abort": abort, "cruise": 0.4, "on_step": step}):
 		await _write_abort(w, st)
 		return
 	if not st.committed:
 		sheet.reveal_next(color, 0.0)
-	# 3) Suelta la pluma en su sitio.
+	# Suelta la pluma: ya está tumbada en su sitio (solo se asienta lo que falte).
 	w.release_piece()
 	w.set_pose(HandRig.Pose.OPEN, _dur(0.12))
 	await sheet.rest_pen(color, _dur(0.2))
@@ -755,20 +767,32 @@ func _run_write(_job: Dictionary) -> void:
 		_send_write_home(w)
 
 
+## Dirección horizontal del hombro de `w` al punto `p` (la guía de la mano, igual que `HandRig`).
+func _flat_dir(w: HandRig, p: Vector3) -> Vector3:
+	var to := p - w.shoulder_position()
+	to.y = 0.0
+	if to.length() < 0.02:
+		return w.figure.global_basis * Vector3(0, 0, 1)
+	return to.normalized()
+
+
 ## La escritura se interrumpió: si ya tenía la pluma la deja en su sitio con un gesto corto y
-## rápido; borra lo escrito a medias (la entrada sigue pendiente) y encola de nuevo la
-## anotación, que se hará tras el trabajo que interrumpió.
+## rápido (la pluma se tumba mientras la mano baja); borra lo escrito a medias (la entrada sigue
+## pendiente) y encola de nuevo la anotación, que se hará tras el trabajo que interrumpió.
 func _write_abort(w: HandRig, st: Dictionary) -> void:
-	if st.tween != null and (st.tween as Tween).is_valid():
-		(st.tween as Tween).kill()
 	if st.held:
-		var pen_grip := sheet.pen_rest_grip(color)
-		await _flow(w, [_wp(pen_grip + Vector3(0, 0.03, 0), 58.0, 1.2), _wp(pen_grip + Vector3(0, 0.004, 0), 60.0, 0.5)], WRITE_ABORT_TIME, {})
+		var pen_grip: Vector3 = st.grip
+		var og: Vector2 = st.og
+		var blend0: float = st.blend
+		var back := func(_s: float, seg: float) -> void:
+			w.set_tool_blend(blend0 * (1.0 - smoothstep(0.0, 2.0, seg)))
+		await _flow(w, [_wp(pen_grip + Vector3(0, 0.03, 0), og.x, 1.2, og.y), _wp(pen_grip, og.x, 0.5, og.y)], WRITE_ABORT_TIME, {"on_step": back})
 		w.release_piece()
 		w.set_pose(HandRig.Pose.OPEN, 0.1)
 		sheet.rest_pen(color, 0.12)  # se asienta mientras la mano ya se va
 		_at_contact = true
 	else:
+		w.end_grasp()
 		w.set_pose(HandRig.Pose.OPEN, 0.1)
 	if not st.committed:
 		sheet.clear_partial(color)
@@ -813,8 +837,8 @@ func _return_home() -> void:
 ## Punto de paso de un gesto: posición, pitch de la mano en grados (-1 = el del punto anterior)
 ## y `speed`, peso de velocidad del tramo que llega a él (menor = más lento; la aproximación
 ## de precisión usa pesos bajos y la salida pesos altos).
-static func _wp(p: Vector3, pitch: float = -1.0, speed: float = 1.0) -> Dictionary:
-	return {"p": p, "pitch": pitch, "w": speed}
+static func _wp(p: Vector3, pitch: float = -1.0, speed: float = 1.0, roll: float = NO_ROLL) -> Dictionary:
+	return {"p": p, "pitch": pitch, "w": speed, "roll": roll}
 
 
 ## Evento de un gesto: `fn` se llama al pasar la fracción de tiempo `t` (anticipa los dedos).
@@ -879,17 +903,27 @@ func _flow(hand: HandRig, wps: Array, duration: float, opts: Dictionary = {}) ->
 		return false
 	var pts: Array[Vector3] = [hand.get_grip()]
 	var pits: Array[float] = [hand.get_pitch_deg()]
+	# Giro de la mano sobre los dedos (grados): arranca del actual; sin ningún `roll` en los puntos
+	# vuelve a 0 (palma abajo), y con alguno los puntos sin él lo mantienen.
+	var rolls: Array[float] = [hand.get_roll_deg()]
+	var any_roll := false
+	for w in wps:
+		if float(w.get("roll", NO_ROLL)) > NO_ROLL + 1.0:
+			any_roll = true
 	var ws: Array[float] = [1.0]
 	var geo := 0.0
 	for w in wps:
 		geo += pts[-1].distance_to(w.p)
 		pts.append(w.p)
 		pits.append(pits[-1] if float(w.pitch) < 0.0 else float(w.pitch))
+		var wr := float(w.get("roll", NO_ROLL))
+		rolls.append(wr if wr > NO_ROLL + 1.0 else (rolls[-1] if any_roll else 0.0))
 		ws.append(maxf(float(w.w), 0.05))
 	var n := pts.size()
 	# Tabla de muestras: posición, pitch, posición entre puntos y longitud ponderada acumulada.
 	var sp: Array[Vector3] = [pts[0]]
 	var sy: Array[float] = [pits[0]]
+	var sr: Array[float] = [rolls[0]]
 	var sg: Array[float] = [0.0]
 	var sw: Array[float] = [0.0]
 	for i in n - 1:
@@ -897,12 +931,15 @@ func _flow(hand: HandRig, wps: Array, duration: float, opts: Dictionary = {}) ->
 		var p3 := pts[i + 2] if i + 2 < n else pts[n - 1] * 2.0 - pts[n - 2]
 		var y0 := pits[i - 1] if i > 0 else pits[0]
 		var y3 := pits[i + 2] if i + 2 < n else pits[n - 1]
+		var r0 := rolls[i - 1] if i > 0 else rolls[0]
+		var r3 := rolls[i + 2] if i + 2 < n else rolls[n - 1]
 		for k in range(1, FLOW_STEPS + 1):
 			var u := float(k) / float(FLOW_STEPS)
 			var q := _catmull(p0, pts[i], pts[i + 1], p3, u)
 			sw.append(sw[-1] + q.distance_to(sp[-1]) / ws[i + 1])
 			sp.append(q)
 			sy.append(cubic_interpolate(pits[i], pits[i + 1], y0, y3, u))
+			sr.append(cubic_interpolate(rolls[i], rolls[i + 1], r0, r3, u))
 			sg.append(float(i) + u)
 	var total_w: float = sw[-1]
 	var dur := maxf(duration, 0.03)
@@ -927,6 +964,7 @@ func _flow(hand: HandRig, wps: Array, duration: float, opts: Dictionary = {}) ->
 		var s := _profile(t, cruise)
 		var pos := sp[-1]
 		var pit := sy[-1]
+		var rol := sr[-1]
 		var seg := float(n - 1)
 		if t < 1.0:
 			var target := s * total_w
@@ -938,11 +976,13 @@ func _flow(hand: HandRig, wps: Array, duration: float, opts: Dictionary = {}) ->
 				f = 0.0
 				pos = sp[-1]
 				pit = lerpf(sy[0], sy[-1], s)
+				rol = lerpf(sr[0], sr[-1], s)
 			else:
 				pos = sp[idx].lerp(sp[idx + 1], f)
 				pit = lerpf(sy[idx], sy[idx + 1], f)
+				rol = lerpf(sr[idx], sr[idx + 1], f)
 			seg = lerpf(sg[idx], sg[idx + 1], f)
-		hand.set_grip(pos, pit)
+		hand.set_grip(pos, pit, rol)
 		for e in events.size():
 			if not fired[e] and t >= float(events[e].t):
 				fired[e] = true

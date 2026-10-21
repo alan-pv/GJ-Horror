@@ -13,7 +13,6 @@ Lo que quedó tras la mano de cinco dedos y el agarre por pieza.
 - [ ] Oposición pulgar-índice de 80° a 160° según la pieza: el pulgar cierra a lo largo de los dedos y no de lado, así que se ve como garra sobre la cabeza, no como pinza diametral.
 - [ ] Con agarres bajos (torre) los dedos que no tocan pueden quedar hasta 5 mm bajo la mesa: falta límite de suelo para ellos.
 - [ ] Dama y rey: el pulgar queda alto sobre la corona.
-- [ ] Pluma: el eje atraviesa un poco los dedos.
 - [ ] Reloj: variante de pulsar con los dedos juntos.
 - [ ] Medir el coste de la resolución de dedos en el juego (dos brazos con IK, 16 mesas) en una máquina modesta.
 
