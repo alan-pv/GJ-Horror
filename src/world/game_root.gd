@@ -57,6 +57,8 @@ const MODULES: Array[String] = [
 
 ## Tope de jugadas de las mesas de fondo por fotograma (reparte el costo).
 const BG_MOVES_PER_FRAME := 1
+## Nivel de la lámpara de una mesa con cadáver (el que deja la ejecución).
+const CORPSE_LEVEL := 0.4
 const CHEAT_IDS := ["own", "enemy", "steal"]
 const PERSONALITY_IDS := ["honesto", "paranoico", "tramposo_nervioso"]
 ## Suelo bajo el centro del asiento del rival (la silla del salón está a 0,80 m; se avanza para llegar al tablero).
@@ -107,6 +109,8 @@ var _shot_done: bool = false
 var _shot_armed_at: float = -1.0
 ## Vida de las mesas de fondo: índice de mesa -> BackgroundTable.
 var bg_tables: Dictionary = {}
+## Cadáveres restaurados de rondas pasadas (mesa -> `CharacterFigure`), ver `_restore_table`.
+var _corpses: Dictionary = {}
 var _bt_cost_ms: float = 0.0
 var _bt_max_ms: float = 0.0
 var _bt_frames: int = 0
@@ -169,6 +173,7 @@ func _ready() -> void:
 	hud.name = "Interfaz"
 	add_child(hud)
 	player.hud = hud
+	BlinkOverlay.resume_if_pending(self)
 	hud.show_capture_prompt = not _args.has("screenshot")
 	hud.set_mouse_captured(false)
 	player.mouse_capture_changed.connect(hud.set_mouse_captured)
@@ -503,14 +508,98 @@ func _setup_tournament(rng: RandomNumberGenerator) -> void:
 
 
 ## Lámparas del salón: las 16 mesas siguen encendidas en todas las rondas (las vacías
-## también, para que el salón no se vaya quedando a oscuras); solo se retiran las figuras
-## y las piezas de las mesas que no se usan. La atenuación llega solo con las ejecuciones.
+## también, para que el salón no se vaya quedando a oscuras). Las mesas de rondas pasadas
+## conservan lo que recuerda `HallMemory` (cadáver del perdedor y posición final de las piezas);
+## el resto queda sin figuras ni piezas. La atenuación llega con las ejecuciones (y los cadáveres
+## restaurados vuelven a la luz tenue con la que se quedaron).
 func _populate_hall() -> void:
+	if manager.round_no <= 1:
+		HallMemory.clear()
+	# Las mesas que se usan en esta ronda (1..N, el humano en la N) ya no son "pasadas".
+	HallMemory.release_used(HallLayout.human_table + 1)
 	for i in hall.table_count():
 		if i == HallLayout.human_table:
 			continue
 		hall.clear_table_board(i)
 		hall.set_table_active(i, true, false)
+		if HallMemory.has(i):
+			_restore_table(i)
+
+
+## Pone en la mesa `table` lo que recuerda `HallMemory`: piezas y, si lo hubo, el cadáver del
+## perdedor quieto en su asiento, en la pose final de `death_slump_table`.
+func _restore_table(table: int) -> void:
+	var e := HallMemory.entry(table)
+	hall.set_table_board(table, e.squares)
+	var seat: int = e.seat
+	if seat < 0:
+		return
+	var f := CharacterFigure.new()
+	f.name = "Cadaver%d" % table
+	hall.table_root(table).add_child(f)
+	f.position = Hall.seat_local(seat)
+	f.rotation.y = PI if seat == ChessPiece.WHITE else 0.0
+	f.setup(e.look)
+	f.hold_final_pose(&"death_slump_table")
+	_corpses[table] = f
+	hall.set_table_level(table, CORPSE_LEVEL, false)
+
+
+## Apunta en `HallMemory` el estado final de cada mesa de la ronda que se cierra: piezas y
+## cadáver del perdedor (solo si lo ejecutaron). Los ganadores no se guardan: se van a su mesa
+## nueva. Quien descansa no deja nada.
+func _remember_round() -> void:
+	for g in manager.games:
+		var t := g.table
+		if t < 0:
+			continue
+		if t == HallLayout.human_table:
+			if tgame == null or server == null:
+				continue
+			var dead := avatar != null and avatar.condemned and avatar.figure != null
+			HallMemory.remember(t, server.board.squares, rival_color if dead else -1,
+					avatar.figure.applied_look if dead else {})
+			continue
+		var bt: BackgroundTable = bg_tables.get(t)
+		if bt == null or bt.bg == null:
+			continue
+		var seat := bt.corpse_seat()
+		HallMemory.remember(t, bt.bg.server.board.squares, seat,
+				bt.figures[seat].applied_look if seat >= 0 else {})
+
+
+## Para el paseo (`RoundWalk`), en el primer parpadeo al levantarse y después de `start_round()`:
+## oculta a los ganadores vivos de la ronda anterior y vacía del todo (figuras, cadáveres y
+## piezas) las mesas que se usarán en la ronda nueva, salvo la destino del humano (la prepara
+## el paseo). Las demás quedan como las verá la escena recargada. Idempotente.
+func clear_tables_for_next_round() -> void:
+	if hall == null or manager == null:
+		return
+	var dest := manager.human_table()
+	var used := dest + 1 if dest >= 0 else 0
+	HallMemory.release_used(used)
+	var emptied := HallMemory.tables_to_empty(hall.table_count(), used, dest)
+	for t in emptied:
+		if t != HallLayout.human_table:
+			_empty_table(t)
+	for t in bg_tables:
+		if not emptied.has(t):
+			(bg_tables[t] as BackgroundTable).hide_living()
+			hall.set_table_level(t, CORPSE_LEVEL if HallMemory.has_corpse(t) else 1.0, false)
+	if avatar != null and not avatar.condemned:
+		avatar.visible = false
+
+
+func _empty_table(table: int) -> void:
+	var bt: BackgroundTable = bg_tables.get(table)
+	if bt != null:
+		bt.hide_all()
+	var corpse: CharacterFigure = _corpses.get(table)
+	if corpse != null:
+		corpse.queue_free()
+		_corpses.erase(table)
+	hall.clear_table_board(table)
+	hall.set_table_level(table, 1.0, false)
 
 
 func _start_background() -> void:
@@ -671,6 +760,7 @@ func _human_eliminated(reason: String) -> void:
 
 
 func _restart_tournament() -> void:
+	HallMemory.clear()
 	manager.new_tournament()
 	_reload()
 
@@ -692,6 +782,7 @@ func _finish_round_flow() -> void:
 		await get_tree().process_frame
 		if not is_inside_tree():
 			return
+	_remember_round()
 	var res := manager.finish_round()
 	_refresh_tournament_hud()
 	var human_id := manager.human_id

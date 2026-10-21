@@ -114,6 +114,30 @@ func has_figures() -> bool:
 	return figure(0) != null or figure(1) != null
 
 
+## Asiento del cadáver (figura entregada al árbitro y ejecutada), o -1 si no hay. Lo usa la
+## memoria del salón (`HallMemory`) al cerrar la ronda.
+func corpse_seat() -> int:
+	for color in 2:
+		if figures[color] != null and _seats[color].stage == &"condemned":
+			return color
+	return -1
+
+
+## Oculta al instante a quienes siguen vivos (los ganadores se van a su mesa nueva); los
+## cadáveres se quedan. Idempotente.
+func hide_living() -> void:
+	for color in 2:
+		if figures[color] != null and _seats[color].stage != &"condemned":
+			figures[color].visible = false
+
+
+## Oculta todas las figuras, cadáveres incluidos (la mesa se vacía). Idempotente.
+func hide_all() -> void:
+	for color in 2:
+		if figures[color] != null:
+			figures[color].visible = false
+
+
 ## Etapa actual del asiento (para pruebas y depuración).
 func stage_of(seat: int) -> StringName:
 	return _seats[seat].stage

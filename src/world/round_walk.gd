@@ -19,12 +19,17 @@ signal finished
 
 const SFX := "res://assets/audio/sfx/"
 const SPEED := CharacterFigure.WALK_SPEED
-## Rapidez (1/s) con que el cuerpo gira hacia donde camina.
-const TURN_RATE := 7.0
+## Frecuencia (1/s) del resorte amortiguado con que el cuerpo gira, y su velocidad angular máxima.
+const TURN_OMEGA := 5.5
+const TURN_MAX := 3.0
+## Metros por delante sobre la ruta a los que apunta el cuerpo (empieza a girar antes del vértice).
+const LOOK_AHEAD := 0.8
+## Segundos tras empezar a levantarse en que se cierran los ojos para vaciar las mesas.
+const BLINK_DELAY := 0.4
 ## Distancia al destino a partir de la cual se retira la silla y se ajusta la lámpara.
 const ARRIVAL_PREP := 3.2
 ## Metros antes de la silla en que empieza a girarse hacia la mesa.
-const FINAL_TURN := 0.9
+const FINAL_TURN := 1.4
 ## Segundos del final de `sit_down` en que la cámara se funde con la pose de reposo.
 const CAMERA_BLEND := 0.9
 ## Cabeceo de la mirada al caminar (rad; algo hacia abajo).
@@ -57,6 +62,9 @@ var _rng := RandomNumberGenerator.new()
 var _rival_proxy: CharacterFigure
 var _next_color: int = ChessPiece.WHITE
 var _next_rival: int = -1
+var _yaw_vel: float = 0.0
+var _blink: BlinkOverlay
+var _skipping: bool = false
 
 
 ## `p_to_table`: mesa destino (índice, en las coordenadas de la escena actual); `next_color`: color
@@ -85,9 +93,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 ## Salta el paseo: corte directo a la escena nueva.
 func skip() -> void:
-	if done:
+	if done or _skipping:
 		return
 	skipped = true
+	_skipping = true
+	await _close_eyes()
 	_finish()
 
 
@@ -113,6 +123,8 @@ func run() -> void:
 	_to_chair = _hall.chair(to_table, 0)
 	_to_home = _to_chair.global_transform
 	_prepare_player()
+	_blink = BlinkOverlay.new()
+	root.add_child(_blink)
 	_running = true
 	# Al levantarse la mirada sube al frente (la pose de reposo mira el tablero).
 	var yaw0 := _player.yaw
@@ -125,6 +137,7 @@ func run() -> void:
 	_step_player.volume_db = -9.0
 	add_child(_step_player)
 
+	_blink_clear_tables()
 	if _body.has_role(&"stand_up"):
 		_play_at_chair(SFX + "chair_scrape.wav", _from_chair.global_position, -8.0)
 		_chair_follow(_from_chair, _from_chair.global_transform, true, _body.clip_length(&"stand_up"))
@@ -137,8 +150,32 @@ func run() -> void:
 	await _sit()
 	if _aborted():
 		return
-	await get_tree().create_timer(0.12).timeout
+	await _close_eyes()
 	_finish()
+
+
+## Parpadeo al levantarse: con los ojos cerrados desaparecen los ganadores y se vacían las mesas de
+## la ronda nueva (`GameRoot.clear_tables_for_next_round`).
+func _blink_clear_tables() -> void:
+	await get_tree().create_timer(BLINK_DELAY).timeout
+	if _aborted() or _skipping:
+		return
+	await _blink.close()
+	if root.has_method(&"clear_tables_for_next_round"):
+		root.call(&"clear_tables_for_next_round")
+	if _aborted() or _skipping:
+		return
+	await get_tree().create_timer(0.1).timeout
+	if _aborted() or _skipping:
+		return
+	await _blink.open()
+
+
+## Cierra los ojos y deja la marca para que la escena nueva los abra (`BlinkOverlay.resume_if_pending`).
+func _close_eyes() -> void:
+	BlinkOverlay.pending_open = true
+	if _blink != null and is_instance_valid(_blink) and _blink.is_inside_tree():
+		await _blink.close()
 
 
 func _aborted() -> bool:
@@ -197,12 +234,15 @@ func _walk() -> void:
 			var to := target - _pos
 			to.y = 0.0
 			var d := to.length()
-			# Giro hacia la dirección de marcha; en el último tramo, hacia la mesa.
-			var want := HallWalk.yaw_for(to) if d > 0.001 else _yaw
+			# Rumbo hacia un punto adelantado de la ruta (empieza a girar antes del vértice); en
+			# el último tramo, hacia la mesa. El resorte suaviza el giro.
+			var ahead := HallWalk.look_ahead(_pos, path, i, LOOK_AHEAD) - _pos
+			ahead.y = 0.0
+			var want := HallWalk.yaw_for(ahead) if ahead.length() > 0.05 else _yaw
 			var left := _remaining(i, d)
 			if last and left < FINAL_TURN:
 				want = lerp_angle(want, PI, 1.0 - clampf(left / FINAL_TURN, 0.0, 1.0))
-			_yaw = lerp_angle(_yaw, want, clampf(dt * TURN_RATE, 0.0, 1.0))
+			_turn_step(want, dt)
 			if d < 0.02:
 				break
 			_pos += to / d * minf(SPEED * dt, d)
@@ -214,8 +254,14 @@ func _walk() -> void:
 				_retire_destination_chair()
 	var goal := path[path.size() - 1]
 	_pos = Vector3(goal.x, 0.0, goal.z)
-	_yaw = PI
 	_apply_body()
+
+
+## Un paso del giro suave del cuerpo hacia el rumbo `want`.
+func _turn_step(want: float, dt: float) -> void:
+	var r := HallWalk.smooth_yaw(_yaw, _yaw_vel, want, dt, TURN_OMEGA, TURN_MAX)
+	_yaw = r.x
+	_yaw_vel = r.y
 
 
 ## Metros que faltan para llegar a la silla desde el punto actual yendo al tramo `i`.
@@ -242,10 +288,15 @@ func _sit() -> void:
 		await get_tree().process_frame
 		if _aborted():
 			return
-		t += get_process_delta_time()
+		var dt := get_process_delta_time()
+		t += dt
+		_turn_step(PI, dt)
+		_apply_body()
 		_blend = smoothstep(0.0, 1.0, clampf((t - (dur - CAMERA_BLEND)) / CAMERA_BLEND, 0.0, 1.0))
 		_player.set_look(lerpf(_player.yaw, 0.0, _blend), lerpf(_player.pitch, PlayerController.rest_pitch(), _blend))
 	_blend = 1.0
+	_yaw = PI
+	_apply_body()
 	_body.global_position = Vector3(_pos.x, HallWalk.seat_point(to_table).y, _pos.z)
 
 

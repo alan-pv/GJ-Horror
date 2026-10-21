@@ -17,6 +17,9 @@ signal _state_changed
 ## Rapidez (1/s) con que la mirada alcanza su objetivo; más alto = más brusco.
 @export var look_speed: float = 9.0
 
+## Último aspecto aplicado con `setup` (para recrear la figura igual, p. ej. tras recargar).
+var applied_look: Dictionary = {}
+
 const MAX_YAW := deg_to_rad(80.0)
 const MAX_PITCH := deg_to_rad(35.0)
 ## Hueso -> nombre del material que lleva `setup`.
@@ -106,6 +109,7 @@ func _process(delta: float) -> void:
 ## `hair`, `eyes` (Color) y `hair_style` ("short", "long", "bald"). Los materiales son propios de
 ## esta instancia: no tiñe a las demás.
 func setup(look: Dictionary) -> void:
+	applied_look = look.duplicate()
 	for key in LOOK_MATERIALS:
 		if not look.has(key):
 			continue
@@ -272,6 +276,19 @@ func play(anim: StringName, blend: float = 0.25, speed: float = 1.0) -> void:
 	_has_pose = true
 	_blend_end_ms = Time.get_ticks_msec() + int(blend * 1000.0 / maxf(speed, 0.05))
 	_state_changed.emit()
+
+
+## Reproduce `anim` y salta directo a su último fotograma, sostenido (cadáveres que se restauran
+## tras recargar la escena: la pose final sin ver la caída). No emite `anim_finished`.
+func hold_final_pose(anim: StringName) -> void:
+	if not _player.has_animation(anim):
+		push_warning("%s: no existe la animación '%s'" % [get_class(), anim])
+		return
+	play(anim, 0.0)
+	_player.seek(_player.get_animation(anim).length, true)
+	_player.pause()
+	_finished = true
+	set_look(0.0, 0.0, true)
 
 
 ## Reproduce `anim` una vez y espera a que termine (corrutina: `await fig.play_once(...)`).

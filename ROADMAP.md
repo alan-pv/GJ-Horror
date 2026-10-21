@@ -13,9 +13,6 @@ Un clip por acción, sin variantes (14 en `player.glb`); las escenas de muchas p
 - [ ] Inclinación del torso: el tope quedó en 0,70 rad (con 0,6 había posturas sin alcanzar) y 3 posturas extremas en la esquina lejana no llegan por 3,5-4,5 cm; el vientre puede rozar ~1 cm el canto a máxima inclinación (estimado). Revisar en primera persona.
 - [ ] **Agarre de la pluma (trípode), lo que falta:** ya están la pinza de pulgar e índice a 2,5 cm de la punta, el medio como apoyo y la pluma a ~50° hacia el hombro (ver `docs/arquitectura.md` 4.14). Pero anular y meñique quedan semiestirados sobre la hoja en vez de recogidos bajo la palma (recogidos atravesarían el papel 1-2 cm con la mano actual: hay que tocar la malla o el esqueleto en `art/`) y la pluma parece salir entre índice y medio. Falta una captura de la pose estable de escritura en el juego, en la mano del jugador y en la del rival.
 
-### Frente E — Escenificación según lo que ve el jugador
-- [ ] Calcular qué mesas están en la línea de visión directa del jugador (cono de la cámara en reposo, sin oclusión) y llevar ahí las reacciones más dramáticas (huidas, súplicas, ejecuciones con más preparación); las mesas fuera de cuadro usan reacciones discretas.
-
 ### Frente H — Diseño: por qué hacer trampa (por discutir)
 Problema: si el jugador puede ganar sin trampas, el juego es solo ajedrez. Ideas para que hacer trampa sea necesario o muy tentador; se eligen y se combinan después de hablarlo:
 - **Rivales más fuertes que el jugador:** el Elo del rival sube más rápido que el del jugador medio (hoy 1000 → 1500), así que jugar limpio pierde casi siempre a partir de la ronda 2-3.

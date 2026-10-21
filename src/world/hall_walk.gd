@@ -82,3 +82,34 @@ static func length(from_table: int, path: Array[Vector3]) -> float:
 ## Guiño de giro: yaw (rad) de la figura (que mira a +Z) para avanzar en la dirección `d` del suelo.
 static func yaw_for(d: Vector3) -> float:
 	return atan2(d.x, d.z)
+
+
+## Punto de la ruta a `dist` metros por delante de `pos`, yendo hacia `path[i]` y siguiendo los
+## tramos siguientes (se detiene en el último punto). Apuntar a él hace que el cuerpo empiece a
+## girar antes del vértice sin cambiar la trayectoria.
+static func look_ahead(pos: Vector3, path: Array[Vector3], i: int, dist: float) -> Vector3:
+	var cur := Vector3(pos.x, 0.0, pos.z)
+	var left := dist
+	for k in range(i, path.size()):
+		var tgt := Vector3(path[k].x, 0.0, path[k].z)
+		var seg := tgt - cur
+		var d := seg.length()
+		if d >= left:
+			return cur + seg / maxf(d, 0.0001) * left
+		left -= d
+		cur = tgt
+	return cur
+
+
+## Un paso del giro del cuerpo: resorte críticamente amortiguado (frecuencia `omega`, 1/s) hacia el
+## rumbo `want` con la velocidad angular acotada a `max_speed` (rad/s). Devuelve (yaw, velocidad).
+## Sin saltos: la velocidad angular es continua aunque `want` cambie de golpe.
+static func smooth_yaw(yaw: float, vel: float, want: float, dt: float, omega: float, max_speed: float) -> Vector2:
+	var steps := maxi(1, ceili(dt * 60.0))
+	var h := dt / steps
+	for _s in steps:
+		var diff := angle_difference(yaw, want)
+		vel += (omega * omega * diff - 2.0 * omega * vel) * h
+		vel = clampf(vel, -max_speed, max_speed)
+		yaw = wrapf(yaw + vel * h, -PI, PI)
+	return Vector2(yaw, vel)
