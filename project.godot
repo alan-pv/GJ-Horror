@@ -16,10 +16,6 @@ run/main_scene="res://src/ui/main_menu.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 boot_splash/bg_color=Color(0.02, 0.016, 0.02, 1)
 
-[audio]
-
-buses/default_bus_layout="res://default_bus_layout.tres"
-
 [autoload]
 
 GameSettings="*res://autoloads/game_settings.gd"

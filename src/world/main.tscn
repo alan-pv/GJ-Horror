@@ -1,20 +1,20 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene format=3 uid="uid://dqrs3okgwfoo0"]
 
-[ext_resource type="Script" path="res://src/world/game_root.gd" id="1_root"]
+[ext_resource type="Script" uid="uid://sefrstqr5o4d" path="res://src/world/game_root.gd" id="1_root"]
 
 [sub_resource type="Environment" id="Environment_hall"]
 background_mode = 1
 background_color = Color(0.008, 0.01, 0.016, 1)
 ambient_light_source = 2
-ambient_light_color = Color(0.20, 0.22, 0.32, 1)
+ambient_light_color = Color(0.2, 0.22, 0.32, 1)
 ambient_light_energy = 0.2
 tonemap_mode = 2
 fog_enabled = true
 fog_light_color = Color(0.015, 0.02, 0.03, 1)
 fog_density = 0.07
 
-[node name="Main" type="Node3D"]
+[node name="Main" type="Node3D" unique_id=538647461]
 script = ExtResource("1_root")
 
-[node name="Entorno" type="WorldEnvironment" parent="."]
+[node name="Entorno" type="WorldEnvironment" parent="." unique_id=37335488]
 environment = SubResource("Environment_hall")
