@@ -21,6 +21,9 @@ const SEAT := Vector3(0.0, 0.0, 0.72)
 ## Ojos del jugador: los de la figura sentada (que está girada 180 grados).
 const EYE_POSITION := Vector3(0.0, OpponentAvatar.EYE_LOCAL.y, SEAT.z - OpponentAvatar.EYE_LOCAL.z)
 const MOUSE_SENSITIVITY := 0.0022
+## Un evento de ratón que salta más que esto (píxeles de pantalla) se descarta: en web,
+## el bloqueo de puntero a veces entrega un salto falso al capturar o al cambiar de ventana.
+const MOUSE_SPIKE_PX := 400.0
 const YAW_LIMIT := deg_to_rad(120.0)
 const PITCH_MIN := deg_to_rad(-80.0)
 const PITCH_MAX := deg_to_rad(55.0)
@@ -60,6 +63,8 @@ var selected: int:
 var _head: Node3D
 var _gaze_timer: float = 0.0
 var _headless: bool = false
+## Captura que el juego pidió; si el navegador la suelta por su cuenta se avisa al HUD.
+var _captured: bool = false
 
 
 func setup(p_server: MatchServer, p_board: BoardView, p_color: int, look: Dictionary = {}) -> void:
@@ -191,8 +196,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _headless or (input_locked and not walking):
 		return
 	if event is InputEventMouseMotion and is_mouse_captured():
-		var k := MOUSE_SENSITIVITY * _sensitivity_scale()
-		set_look(yaw - event.relative.x * k, pitch - event.relative.y * k)
+		var d := look_delta(event.screen_relative, _sensitivity_scale())
+		set_look(yaw - d.x, pitch - d.y)
 	elif walking:
 		return
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
@@ -213,6 +218,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			server.accuse(color)
 
 
+## Giro (yaw, pitch) en radianes para un movimiento del ratón en píxeles de pantalla.
+## Se usa `screen_relative` y no `relative`: este último se escala con el estiramiento de la
+## ventana, y el giro cambiaba según el tamaño del lienzo (lento en pantalla completa, desbocado
+## en el recuadro de itch.io).
+static func look_delta(screen_relative: Vector2, sensitivity: float) -> Vector2:
+	if screen_relative.length() > MOUSE_SPIKE_PX:
+		return Vector2.ZERO
+	return screen_relative * MOUSE_SENSITIVITY * sensitivity
+
+
 ## Multiplicador de sensibilidad de los ajustes (1.0 si no existe el autoload).
 func _sensitivity_scale() -> float:
 	var settings := get_node_or_null("/root/GameSettings")
@@ -223,6 +238,7 @@ func capture_mouse(on: bool) -> void:
 	if _headless:
 		return
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if on else Input.MOUSE_MODE_VISIBLE
+	_captured = on
 	mouse_capture_changed.emit(on)
 
 
@@ -236,6 +252,10 @@ func _process(delta: float) -> void:
 			server.set_gaze(color, camera.global_position, -camera.global_basis.z)
 	if not _headless:
 		_update_hover()
+		# El navegador puede soltar el puntero sin avisar (Esc, perder el foco del iframe).
+		if _captured and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+			_captured = false
+			mouse_capture_changed.emit(false)
 	# Si ya no se puede actuar (mano ocupada, acusación, fin), se suelta la pieza.
 	if interaction.selected >= 0 and not interaction.can_act():
 		interaction.deselect()

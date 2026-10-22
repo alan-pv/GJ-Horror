@@ -11,7 +11,7 @@ const GAME_SCENE := "res://src/world/main.tscn"
 const SETTINGS_PATH := "user://settings.cfg"
 const SECTION := "game"
 const SENSITIVITY_MIN := 0.25
-const SENSITIVITY_MAX := 3.0
+const SENSITIVITY_MAX := 5.0
 
 signal changed
 
