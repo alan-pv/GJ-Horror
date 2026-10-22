@@ -28,16 +28,28 @@ Problema: si el jugador puede ganar sin trampas, el juego es solo ajedrez. Ideas
 
 Pedidos del 2026-10-21.
 
-### Por pensar
-- [ ] Es aburrido esperar a que terminen todas las mesas para seguir jugando. Buscar alternativas (sin decidir aún).
+## Ronda de pulido 5 — Historia y estrés
+
+Pedidos del 2026-10-22. Tres frentes en paralelo; la base común (`GameRoot.hold_start/release_start`, señales `round_cut`, `last_execution_done`, `human_condemned`, `champion_crowned` y `extra_stress`) ya está en `game_root.gd`.
+
+### Frente V — Historia y monólogo interior (`src/client/voice/`)
+- [ ] Historia: todos deben una deuda impagable que compró "la Casa"; el campeón sale sin deuda y rico; "eliminado" es un eufemismo que el jugador entiende con el primer disparo. Giro: el árbitro fue campeón y la Casa necesita un árbitro nuevo.
+- [ ] Discurso del árbitro al empezar el torneo (reglas sin mencionar la trampa) y monólogo que lo nota.
+- [ ] Monólogo interior con cola de prioridades: inicio de ronda, disparos, rival ejecutado, apagón, rival distraído, empujones sutiles a hacer trampa, árbitro cerca, trampas propias, acusaciones, material, reloj, última mesa, ejecución propia y campeón.
+
+### Frente S — Estrés (`src/client/stress/`)
+- [ ] Modelo (piso por reloj, ronda y material + picos por eventos que decaen) y efectos: balanceo y sacudida de cámara, desenfoque periférico, viñeta con latido, latido y respiración, paso bajo, pitido tras un disparo cercano y FOV.
+
+### Frente R — Ronda más corta y rivales más distraídos
+- [ ] 10-20 s después de que el humano termina, las mesas que faltan se cierran: solo se ve una última ejecución y el jugador parpadea hacia su mesa nueva.
+- [ ] Discurso del árbitro: el árbitro se coloca a la vista para hablar (`Arbiter.begin_address/end_address`).
+- [ ] Los bots se quedan más tiempo mirando a otro lado tras una distracción.
 
 ## Pendiente
 
 - [ ] Corte de la recarga entre rondas (`RoundWalk`): al sentarse se nota un salto de luz (la lámpara de la escena nueva es más brillante y tiene sombras) y el reloj y las planillas de la mesa destino, horneados en su malla, cambian de sitio y se encienden. Comparar con `--walk-end-shot` / `--walk-start-shot`.
 - [ ] Las partidas de fondo empiezan desde la posición inicial; podrían arrancar de un medio juego (`Hall.mid_game_fen`) para que los tableros se vean avanzados.
 - [ ] Pasillo entre filas de ~1,16 m entre sillas (`HallLayout.SPACING_Z` = 3,2): subirlo si el árbitro pasa justo.
-
-- [ ] El humano no tiene tecla para su evento de distracción (toser).
 
 - [ ] **Repo público el día que se publique el juego** en itch.io (AGPL de Maia-3).
 - [ ] Exportación web real (plantillas de Godot) y prueba de Maia-3 en navegador.

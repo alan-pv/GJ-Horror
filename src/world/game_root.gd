@@ -48,6 +48,15 @@ signal match_started(server: MatchServer)
 signal table_eliminated(table_index: int, position: Vector3, seat: int)
 ## Cambió cuántos jugadores siguen en el torneo (lo usa el director de tensión).
 signal players_remaining_changed(remaining: int, total: int)
+## Corte de la ronda tras terminar la partida del humano: las mesas que faltaban se cierran y
+## `last_table` es la única cuya ejecución se ve (-1 si no queda ninguna).
+signal round_cut(last_table: int)
+## El árbitro terminó la última ejecución de la ronda (la de `round_cut`).
+signal last_execution_done(table: int)
+## El humano perdió: el árbitro viene a por él (antes de la ejecución en primera persona).
+signal human_condemned
+## El humano ganó el torneo (antes de la pantalla de campeón).
+signal champion_crowned
 
 ## Módulos de gameplay. Cada uno es un script cuyo `new()` da un Node con
 ## `func install(root: GameRoot) -> void`. Se instancian como hijos de la raíz
@@ -57,6 +66,9 @@ const MODULES: Array[String] = [
 	"res://src/client/cheats/cheat_module.gd",
 	"res://src/client/arbiter_module.gd",
 	"res://src/client/events/event_module.gd",
+	"res://src/client/voice/intro_module.gd",
+	"res://src/client/voice/inner_voice.gd",
+	"res://src/client/stress/stress_module.gd",
 ]
 
 ## Tope de jugadas de las mesas de fondo por fotograma (reparte el costo).
@@ -123,6 +135,11 @@ var _draw_sum: float = 0.0
 var _proc_sum: float = 0.0
 ## Pulsación del reloj rechazada por mano ocupada en una trampa (por color).
 var _press_retry: Array[bool] = [false, false]
+## Estrés que aporta un módulo (por color, 0..1); la mano tiembla con el mayor entre este y el del reloj.
+var extra_stress: Array[float] = [0.0, 0.0]
+## Retenciones del arranque (`hold_start`): mientras haya alguna, la partida y las de fondo esperan.
+var _start_holds: int = 0
+var _match_begun: bool = false
 
 
 func _ready() -> void:
@@ -199,16 +216,13 @@ func _ready() -> void:
 	hud.set_warnings(manager.sessions[manager.human_id].warnings, config.false_accusations_to_eliminate)
 
 	board_view.sync(server.board)
-	if tgame != null:
-		server.start()
-		_prefetch_beginner_help()
-	else:
+	if tgame == null:
 		# Descanso: la mesa queda sin partida y el rival no está.
 		avatar.visible = false
 		_human_settled = true
 		hud.set_status("You advance to the next round without playing")
-	match_started.emit(server)
-	clock_view.set_running(server.clock.running)
+	if _start_holds == 0:
+		_begin_match()
 	if _args.has("autoplay"):
 		hud.set_hint("Autoplay mode")
 	_log("%s: humano = %s, rival = %s (%s)" % [manager.round_label(), _color_name(human_color), _color_name(rival_color), rival_bot.brain.brain_name()])
@@ -219,6 +233,35 @@ func _ready() -> void:
 	_show_demo_screen()
 	if _args.has("walk-demo"):
 		_start_walk_demo.call_deferred()
+
+
+## Arranca la partida del humano y las de fondo (al montar la escena o al soltar la última retención).
+func _begin_match() -> void:
+	if _match_begun:
+		return
+	_match_begun = true
+	if tgame != null:
+		server.start()
+		_prefetch_beginner_help()
+	match_started.emit(server)
+	clock_view.set_running(server.clock.running)
+
+
+## Un módulo pide que la partida no arranque todavía (p. ej. el discurso del árbitro). Solo
+## sirve durante `install`; cada `hold_start` se compensa con un `release_start`.
+func hold_start() -> void:
+	_start_holds += 1
+
+
+func release_start() -> void:
+	_start_holds = maxi(_start_holds - 1, 0)
+	if _start_holds == 0 and is_inside_tree():
+		_begin_match()
+
+
+## ¿Ya arrancó la partida (o el descanso)?
+func match_begun() -> bool:
+	return _match_begun
 
 
 func _install_modules() -> void:
@@ -775,6 +818,7 @@ func _round_title() -> String:
 
 func _human_eliminated(reason: String) -> void:
 	_ending = true
+	human_condemned.emit()
 	_log("Humano eliminado (%s): torneo nuevo" % reason)
 	hud.set_status("")
 	# El árbitro viene a por el jugador: ejecución en primera persona, que acaba en negro.
@@ -823,6 +867,7 @@ func _finish_round_flow() -> void:
 		var detail := "Final %d-%d" % [s.wins.get(human_id, 0), s.wins.get(other, 0)]
 		if manager.champion_id == human_id:
 			_log("Campeón: el humano")
+			champion_crowned.emit()
 			hud.show_screen("Champion!", "You won the %d-player tournament\n%s" % [manager.player_count, detail],
 					"\nPress R to play another tournament", Color(0.95, 0.8, 0.3))
 			await get_tree().create_timer(12.0 if not _args.has("autoplay") else 4.0).timeout
@@ -920,8 +965,8 @@ func _process(delta: float) -> void:
 	_scene_elapsed += delta
 	var t0 := Time.get_ticks_usec()
 	# A lo sumo BG_MOVES_PER_FRAME jugadas de fondo por fotograma; se rota el orden por equidad.
-	var moves_left := BG_MOVES_PER_FRAME
-	for k in background.size():
+	var moves_left := BG_MOVES_PER_FRAME if _match_begun else 0
+	for k in (background.size() if _match_begun else 0):
 		var bg := background[(k + _bg_rotation) % background.size()]
 		if bg.tick(delta, moves_left > 0):
 			moves_left -= 1
@@ -945,7 +990,7 @@ func _process(delta: float) -> void:
 	clock_view.set_running(c.running)
 	# El estrés de cada mano crece cuando le queda poco tiempo en el reloj.
 	for color in 2:
-		animators[color].rig.stress = clampf(1.0 - c.remaining[color] / 45.0, 0.0, 1.0)
+		animators[color].rig.stress = maxf(clampf(1.0 - c.remaining[color] / 45.0, 0.0, 1.0), extra_stress[color])
 	if _args.has("quit-after") and _elapsed >= float(_args["quit-after"]):
 		TournamentSession.elapsed = _elapsed
 		_print_summary()
