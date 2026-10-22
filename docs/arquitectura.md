@@ -117,6 +117,8 @@ Cada módulo es un script cuyo `new()` da un `Node` con `install(root)`; `GameRo
 | `cheat_module.gd` | Conexión de señales de trampas con las manos (también la pulsación tras una trampa-jugada) y guiones `--cheat-demo`. |
 | `stress_module.gd` | `StressModel` del humano y sus efectos (cámara, desenfoque, viñeta, audio). Ver 4.21. |
 | `event_module.gd` | `TensionDirector`, `EventStage`, disuasivo del árbitro, eventos del rival, aviso a los bots. |
+| `voice/intro_module.gd` | Discurso del árbitro al empezar el torneo (retiene el arranque con `hold_start`); ver 4.22. |
+| `voice/inner_voice.gd` | Monólogo interior del jugador (subtítulos según lo que ocurre); ver 4.22. |
 
 ### Señales principales
 
@@ -496,6 +498,37 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (2, 4,5) s 
 - Audio (bus SFX): `heartbeat_loop` desde 0,3 (tono = bpm/75, 0,8..1,6) y `panic_breath_loop` desde 0,6; paso bajo en el bus (`AudioEffectLowPassFilter`, 20,5 kHz → 2,5 kHz entre 0,6 y 1). Un disparo en tu mesa o a < 4 m suena `ear_ring` y cierra el filtro a 500 Hz, que se abre en 1,5 s. El filtro se añade una sola vez al bus y `_exit_tree` lo deja abierto y desactivado. Al ser condenado el módulo apaga sus bucles y deja el audio a `Arbiter._start_fp_audio`.
 - Temblor de la mano: escribe `root.extra_stress[human_color]`.
 
+### 4.22 Historia y monólogo interior (`src/client/voice/`)
+
+**Historia.** Todos los del salón deben una deuda impagable y "la Casa" (*the House*) las compró. Quien gane sale sin deuda y rico; quien pierde es "eliminado": el árbitro nunca dice que muere, el jugador lo entiende con el primer disparo. El árbitro avisa de que ser descubierto haciendo trampa elimina, y el monólogo concluye que el jugador no es lo bastante bueno para ganar limpio: tendrá que hacer trampa sin que lo vean. Giro final: el árbitro fue campeón alguna vez y la Casa necesita uno nuevo (lo cuenta la pantalla de campeón).
+
+**Discurso (`IntroModule`, nombre de nodo `Discurso`).** Solo al empezar la ronda 1 de un torneo con partida del humano. En `install` llama a `root.hold_start()`; ya con la escena lista pone al árbitro delante (`Arbiter.begin_address`, `address_head_position`, `end_address`, llamados con `has_method`), bloquea la entrada del jugador, gira su cámara hacia el árbitro, dice las frases con `Hud.show_arbiter` (1,6 s + 0,055 s por carácter) y devuelve la cámara al tablero (`PlayerController.rest_pitch`) antes de `root.release_start()`. Espacio o Enter lo salta (pasa a "Begin."); la pista "SPACE: skip" es una `Label` propia abajo a la derecha. El completo (9 frases: deuda, la Casa, reglas del reloj, ganar/perder, tablas para las negras, "Anyone caught cheating is eliminated.", acusaciones y advertencias, premio, "I sat where you are sitting, once. Begin.") sale el primer torneo del proceso (variable estática); los siguientes dicen "Another night. The same rules. Begin.". No sale con `--autoplay`, `--screenshot`, `--walk-demo`, `--no-intro`, `--start-round` > 1, `--force-execution`, `--lose-now`, `--win-now` ni `--event`; `--intro` lo fuerza. Al terminar emite `finished(full)`. `IntroModule.should_play` es la condición pura.
+
+**Monólogo (`InnerVoice`).** Solo lee estado y escucha señales (nunca llama intenciones del servidor) y muestra con `Hud.show_subtitle`. Tras un `beginner_warning` calla 3,5 s. Piezas:
+- `VoiceLines.LINES`: tabla editable de frases (`prio` LOW/MID/HIGH, `texts`, `seq`, `once`, `wait`, `group`, `chance`, `play`). Las marcadas `play` (apagón, rival distraído, empujones, árbitro cerca, trampas, material y reloj) solo valen con la partida en juego: al terminar, `VoiceQueue.drop_play_only()` descarta las pendientes.
+- `VoiceQueue` (lógica pura, el tiempo lo da quien la usa): gana la mayor prioridad; tope global de una frase cada 6 s salvo las altas; una de prioridad mayor corta a otra menor que suena; las bajas que llegan más de 2 s tarde se descartan; "una vez" por partida (instancia) o por torneo (estático, `reset_tournament`, que `InnerVoice.install` llama con `round_no <= 1`); espera por grupo; variantes al azar sin repetir la última; las secuencias (`seq`) separan sus frases 3 s.
+- `VoiceRules`: números en palabras, frase de inicio de ronda, cruce de umbrales del reloj, material y damas, `GazeWatch` (rival sin mirar el tablero ≥ 1,2 s).
+
+| Disparador | Frase (prioridad) |
+| --- | --- |
+| Fin del discurso completo | `cheat_hint`: "...Caught. He said caught." / "I'm not good enough to win this clean." / "So I just can't get caught." (A, una vez por torneo; tras el corto, nada) |
+| Inicio de la ronda 1, +20 s | `context_players` "<N> players. One walks out." (M, una vez por torneo) |
+| Inicio de ronda ≥ 2, +2 s | `round_left` (más de 4) / `round_semi` / `round_final` (solo la primera partida) (M) |
+| Primer disparo (`Distraction` gunshot) | `first_shot` "...Eliminated. That's what he meant." + "That was real." (A, una vez por torneo) |
+| Disparos siguientes | `shot_next` (B, 50 %, espera 25 s) |
+| `arbiter.executed` con el rival del humano | `rival_executed` (A) |
+| Apagón (flanco de `is_blackout`) | `blackout_first` / `blackout` (M) |
+| Rival distraído (con partida en juego y sin trampa del humano en curso) | `distracted_first` / `distracted` (M, espera 40 s) |
+| 75 s sin trampa y rival distraído / 150 s sin trampa y perdiendo material o reloj | `nudge_hands` (B, una vez por partida) / `nudge_fair` (M, una vez por torneo) |
+| Árbitro cerca (flanco de `is_arbiter_near`) | `arbiter_near` (M, espera 45 s); con trampa en curso `arbiter_cheating` (A) |
+| Trampas del humano | `cheat_first` (M, una vez por torneo), `cheat_unseen` (B, espera 30 s), `cheat_seen` (M), `cheat_abort` (B) |
+| Acusaciones | `accused` (A), `accused_false` (M); acusas: `my_false_1`, `my_false_2`, `my_correct` (M) |
+| Cambios del tablero | `queen_lost`, `queen_taken` (M, por recuento de damas en `state_changed`); `check_given` (B, espera 30 s) |
+| Reloj | `clock_30` (M), `clock_10` (A), `clock_rival_20` (B), una vez por partida |
+| `last_execution_done` / `human_condemned` / `champion_crowned` | `last_execution` (M) / `condemned` (A) / `champion` (A) |
+
+Con `--verbose` imprime cada frase del discurso y del monólogo. `tests/test_inner_voice.gd` cubre la cola, los disparadores puros y las condiciones del discurso.
+
 ## 5. Configuración
 
 ### `MatchConfig` (`src/server/match_config.gd`)
@@ -544,6 +577,7 @@ Se leen como `--clave` o `--clave=valor` en `GameRoot._parse_args`; `get_args()`
 | `--no-events` | Sin eventos automáticos. |
 | `--round-cut=S` | Fija la espera (s) del corte de ronda (10-20 s al azar por defecto). |
 | `--address-demo` | El árbitro da el discurso y se queda plantado (`ArbiterModule`; capturas con `--shot-look=yaw,pitch`). |
+| `--intro` / `--no-intro` | Fuerza (incluso con `--screenshot`) / desactiva el discurso del árbitro de la ronda 1 (4.22). |
 | `--no-stress`, `--stress=V` | Sin efectos de estrés / estrés fijo en V (0..1; capturas). |
 
 Controles del jugador (`project.godot`): clic izquierdo (capturar ratón / elegir pieza / soltarla en un destino), clic derecho o `Esc` (soltar la pieza; `Esc` también suelta el ratón), `A` acusar, `X` abortar, `R` reiniciar torneo.
@@ -574,6 +608,7 @@ godot --headless --path . --script res://tests/run_tests.gd -- --filter=cheats
 | `test_maia_encoding.gd` | Vocabulario, Elo continuo, codificación idéntica al fixture de PyTorch, índices de jugadas legales, espejado, reconstrucción del historial (captura, al paso, enroque, cambios por trampa, cerebro compartido) y respaldo sin web. |
 | `test_stress.gd` | `StressModel`: piso (reloj, torneo, material), picos con sostenimiento y decaimiento al piso, tope, sostenidos, condena, sacudida y latido. |
 | `test_distractions.gd` | Probabilidades por tipo con semilla, descartados que no voltean, retardo y duraciones en rango, respingo solo en fuertes, radios, datos de `EventDef`, factor de personalidad, el bot que voltea deja de mirar el tablero. |
+| `test_inner_voice.gd` | `VoiceQueue` (prioridad, tope global, cortes, descarte de bajas tardías, una vez por partida/torneo, esperas, secuencias, silencio, variantes), `VoiceRules` (palabras, inicio de ronda, umbrales, material, `GazeWatch`) y condiciones del discurso. |
 | `test_round_cut.gd` | Corte de ronda: elección de la última mesa y reparto en silencio (`RoundCut.plan`), `ExecutionQueue.peek_next/skip_pending/drop`, `Arbiter.resolve_silently` y punto del discurso en pasillo. |
 | `test_tension_director.gd` | Carga de definiciones, primer evento, separación y no repetición, frecuencia según jugadores, misma semilla, esperas, orígenes, disparo forzado, desactivado. |
 | `test_rival_events.gd` | Señal de evento del rival, esperas por color y evento, rechazo durante acusación, toser con la mano ocupada, árbitro cerca marca trampas como vistas. |
