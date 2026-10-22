@@ -41,7 +41,27 @@ const WRITE_BLEND := 0.6
 const POSES_TURN := {&"sit_think": 6.0, &"sit_wait": 2.0}
 const POSES_WAIT := {&"sit_wait": 6.0, &"sit_think": 1.5, &"sit_write": 0.6}
 const POSE_DWELL := Vector2(5.0, 12.0)
-## Promedio de segundos entre dos caídas de pieza de un mismo asiento.
+
+## Sonido ambiental de los relojes de fondo (bus SFX, atenuación cuadrática: casi inaudible a
+## 3 m y nada pasados ~9 m). Posición del reloj horneado por `Hall._build_table`.
+const CLOCK_LOCAL := Vector3(0.47, BoardView.TABLE_TOP + 0.04, 0.0)
+const TICK_PATH := "res://assets/audio/sfx/clock_tick.wav"
+const TOCK_PATH := "res://assets/audio/sfx/clock_tock.wav"
+const PRESS_PATH := "res://assets/audio/sfx/clock_press.wav"
+const PLACE_PATHS: Array[String] = [
+	"res://assets/audio/sfx/piece_place_1.wav", "res://assets/audio/sfx/piece_place_2.wav",
+	"res://assets/audio/sfx/piece_place_3.wav",
+]
+const TICK_VOLUME_DB := -12.0
+const TICK_UNIT_SIZE := 1.5
+const TICK_MAX_DISTANCE := 9.0
+const TICK_PITCH_JITTER := 0.05
+const PRESS_VOLUME_DB := -10.0
+const PLACE_VOLUME_DB := -16.0
+const SOUND_UNIT_SIZE := 1.5
+const SOUND_MAX_DISTANCE := 11.0
+## Instante (fracción de la duración del clip) en que la mano toca el botón del reloj.
+const PRESS_CONTACT := 0.5
 
 var table_index: int = -1
 var hall: Hall
@@ -62,6 +82,12 @@ var _board_due: float = -1.0
 var _arbiter_pos: Variant = null
 var _cam_pos := Vector3.ZERO
 var _game_over: bool = false
+## Tic-tac: fase aleatoria por mesa, último segundo sonado y reproductores (se crean al primer uso).
+var _tick_phase: float = 0.0
+var _tick_last: int = -1
+var _tick_players: Array[AudioStreamPlayer3D] = [null, null, null]  # tic-tac, pulsación, pieza
+var _start_pressed: bool = false
+static var _sounds: Dictionary = {}
 
 
 ## Crea las figuras. `present[color]` dice qué asientos están ocupados. Se añade como hijo
@@ -75,6 +101,7 @@ func setup(p_hall: Hall, index: int, p_bg: BackgroundMatch, present: Array, seed
 	bg = p_bg
 	name = "VidaMesa%d" % index
 	_rng.seed = seed_value * 31 + index * 977 + 5
+	_tick_phase = _rng.randf()
 	for color in 2:
 		var s := {
 			"present": bool(present[color]), "stage": &"ambient", "gen": 0, "until": 0.0,
@@ -165,11 +192,90 @@ func tick(delta: float, camera: Camera3D, arbiter_pos: Variant) -> void:
 	_clock += delta
 	_arbiter_pos = arbiter_pos
 	_update_tier(camera)
+	_update_ticking()
 	_decide_acc += delta
 	if _decide_acc >= 0.1:
 		_decide(_decide_acc)
 		_decide_acc = 0.0
 	_step_animation(delta)
+
+
+## Índice de tic-tac (uno por segundo, desfasado por mesa): cambia de valor justo cuando toca sonar.
+static func tick_index(time: float, phase: float) -> int:
+	return int(floorf(time + phase))
+
+
+## Tic-tac mientras corre el reloj de esta mesa: un solo reproductor reutilizado, alternando
+## tic/toc, y solo si el oyente está dentro del alcance (la comprobación cuesta una comparación
+## entera por fotograma; la distancia, una vez por segundo).
+func _update_ticking() -> void:
+	var idx := tick_index(_clock, _tick_phase)
+	if idx == _tick_last:
+		return
+	_tick_last = idx
+	if not clock_running() or _cam_pos == Vector3.ZERO:
+		return
+	var pos := global_position + CLOCK_LOCAL
+	if _cam_pos.distance_to(pos) > TICK_MAX_DISTANCE:
+		return
+	var p := _player_for(0)
+	p.stream = _stream(TOCK_PATH if idx % 2 != 0 else TICK_PATH)
+	p.pitch_scale = 1.0 + _rng.randf_range(-TICK_PITCH_JITTER, TICK_PITCH_JITTER)
+	p.play()
+
+
+## True mientras el reloj de esta mesa corre: partida empezada y sin terminar, con alguien vivo sentado.
+func clock_running() -> bool:
+	if bg == null or _game_over or not bg.server.started or bg.server.is_over():
+		return false
+	for color in 2:
+		var f := figure(color)
+		if f != null and f.visible and _seats[color].stage != &"condemned":
+			return true
+	return false
+
+
+func _stream(path: String) -> AudioStream:
+	if not _sounds.has(path):
+		_sounds[path] = load(path) if ResourceLoader.exists(path) else null
+	return _sounds[path]
+
+
+## Reproductor persistente `slot` (0 tic-tac, 1 pulsación, 2 pieza), creado en el primer uso.
+func _player_for(slot: int) -> AudioStreamPlayer3D:
+	var p := _tick_players[slot]
+	if p != null:
+		return p
+	p = AudioStreamPlayer3D.new()
+	p.name = ["TicTac", "Pulsacion", "PiezaSuena"][slot]
+	p.bus = "SFX" if AudioServer.get_bus_index("SFX") != -1 else "Master"
+	p.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_SQUARE_DISTANCE
+	p.unit_size = TICK_UNIT_SIZE if slot == 0 else SOUND_UNIT_SIZE
+	p.max_distance = TICK_MAX_DISTANCE if slot == 0 else SOUND_MAX_DISTANCE
+	p.volume_db = [TICK_VOLUME_DB, PRESS_VOLUME_DB, PLACE_VOLUME_DB][slot]
+	add_child(p)
+	p.position = CLOCK_LOCAL if slot < 2 else Vector3(0.0, BoardView.TABLE_TOP + 0.05, 0.0)
+	_tick_players[slot] = p
+	return p
+
+
+## Suena el clic de pulsación (slot 1) o la caída de pieza (slot 2) si el oyente está a su alcance.
+func _foley(slot: int, path: String) -> void:
+	if not is_inside_tree() or _cam_pos == Vector3.ZERO:
+		return
+	if _cam_pos.distance_to(global_position) > SOUND_MAX_DISTANCE:
+		return
+	var p := _player_for(slot)
+	p.stream = _stream(path)
+	p.pitch_scale = 1.0 + _rng.randf_range(-0.06, 0.06)
+	p.play()
+
+
+## Sonido tras `delay` s (sin crear nodos: solo un temporizador).
+func _foley_later(delay: float, slot: int, path: String) -> void:
+	await get_tree().create_timer(delay).timeout
+	if is_instance_valid(self):
+		_foley(slot, path)
 
 
 func _update_tier(camera: Camera3D) -> void:
@@ -408,16 +514,49 @@ func _sequence(color: int) -> void:
 	s.stage = &"move"
 	s.calm = false
 	f.set_look(_rng.randf_range(-0.1, 0.1), BOARD_PITCH)
+	_foley_later(BOARD_DELAY, 2, PLACE_PATHS[_rng.randi() % PLACE_PATHS.size()])
 	await f.play_once(&"sit_move_piece", MOVE_BLEND)
 	if not _same_job(color, g, &"move"):
 		return
 	s.stage = &"press"
+	_foley_later(_press_contact_delay(f), 1, PRESS_PATH)
 	await f.play_once(&"sit_press_clock", PRESS_BLEND)
 	if not _same_job(color, g, &"press"):
 		return
 	s.stage = &"write"
 	s.until = _clock + _rng.randf_range(1.2, 3.0)
 	f.play(&"sit_write", WRITE_BLEND)
+
+
+## Segundos desde que arranca `sit_press_clock` hasta que la mano toca el botón.
+func _press_contact_delay(f: CharacterFigure) -> float:
+	var ap := f.animation_player()
+	if ap.has_animation(&"sit_press_clock"):
+		return ap.get_animation(&"sit_press_clock").length * PRESS_CONTACT
+	return 0.3
+
+
+## "Begin.": la figura de negras pulsa el reloj para arrancar la partida. Una sola vez por
+## ronda; no hace nada si no hay figura viva, si está en otra faena o mezclando una pose.
+func press_start_clock() -> void:
+	if _start_pressed:
+		return
+	var s := _seats[1]
+	var f := figure(1)
+	if f == null or not s.present or s.stage != &"ambient" or f.is_blending():
+		return
+	_start_pressed = true
+	s.gen += 1
+	var g: int = s.gen
+	s.stage = &"press"
+	f.set_look(_rng.randf_range(-0.1, 0.1), BOARD_PITCH)
+	_foley_later(_press_contact_delay(f), 1, PRESS_PATH)
+	await f.play_once(&"sit_press_clock", PRESS_BLEND)
+	if not _same_job(1, g, &"press"):
+		return
+	s.stage = &"ambient"
+	s.pose_t = 0.0
+	f.play_role(&"sit_wait", _rng)
 
 
 func _same_job(color: int, gen: int, stage: StringName) -> bool:
@@ -427,6 +566,8 @@ func _same_job(color: int, gen: int, stage: StringName) -> bool:
 ## La partida terminó: el ganador se queda quieto y aliviado; el perdedor espera su suerte.
 func on_game_over(winner: int) -> void:
 	_game_over = true
+	if _tick_players[0] != null:
+		_tick_players[0].stop()
 	if bg != null and bg.server.end_reason == MatchServer.REASON_TIMEOUT:
 		var clock_pos := global_position + Vector3(0.0, 0.8, 0.0)
 		_play_sound(&"flag", clock_pos, -2.0)
