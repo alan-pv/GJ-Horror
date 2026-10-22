@@ -25,12 +25,12 @@ const GROUP := &"distraction_listeners"
 ##   speed:    multiplicador de la velocidad de giro de la cabeza.
 ## }
 const SPECS := {
-	&"gunshot": {"chance": 0.95, "strength": 1.0, "look": Vector2(1.5, 3.0), "glance": false, "startle": 0.8, "radius": 0.0, "speed": 1.6},
-	&"accusation": {"chance": 0.8, "strength": 0.85, "look": Vector2(1.2, 2.6), "glance": false, "startle": 0.75, "radius": 0.0, "speed": 1.4},
-	&"blackout": {"chance": 0.8, "strength": 0.9, "look": Vector2(1.5, 3.0), "glance": false, "startle": 0.7, "radius": 0.0, "speed": 1.4},
+	&"gunshot": {"chance": 0.95, "strength": 1.0, "look": Vector2(2.7, 5.4), "glance": false, "startle": 0.8, "radius": 0.0, "speed": 1.6},
+	&"accusation": {"chance": 0.8, "strength": 0.85, "look": Vector2(2.2, 4.7), "glance": false, "startle": 0.75, "radius": 0.0, "speed": 1.4},
+	&"blackout": {"chance": 0.8, "strength": 0.9, "look": Vector2(2.7, 5.4), "glance": false, "startle": 0.7, "radius": 0.0, "speed": 1.4},
 	&"arbiter_pass": {"chance": 0.45, "strength": 0.3, "look": Vector2(0.4, 0.9), "glance": true, "startle": 0.0, "radius": 3.5, "speed": 2.3},
-	&"plea": {"chance": 0.45, "strength": 0.4, "look": Vector2(0.8, 1.8), "glance": false, "startle": 0.0, "radius": 9.0, "speed": 1.0},
-	&"flag": {"chance": 0.15, "strength": 0.25, "look": Vector2(0.6, 1.4), "glance": false, "startle": 0.0, "radius": 4.5, "speed": 1.0},
+	&"plea": {"chance": 0.45, "strength": 0.4, "look": Vector2(1.4, 3.2), "glance": false, "startle": 0.0, "radius": 9.0, "speed": 1.0},
+	&"flag": {"chance": 0.15, "strength": 0.25, "look": Vector2(1.1, 2.5), "glance": false, "startle": 0.0, "radius": 4.5, "speed": 1.0},
 }
 
 const IGNORED: Array[StringName] = [&"dim_lamp", &"stool", &"door", &"player_noise"]

@@ -17,6 +17,8 @@ const SIDE_OFFSET := 0.85
 ## Junto al extremo de la mesa del humano (lado derecho del jugador): desde aquí
 ## revisa las planillas y apunta al jugador.
 const HUMAN_SIDE_SPOT := Vector3(0.95, 0.0, 0.0)
+## Distancia (m) delante del jugador (en -Z) a la que el árbitro da el discurso.
+const ADDRESS_DEPTH := 3.0
 
 
 ## Líneas verticales de pasillo (X): entre columnas y los dos bordes.
@@ -255,6 +257,16 @@ static func nearest_table(p: Vector3, only: Array[int] = []) -> int:
 			best_d = d
 			best = i
 	return best
+
+
+## Punto de pasillo desde el que el árbitro da el discurso: en el pasillo vertical a la derecha de
+## la mesa del humano, ~3 m delante (-Z) de su silla. Desplazado de la línea jugador-rival, así la
+## cabeza del rival no lo tapa; nunca cae dentro de una mesa. Sobre el podio ajusta la altura.
+static func address_spot() -> Vector3:
+	var human_col := HallLayout.cell_of(HallLayout.human_table).x
+	var p := Vector3(aisle_xs()[human_col + 1], 0.0, -ADDRESS_DEPTH)
+	p.y = HallLayout.floor_y(p)
+	return p
 
 
 ## Ruta que pasa por detrás de la silla del jugador (de un lado al otro), saliendo de `from`.

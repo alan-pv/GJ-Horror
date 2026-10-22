@@ -37,11 +37,6 @@ Pedidos del 2026-10-22. Frentes en paralelo; la base común (`GameRoot.hold_star
 - [ ] Discurso del árbitro al empezar el torneo (reglas sin mencionar la trampa) y monólogo que lo nota.
 - [ ] Monólogo interior con cola de prioridades: inicio de ronda, disparos, rival ejecutado, apagón, rival distraído, empujones sutiles a hacer trampa, árbitro cerca, trampas propias, acusaciones, material, reloj, última mesa, ejecución propia y campeón.
 
-### Frente R — Ronda más corta y rivales más distraídos
-- [ ] 10-20 s después de que el humano termina, las mesas que faltan se cierran: solo se ve una última ejecución y el jugador parpadea hacia su mesa nueva.
-- [ ] Discurso del árbitro: el árbitro se coloca a la vista para hablar (`Arbiter.begin_address/end_address`).
-- [ ] Los bots se quedan más tiempo mirando a otro lado tras una distracción.
-
 ## Pendiente
 
 - [ ] Corte de la recarga entre rondas (`RoundWalk`): al sentarse se nota un salto de luz (la lámpara de la escena nueva es más brillante y tiene sombras) y el reloj y las planillas de la mesa destino, horneados en su malla, cambian de sitio y se encienden. Comparar con `--walk-end-shot` / `--walk-start-shot`.

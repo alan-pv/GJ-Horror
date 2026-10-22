@@ -18,7 +18,7 @@ extends Resource
 ## Veces por minuto que mira el salón por su cuenta.
 @export_range(0.0, 20.0) var idle_glances_per_minute: float = 3.0
 ## Segundos que mantiene la vista lejos del tablero.
-@export var look_away_seconds: Vector2 = Vector2(1.0, 3.0)
+@export var look_away_seconds: Vector2 = Vector2(2.0, 4.5)
 ## Velocidad de giro de la cabeza (radianes por segundo).
 @export var head_turn_speed: float = 3.5
 

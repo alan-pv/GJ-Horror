@@ -59,8 +59,13 @@ var _black: CanvasLayer
 ## Mesas con partida en juego que patrulla; `_active_set` false = aún no se informó (todas).
 var _active_tables: Array[int] = []
 var _active_set: bool = false
+## Foco que lo ilumina durante el discurso (`begin_address`).
+var _address_light: SpotLight3D
 ## Mesas ya revisadas (por una acusación o antes de una ejecución): no se repite.
 var _reviewed: Dictionary = {}
+## Discurso: mientras dure, el árbitro está plantado en `_address_pos` y no patrulla.
+var _addressing: bool = false
+var _address_pos := Vector3.ZERO
 
 
 ## Arma la figura y empieza a patrullar. `p_root` puede ser null (pruebas).
@@ -95,6 +100,35 @@ func request_execution(table: int, seat: int) -> void:
 	var spot := ArbiterRoutes.execution_spot(table, seat, human_color)
 	if queue.push(table, seat, spot, table == HallLayout.human_table):
 		_condemn(table, seat)
+
+
+## Descarta las ejecuciones en cola de las mesas distintas de `except_table` (corte de ronda):
+## quedan como hechas, sus condenados dejan de reaccionar y nunca pasan por el árbitro. Devuelve
+## las entradas descartadas `{table, seat, ...}`.
+func skip_pending(except_table: int) -> Array[Dictionary]:
+	var skipped := queue.skip_pending(except_table)
+	for e in skipped:
+		_silence(int(e.table), int(e.seat))
+	return skipped
+
+
+## El perdedor de (`table`, `seat`) se resuelve en silencio, sin que el árbitro lo ejecute:
+## sale de la cola si estaba, cuenta como hecho y su figura (si existe) queda en manos del
+## árbitro, quieta y callada. No emite `executed`.
+func resolve_silently(table: int, seat: int) -> void:
+	if queue.current == ExecutionQueue.key(table, seat):
+		return  # la está ejecutando ahora: sigue su curso
+	queue.drop(table, seat)
+	queue.mark_done(table, seat)
+	_silence(table, seat)
+
+
+func _silence(table: int, seat: int) -> void:
+	var k := ExecutionQueue.key(table, seat)
+	if _cond.has(k):
+		(_cond[k] as Condemned).silence()
+	elif root != null:
+		root.condemn_seat(table, seat)  # entrega la figura (queda quieta, sin vida ambiental)
 
 
 ## Informa qué mesas tienen partida en juego: la patrulla y sus pausas se limitan a los
@@ -143,7 +177,7 @@ func accusation_active() -> bool:
 func pass_behind(_target: Vector3, seconds: float) -> void:
 	if _urgency() > Urgency.NONE or not _forced_route.is_empty():
 		return
-	if queue.current >= 0 or not _acc.is_empty() or not _player_job.is_empty():
+	if _addressing or queue.current >= 0 or not _acc.is_empty() or not _player_job.is_empty():
 		return
 	_forced_route = ArbiterRoutes.behind_player_route(position)
 	var xs := ArbiterRoutes.aisle_xs()
@@ -178,6 +212,62 @@ func execute_player() -> void:
 	await player_executed
 
 
+## Discurso del árbitro (lo usa el módulo del arranque). Lo planta de inmediato, sin caminar, de
+## pie y en `idle` en un punto de pasillo visible desde la silla del humano (`ArbiterRoutes.address_spot`),
+## mirando al jugador, y suspende la patrulla hasta `end_address()`.
+func begin_address() -> void:
+	_addressing = true
+	_forced_route = []
+	_address_pos = ArbiterRoutes.address_spot()
+	position = _address_pos
+	_hold_address(0.0)
+	figure.play(&"idle", 0.0)
+	_prev_anim_pos = 0.0
+	# Un foco cenital tenue para que se le lea la figura en el rincón oscuro del pasillo.
+	if _address_light == null:
+		_address_light = SpotLight3D.new()
+		_address_light.name = "FocoDiscurso"
+		_address_light.light_color = Color(1.0, 0.88, 0.72)
+		_address_light.light_energy = 2.2
+		_address_light.spot_range = 4.0
+		_address_light.spot_angle = 24.0
+		_address_light.rotation = Vector3(-PI / 2.0, 0.0, 0.0)
+		_address_light.position = Vector3(0.0, 3.0, 0.25)
+		add_child(_address_light)
+	_address_light.visible = true
+
+
+## Posición global de la cabeza del árbitro (para que la cámara del jugador lo mire).
+func address_head_position() -> Vector3:
+	if figure != null and figure.is_inside_tree():
+		return figure.head_global_position()
+	return position + Vector3(0.0, 1.65, 0.0)
+
+
+## Fin del discurso: reanuda la patrulla (se aleja caminando).
+func end_address() -> void:
+	_addressing = false
+	figure.set_look(0.0, 0.0)
+	if _address_light != null:
+		_address_light.visible = false
+
+
+## ¿Está dando el discurso?
+func is_addressing() -> bool:
+	return _addressing
+
+
+## Lo mantiene en su sitio mirando al jugador (cuerpo y cabeza).
+func _hold_address(dt: float) -> void:
+	position = _address_pos
+	var eye := Vector3(0.0, 1.2, 0.2)
+	if root != null and root.player != null:
+		eye = root.player.global_position
+	_face_toward(eye, dt)
+	if figure != null and is_inside_tree():
+		figure.look_at_point(eye)
+
+
 ## Pérdida de ganancia (dB) de un paso a `distance` metros: modelo de distancia inversa de
 ## Godot con `STEP_UNIT_SIZE` y el volumen base, con el tope de 3 dB del motor. Más allá de
 ## `STEP_MAX_DISTANCE` no se oye.
@@ -206,7 +296,9 @@ func _run() -> void:
 	_running = true
 	# Espera a que la partida arranque para no caminar durante el montaje.
 	while is_inside_tree():
-		if not _player_job.is_empty():
+		if _addressing and _player_job.is_empty():
+			_hold_address(get_process_delta_time())
+		elif not _player_job.is_empty():
 			await _do_player_execution()
 		elif not _acc.is_empty():
 			await _do_accusation()
@@ -248,7 +340,7 @@ func _pause_looking(seconds: float) -> void:
 	_idle()
 	var table := HallLayout.table_position(ArbiterRoutes.nearest_table(position, patrol_tables()))
 	var t := 0.0
-	while t < seconds and _urgency() == Urgency.NONE and _forced_route.is_empty() and is_inside_tree():
+	while t < seconds and _urgency() == Urgency.NONE and _forced_route.is_empty() and not _addressing and is_inside_tree():
 		await get_tree().process_frame
 		var dt := get_process_delta_time()
 		t += dt
@@ -612,7 +704,7 @@ func _walk_path(path: Array[Vector3], speed: float, level: int, on_progress: Cal
 		while true:
 			if not is_inside_tree():
 				return false
-			if _urgency() > level:
+			if _urgency() > level or (_addressing and level < Urgency.PLAYER):
 				_idle()
 				return false
 			var to := p - position

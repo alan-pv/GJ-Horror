@@ -112,6 +112,18 @@ func _process(delta: float) -> void:
 			_voice.play()
 
 
+## Corte de ronda: no lo ejecutará nadie. Deja de reaccionar, de avisar y de sonar; la figura
+## queda como está hasta que `GameRoot` le ponga la pose final.
+func silence() -> void:
+	if dead:
+		return
+	dead = true
+	if _voice != null:
+		_voice.stop()
+	if _loop != null:
+		_loop.stop()
+
+
 ## Recibe el disparo y cae sobre la mesa.
 ## Corrutina: termina cuando el cuerpo ya cayó.
 func die() -> void:

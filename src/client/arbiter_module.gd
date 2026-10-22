@@ -11,6 +11,8 @@ extends Node
 ##   --force-at=S         segundos de partida antes de pedirla (3)
 ##   --lose-now           el humano pierde a los `--force-at` s (ejecución en primera persona)
 ##   --win-now            el humano gana a los `--force-at` s (ejecutan al rival)
+##   --address-demo       el árbitro da el discurso (`Arbiter.begin_address`) y se queda plantado
+##                        (con --shot-look=yaw,pitch para encuadrarlo en la captura)
 ##   --arb-start=x,z      posición inicial del árbitro
 ##                        (para capturas mientras el salón no use la cuadrícula)
 
@@ -47,6 +49,8 @@ func install(p_root: GameRoot) -> void:
 		var p := str(args["arb-start"]).split(",")
 		if p.size() == 2:
 			arbiter.position = Vector3(float(p[0]), 0.0, float(p[1]))
+	if args.has("address-demo"):
+		arbiter.begin_address()
 	# Respaldo: si nadie pide la ejecución de una mesa de fondo, la pide este módulo.
 	root.table_eliminated.connect(_on_table_eliminated)
 	_force_at = float(args.get("force-at", 3.0))

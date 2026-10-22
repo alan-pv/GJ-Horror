@@ -28,6 +28,7 @@ extends Node3D
 ##                        y el primero de la escena nueva (verifica el corte)
 ##   --walk-mid-shot=ruta   con el paseo: captura ~1 s después de abrir los ojos tras el primer parpadeo
 ##                        (el salón ya debe verse como la escena nueva: igual que --walk-start-shot)
+##   --round-cut=S        espera fija (s) entre que el humano se asienta y el corte de ronda (10-20 s al azar)
 ##   --walk-demo          termina la ronda al instante (el humano gana) y hace el paseo a la mesa
 ##                        siguiente sin jugar (con --start-round=N se ve en esa ronda; Espacio lo salta)
 ## Sin argumentos el juego arranca en el menú principal (`src/ui/main_menu.tscn`);
@@ -111,6 +112,16 @@ var _args: Dictionary = {}
 var _scene_elapsed: float = 0.0
 var _ending: bool = false
 var _human_settled: bool = false
+## Corte de ronda: cuenta atrás desde que el humano se asienta; `_cut_last` es la mesa cuya
+## ejecución se ve (-1 = ninguna); `_silent_tables` las mesas de fondo cerradas en silencio
+## (mesa -> true) y `_silent_corpses` sus perdedores (mesa -> asiento), que reciben la pose final
+## con los ojos del jugador cerrados (`clear_tables_for_next_round`).
+var _cut_armed: bool = false
+var _cut_left: float = 0.0
+var _cut_done: bool = false
+var _cut_last: int = -1
+var _silent_tables: Dictionary = {}
+var _silent_corpses: Dictionary = {}
 var _bg_cost_ms: float = 0.0
 var _bg_max_ms: float = 0.0
 var _bg_frames: int = 0
@@ -613,6 +624,7 @@ func _remember_round() -> void:
 		var seat := bt.corpse_seat()
 		HallMemory.remember(t, bt.bg.server.board.squares, seat,
 				bt.figures[seat].applied_look if seat >= 0 else {})
+		_log("Recuerdo mesa %d: cadáver en asiento %d%s" % [t, seat, " (en silencio)" if _silent_corpses.has(t) else ""])
 
 
 ## Para el paseo (`RoundWalk`), en el primer parpadeo al levantarse y después de `start_round()`:
@@ -638,6 +650,7 @@ func clear_tables_for_next_round() -> void:
 		if not emptied.has(t) and not fill.has(t):
 			(bg_tables[t] as BackgroundTable).hide_living()
 			hall.set_table_level(t, CORPSE_LEVEL if HallMemory.has_corpse(t) else 1.0, false)
+			_pose_silent_corpse(t)
 	for g in manager.pending_games():
 		if fill.has(g.table):
 			_seat_round_table(g.table, null, [g.white, g.black])
@@ -648,6 +661,19 @@ func clear_tables_for_next_round() -> void:
 	_link_bg_neighbors()
 	if avatar != null and not avatar.condemned:
 		avatar.visible = false
+
+
+## Un perdedor resuelto en silencio (corte de ronda) pasa a la pose final de los ejecutados: se llama
+## con los ojos del jugador cerrados para que no se vea aparecer el cadáver.
+func _pose_silent_corpse(table: int) -> void:
+	if not _silent_corpses.has(table):
+		return
+	var bt: BackgroundTable = bg_tables.get(table)
+	var seat: int = _silent_corpses[table]
+	if bt == null or bt.corpse_seat() != seat or bt.figures[seat] == null:
+		return
+	bt.figures[seat].hold_final_pose(&"death_slump_table")
+	hall.set_table_level(table, CORPSE_LEVEL, false)
 
 
 func _empty_table(table: int) -> void:
@@ -715,7 +741,15 @@ func _on_background_finished(g: TournamentGame, bg: BackgroundMatch) -> void:
 	manager.report_result(g, bg.server.winner, bg.server.end_reason, times)
 	var loser_color := ChessPiece.opposite(bg.server.winner)
 	_log("Mesa %d: gana %s a %s (%s)" % [g.table, manager.player_name(g.winner_id()), manager.player_name(g.loser_id()), g.reason])
-	if g.table >= 0:
+	if g.table >= 0 and _silent_tables.has(g.table):
+		# Corte de ronda: el perdedor se resuelve en silencio, sin pasar por el árbitro.
+		var sbt: BackgroundTable = bg_tables.get(g.table)
+		if sbt != null:
+			sbt.on_game_over(bg.server.winner)
+		if arbiter != null:
+			arbiter.resolve_silently(g.table, loser_color)
+		_silent_corpses[g.table] = loser_color
+	elif g.table >= 0:
 		var bt: BackgroundTable = bg_tables.get(g.table)
 		if bt != null:
 			bt.on_game_over(bg.server.winner)
@@ -736,9 +770,57 @@ func _on_background_finished(g: TournamentGame, bg: BackgroundMatch) -> void:
 func _on_executed(table: int, _seat: int) -> void:
 	if not is_inside_tree():
 		return
+	if _cut_done and table == _cut_last:
+		last_execution_done.emit(table)
 	# Las demás mesas reaccionan al disparo por `Distraction` (aviso `gunshot` de `Arbiter`).
 	if table != HallLayout.human_table:
 		hall.set_table_level(table, 0.4, true, true)
+
+
+## Corte de ronda (ver `RoundCut`): pasados 10-20 s desde que el humano se asienta, si la ronda no se
+## completó sola, una "última mesa" conserva su ejecución y las demás partidas se cierran con resultado
+## simulado y sus perdedores se resuelven en silencio. Sin árbitro (o con `--no-arbiter-exec`) no hay corte.
+func _update_round_cut(delta: float) -> void:
+	if _ending or _cut_done or not _human_settled or not _match_begun or arbiter == null \
+			or _args.has("no-arbiter-exec"):
+		return
+	if manager.round_complete() and not arbiter.has_pending_work():
+		return  # termina sola
+	if not _cut_armed:
+		_cut_armed = true
+		_cut_left = float(_args["round-cut"]) if _args.has("round-cut") \
+				else randf_range(RoundCut.DELAY.x, RoundCut.DELAY.y)
+	_cut_left -= delta
+	if _cut_left <= 0.0:
+		_do_round_cut()
+
+
+func _do_round_cut() -> void:
+	_cut_done = true
+	var current := arbiter.queue.current / 2 if arbiter.queue.current >= 0 else -1
+	var next_entry := arbiter.queue.peek_next(arbiter.position)
+	var next_queued := int(next_entry.table) if not next_entry.is_empty() else -1
+	var unfinished: Array = []
+	for bg in background:
+		if bg.table >= 0 and not bg.is_over():
+			var d := Vector2(hall.table_position(bg.table).x - arbiter.position.x,
+					hall.table_position(bg.table).z - arbiter.position.z).length()
+			unfinished.append({"table": bg.table, "dist": d})
+	var plan := RoundCut.plan(current, next_queued, unfinished)
+	_cut_last = plan.last_table
+	for e in arbiter.skip_pending(_cut_last):
+		_silent_corpses[int(e.table)] = int(e.seat)
+	for t in plan.silent:
+		_silent_tables[t] = true
+	_log("Corte de ronda: última mesa %d, en silencio %s" % [_cut_last, str(plan.silent)])
+	for bg in background:
+		if bg.is_over():
+			continue
+		if bg.table < 0 or _silent_tables.has(bg.table):
+			bg.force_end()
+		elif bg.table == _cut_last:
+			bg.force_end()  # se ejecuta con normalidad (`_on_background_finished`)
+	round_cut.emit(_cut_last)
 
 
 ## Figura sentada en (`table`, `seat`); `seat` = color (0 blancas, 1 negras). En la
@@ -868,7 +950,15 @@ func _finish_round_flow() -> void:
 		if manager.champion_id == human_id:
 			_log("Campeón: el humano")
 			champion_crowned.emit()
-			hud.show_screen("Champion!", "You won the %d-player tournament\n%s" % [manager.player_count, detail],
+			hud.show_arbiter("Your debt is settled.", 3.5)
+			await get_tree().create_timer(3.5).timeout
+			if not is_inside_tree():
+				return
+			hud.show_arbiter("The House is always in need of a new arbiter.", 4.5)
+			await get_tree().create_timer(4.5).timeout
+			if not is_inside_tree():
+				return
+			hud.show_screen("Champion!", "You won the %d-player tournament\n%s\n\nYour debt is paid.\nThe mask is yours now." % [manager.player_count, detail],
 					"\nPress R to play another tournament", Color(0.95, 0.8, 0.3))
 			await get_tree().create_timer(12.0 if not _args.has("autoplay") else 4.0).timeout
 			if not is_inside_tree():
@@ -981,6 +1071,7 @@ func _process(delta: float) -> void:
 	_fps_sum += Engine.get_frames_per_second()
 	_draw_sum += Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
 	_proc_sum += Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+	_update_round_cut(delta)
 	# La ronda termina cuando acabaron todas las partidas y el árbitro no tiene trabajo pendiente.
 	if not _ending and _human_settled and manager.round_complete() \
 			and (arbiter == null or not arbiter.has_pending_work()):

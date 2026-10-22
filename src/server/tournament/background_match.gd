@@ -94,6 +94,12 @@ func tick(delta: float, can_move: bool = true) -> bool:
 	return moved
 
 
+## Cierra ya la partida con un resultado simulado (la usa el corte de ronda).
+func force_end() -> void:
+	if not server.is_over():
+		_resolve_simulated()
+
+
 ## Cierra la partida con un resultado simulado: gana el favorito del Elo con
 ## más frecuencia; el perdedor abandona o recibe mate.
 func _resolve_simulated() -> void:

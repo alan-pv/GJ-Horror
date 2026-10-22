@@ -56,7 +56,7 @@ func test_delay_and_duration_in_range() -> void:
 			check(plan.delay >= 0.15 and plan.delay <= 0.45, "retardo 0,15-0,45: " + String(k))
 			check(plan.seconds >= spec.look.x and plan.seconds <= spec.look.y, "duración en rango: " + String(k))
 	var shot := Distraction.look_seconds(&"gunshot", r)
-	check(shot >= 1.5 and shot <= 3.0, "disparo 1,5-3 s")
+	check(shot >= 2.7 and shot <= 5.4, "disparo 2,7-5,4 s")
 	var glance := Distraction.look_seconds(&"arbiter_pass", r)
 	check(glance >= 0.4 and glance <= 0.9, "de reojo 0,4-0,9 s")
 	check(Distraction.reaction_delay(&"gunshot", r) < Distraction.reaction_delay(&"flag", _rng(1)) + 0.07, "más fuerte, más rápido")

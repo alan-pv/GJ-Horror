@@ -59,6 +59,45 @@ func take_next(from: Vector3) -> Dictionary:
 	return e
 
 
+## Como `take_next` pero sin sacarla: la entrada que se tomaría desde `from` ({} si no hay).
+func peek_next(from: Vector3) -> Dictionary:
+	if pending.is_empty():
+		return {}
+	var best := 0
+	for i in range(1, pending.size()):
+		if _better(pending[i], pending[best], from):
+			best = i
+	return pending[best]
+
+
+## Descarta las entradas pendientes de mesas distintas de `except_table` y las da por hechas.
+## Devuelve las descartadas (corte de ronda: se resuelven en silencio).
+func skip_pending(except_table: int) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var keep: Array[Dictionary] = []
+	for e in pending:
+		if int(e.table) == except_table:
+			keep.append(e)
+		else:
+			out.append(e)
+			_done[key(int(e.table), int(e.seat))] = true
+	pending = keep
+	return out
+
+
+## Quita de la cola la entrada de (`table`, `seat`) si está (no la da por hecha).
+func drop(table: int, seat: int) -> void:
+	for i in pending.size():
+		if int(pending[i].table) == table and int(pending[i].seat) == seat:
+			pending.remove_at(i)
+			return
+
+
+## Da por hecha una ejecución sin hacerla (el perdedor se resuelve en silencio).
+func mark_done(table: int, seat: int) -> void:
+	_done[key(table, seat)] = true
+
+
 ## Devuelve una entrada en curso a la cola (p. ej. la interrumpió una acusación).
 func requeue(e: Dictionary) -> void:
 	current = -1
