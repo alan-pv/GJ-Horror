@@ -25,6 +25,7 @@ var _banner_tween: Tween
 var _subtitle_tween: Tween
 var _arbiter_tween: Tween
 var _debug: Label
+var _vignette_mat: ShaderMaterial
 ## Panel de diagnóstico (F3) para las pruebas con jugadores; lo rellena `PlayerController`.
 var debug_visible: bool = false
 
@@ -125,16 +126,30 @@ func _build_vignette() -> void:
 	var shader := Shader.new()
 	shader.code = """
 shader_type canvas_item;
+// stress: 0..1 oscurece y cierra la viñeta; pulse: 0..1 latido (abre un poco el borde y lo enrojece).
+uniform float stress : hint_range(0.0, 1.0) = 0.0;
+uniform float pulse : hint_range(0.0, 1.0) = 0.0;
 void fragment() {
 	vec2 uv = UV - vec2(0.5);
 	float d = dot(uv, uv) * 1.6;
-	COLOR = vec4(0.0, 0.0, 0.0, smoothstep(0.12, 0.62, d) * 0.75);
+	float inner = mix(0.12, 0.05, stress) - 0.03 * pulse * stress;
+	float outer = mix(0.62, 0.42, stress) - 0.04 * pulse * stress;
+	float a = smoothstep(inner, outer, d) * mix(0.75, 0.92, stress);
+	COLOR = vec4(vec3(0.12, 0.0, 0.0) * pulse * stress, a);
 }
 """
-	var mat := ShaderMaterial.new()
-	mat.shader = shader
+	_vignette_mat = ShaderMaterial.new()
+	_vignette_mat.shader = shader
+	var mat := _vignette_mat
 	rect.material = mat
 	add_child(rect)
+
+
+## Viñeta del estrés: `amount` 0..1 la cierra y oscurece; `pulse` 0..1 es el latido del momento.
+func set_stress_vignette(amount: float, pulse: float) -> void:
+	if _vignette_mat != null:
+		_vignette_mat.set_shader_parameter("stress", clampf(amount, 0.0, 1.0))
+		_vignette_mat.set_shader_parameter("pulse", clampf(pulse, 0.0, 1.0))
 
 
 ## Rótulo del paseo entre rondas: título, detalle y pista de salto. No bloquea nada (sin fondo).

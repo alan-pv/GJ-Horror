@@ -31,6 +31,7 @@ const TEST_FILES := [
 	"res://tests/test_torso_lean.gd",
 	"res://tests/test_opponent_avatar.gd",
 	"res://tests/test_distractions.gd",
+	"res://tests/test_stress.gd",
 ]
 
 

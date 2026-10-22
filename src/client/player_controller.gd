@@ -66,6 +66,8 @@ const YAW_LIMIT := deg_to_rad(120.0)
 const PITCH_MIN := deg_to_rad(-80.0)
 const PITCH_MAX := deg_to_rad(55.0)
 const GAZE_INTERVAL := 0.1
+## Campo de visión de la cámara sin estrés (grados).
+const BASE_FOV := 62.0
 
 var server: MatchServer
 var board: BoardView
@@ -99,6 +101,8 @@ var selected: int:
 		return interaction.selected if interaction != null else -1
 
 var _head: Node3D
+## Entre la cabeza y la cámara: balanceo y sacudida del estrés (`set_camera_sway`).
+var _sway: Node3D
 var _gaze_timer: float = 0.0
 var _headless: bool = false
 ## Captura que el juego pidió; si el navegador la suelta por su cuenta se avisa al HUD.
@@ -124,12 +128,17 @@ func setup(p_server: MatchServer, p_board: BoardView, p_color: int, look: Dictio
 	_head = Node3D.new()
 	_head.name = "Cabeza"
 	add_child(_head)
+	# Nodo intermedio para el balanceo y la sacudida (estrés): solo mueve la imagen; la mirada
+	# que se manda al servidor sale de la cabeza, sin esto.
+	_sway = Node3D.new()
+	_sway.name = "Balanceo"
+	_head.add_child(_sway)
 	camera = Camera3D.new()
-	camera.fov = 62.0
+	camera.fov = BASE_FOV
 	camera.near = 0.02
 	camera.far = 60.0
 	camera.current = true
-	_head.add_child(camera)
+	_sway.add_child(camera)
 	# Empieza mirando el centro del tablero.
 	pitch = rest_pitch()
 	_apply_look()
@@ -205,6 +214,13 @@ func set_look(p_yaw: float, p_pitch: float) -> void:
 	yaw = clampf(p_yaw, -YAW_LIMIT, YAW_LIMIT)
 	pitch = clampf(p_pitch, PITCH_MIN, PITCH_MAX)
 	_apply_look()
+
+
+## Rotación extra de la imagen (radianes: pitch, yaw, roll) por el estrés. No cambia hacia dónde
+## mira el jugador para el servidor ni la cabeza que gira el árbitro.
+func set_camera_sway(rot: Vector3) -> void:
+	if _sway != null:
+		_sway.rotation = rot
 
 
 func _apply_look() -> void:
@@ -338,7 +354,9 @@ func _process(delta: float) -> void:
 	if _gaze_timer <= 0.0:
 		_gaze_timer = GAZE_INTERVAL
 		if send_gaze:
-			server.set_gaze(color, camera.global_position, -camera.global_basis.z)
+			# La mirada sale de la cabeza (sin balanceo ni sacudida); con cámara de depuración, de la cámara.
+			var eye: Node3D = camera if debug_camera else _head
+			server.set_gaze(color, eye.global_position, -eye.global_basis.z)
 	if not _headless:
 		_update_hover()
 		# El navegador puede soltar el puntero sin avisar (Esc, perder el foco del iframe).

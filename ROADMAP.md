@@ -30,15 +30,12 @@ Pedidos del 2026-10-21.
 
 ## Ronda de pulido 5 — Historia y estrés
 
-Pedidos del 2026-10-22. Tres frentes en paralelo; la base común (`GameRoot.hold_start/release_start`, señales `round_cut`, `last_execution_done`, `human_condemned`, `champion_crowned` y `extra_stress`) ya está en `game_root.gd`.
+Pedidos del 2026-10-22. Frentes en paralelo; la base común (`GameRoot.hold_start/release_start`, señales `round_cut`, `last_execution_done`, `human_condemned`, `champion_crowned` y `extra_stress`) ya está en `game_root.gd`.
 
 ### Frente V — Historia y monólogo interior (`src/client/voice/`)
 - [ ] Historia: todos deben una deuda impagable que compró "la Casa"; el campeón sale sin deuda y rico; "eliminado" es un eufemismo que el jugador entiende con el primer disparo. Giro: el árbitro fue campeón y la Casa necesita un árbitro nuevo.
 - [ ] Discurso del árbitro al empezar el torneo (reglas sin mencionar la trampa) y monólogo que lo nota.
 - [ ] Monólogo interior con cola de prioridades: inicio de ronda, disparos, rival ejecutado, apagón, rival distraído, empujones sutiles a hacer trampa, árbitro cerca, trampas propias, acusaciones, material, reloj, última mesa, ejecución propia y campeón.
-
-### Frente S — Estrés (`src/client/stress/`)
-- [ ] Modelo (piso por reloj, ronda y material + picos por eventos que decaen) y efectos: balanceo y sacudida de cámara, desenfoque periférico, viñeta con latido, latido y respiración, paso bajo, pitido tras un disparo cercano y FOV.
 
 ### Frente R — Ronda más corta y rivales más distraídos
 - [ ] 10-20 s después de que el humano termina, las mesas que faltan se cierran: solo se ve una última ejecución y el jugador parpadea hacia su mesa nueva.
