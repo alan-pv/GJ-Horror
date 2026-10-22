@@ -386,6 +386,9 @@ func button_top_world(color: int) -> Vector3:
 ## El jugador pulsa su mitad: baja (con rebote) y la contraria sube (corrutina).
 func press_button(color: int) -> void:
 	_tilt_rocker(_side_of(color), true)
+	# Al recargar la escena la mano puede pulsar cuando el reloj ya salió del árbol.
+	if not is_inside_tree():
+		return
 	await get_tree().create_timer(0.2).timeout
 
 
