@@ -51,6 +51,7 @@ func install(p_root: GameRoot) -> void:
 			arbiter.position = Vector3(float(p[0]), 0.0, float(p[1]))
 	if args.has("address-demo"):
 		arbiter.begin_address()
+		arbiter.set_address_light(true)
 	# Respaldo: si nadie pide la ejecución de una mesa de fondo, la pide este módulo.
 	root.table_eliminated.connect(_on_table_eliminated)
 	_force_at = float(args.get("force-at", 3.0))

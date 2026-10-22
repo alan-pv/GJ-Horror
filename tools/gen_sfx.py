@@ -262,7 +262,31 @@ def gen_room():
     save("room_tone_loop.wav", y, 0.5, oneshot=False)
 
 
+# ---------------- foco de teatro (inicio del torneo) ----------------
+def stage_light(on):
+    """Interruptor/relé de teatro: golpe grave, chasquido metálico y zumbido eléctrico (solo al encender
+    queda una cola de ~0,6 s; al apagar el golpe es más seco y el zumbido se corta)."""
+    n = int(2.4 * SR); t = np.arange(n) / SR; y = np.zeros(n)
+    thump = np.sin(2 * np.pi * (58 + 90 * np.exp(-t / 0.03)) * t) * ad(n, .0004, 0.07 if on else 0.045)
+    y += thump * 1.5
+    clunk = bp(noise(n), 400, 5000) * ad(n, .0002, 0.012) + ring(n, [1180, 2650, 4100], [.05, .035, .02], [.7, .4, .25]) * ad(n, .0002, 1)
+    y += clunk * (1.1 if on else 0.8)
+    k = int((0.07 if on else 0.05) * SR)   # segundo chasquido (resorte del contacto)
+    y[k:] += 0.55 * (bp(noise(n - k), 1500, 8000) * ad(n - k, .0002, 0.006) + ring(n - k, [3300, 5200], [.03, .02]) * ad(n - k, .0002, 1))
+    hum_len = 0.65 if on else 0.05
+    hum_env = ad(n, .004, 10.0) * np.clip((hum_len - t) / (0.18 if on else 0.03), 0, 1) * (t > 0.05)
+    hum = sum(a * np.sin(2 * np.pi * f * t + rng.uniform(0, 6.28)) for f, a in [(100, 1.0), (200, .55), (300, .3), (500, .12)])
+    hum = (hum + 0.25 * bp(noise(n), 2000, 7000)) * (1 + .3 * np.sin(2 * np.pi * 9 * t))
+    y += hum * hum_env * (0.35 if on else 0.25)
+    y = np.tanh(y * 0.9)
+    save("stage_light_%s.wav" % ("on" if on else "off"), reverb(y, 2.2, 0.38, pre=0.03, tail_lp=3000), 0.92, fade_out=0.4)
+
+
+def gen_stage_light():
+    stage_light(True); stage_light(False)
+
+
 if __name__ == "__main__":
-    for g in (gen_clock, gen_pieces, gen_pen, gen_steps, gen_gun, gen_cock, gen_bodies, gen_chair, gen_voice, gen_ear, gen_heart, gen_room):
+    for g in (gen_clock, gen_pieces, gen_pen, gen_steps, gen_gun, gen_cock, gen_bodies, gen_chair, gen_voice, gen_ear, gen_heart, gen_room, gen_stage_light):
         g()
     print("ok ->", os.path.abspath(OUT))

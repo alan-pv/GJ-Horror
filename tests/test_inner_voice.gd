@@ -254,9 +254,13 @@ func test_intro_conditions() -> void:
 
 
 func test_intro_text() -> void:
-	check_eq(IntroModule.FULL_LINES.size(), 9, "9 frases")
+	check_eq(IntroModule.FULL_LINES.size(), 8, "8 frases")
 	check_eq(IntroModule.FULL_LINES[5], "Anyone caught cheating is eliminated.", "frase 6")
-	check_eq(IntroModule.SHORT_LINES[0], "Another night. The same rules. Begin.", "corto")
+	check_eq(IntroModule.SHORT_LINES[0], "Another night. The same rules.", "corto")
+	check_eq(IntroModule.FULL_LINES[7], "The last player in this room walks out free of debt. And very rich.", "última frase")
+	for l in IntroModule.FULL_LINES + IntroModule.SHORT_LINES:
+		check(not l.contains("Begin") and not l.contains("sat where"), "el discurso no incluye 'Begin.' ni el giro: " + l)
+	check_eq(IntroModule.SKIP_LINE, "Begin.", "Begin. aparte")
 
 
 func test_play_only_lines_drop_when_match_ends() -> void:

@@ -33,6 +33,9 @@ const STEP_BASE_DB := -2.0
 const WALK_LENGTH := 1.30
 const STEP_PHASES: Array[float] = [0.0, 0.65]
 const NEAR_RADIUS := 2.0
+## Foco teatral del discurso: intenso y de cono cerrado.
+const ADDRESS_LIGHT_ENERGY := 8.0
+const ADDRESS_LIGHT_ANGLE := 17.0
 
 enum Urgency { NONE = 0, QUEUE = 1, ACCUSATION = 2, PLAYER = 3 }
 
@@ -214,7 +217,8 @@ func execute_player() -> void:
 
 ## Discurso del árbitro (lo usa el módulo del arranque). Lo planta de inmediato, sin caminar, de
 ## pie y en `idle` en un punto de pasillo visible desde la silla del humano (`ArbiterRoutes.address_spot`),
-## mirando al jugador, y suspende la patrulla hasta `end_address()`.
+## mirando al jugador, y suspende la patrulla hasta `end_address()`. Queda a oscuras: el foco se
+## enciende aparte con `set_address_light(true)`.
 func begin_address() -> void:
 	_addressing = true
 	_forced_route = []
@@ -223,18 +227,30 @@ func begin_address() -> void:
 	_hold_address(0.0)
 	figure.play(&"idle", 0.0)
 	_prev_anim_pos = 0.0
-	# Un foco cenital tenue para que se le lea la figura en el rincón oscuro del pasillo.
-	if _address_light == null:
-		_address_light = SpotLight3D.new()
-		_address_light.name = "FocoDiscurso"
-		_address_light.light_color = Color(1.0, 0.88, 0.72)
-		_address_light.light_energy = 2.2
-		_address_light.spot_range = 4.0
-		_address_light.spot_angle = 24.0
-		_address_light.rotation = Vector3(-PI / 2.0, 0.0, 0.0)
-		_address_light.position = Vector3(0.0, 3.0, 0.25)
-		add_child(_address_light)
-	_address_light.visible = true
+	_ensure_address_light()
+	_address_light.visible = false
+
+
+## Enciende o apaga de golpe el foco teatral sobre el árbitro (cono cerrado e intenso).
+func set_address_light(on: bool) -> void:
+	_ensure_address_light()
+	_address_light.visible = on
+
+
+func _ensure_address_light() -> void:
+	if _address_light != null:
+		return
+	_address_light = SpotLight3D.new()
+	_address_light.name = "FocoDiscurso"
+	_address_light.light_color = Color(1.0, 0.9, 0.74)
+	_address_light.light_energy = ADDRESS_LIGHT_ENERGY
+	_address_light.spot_range = 5.0
+	_address_light.spot_angle = ADDRESS_LIGHT_ANGLE
+	_address_light.spot_angle_attenuation = 0.7
+	_address_light.rotation = Vector3(-PI / 2.0, 0.0, 0.0)
+	_address_light.position = Vector3(0.0, 3.2, 0.25)
+	_address_light.visible = false
+	add_child(_address_light)
 
 
 ## Posición global de la cabeza del árbitro (para que la cámara del jugador lo mire).

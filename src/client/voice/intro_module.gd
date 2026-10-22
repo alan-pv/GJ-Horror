@@ -1,10 +1,17 @@
 class_name IntroModule
 extends Node
-## Discurso del árbitro al empezar la ronda 1 de un torneo. Retiene el arranque de la partida
-## (`hold_start`), pone al árbitro de pie delante del jugador (`Arbiter.begin_address`), gira la
-## cámara hacia él, dice las frases con `show_arbiter` y devuelve la cámara al tablero antes de
-## soltar el arranque. Espacio o Enter lo salta. Solo habla de verdad el primer torneo del proceso;
-## en los siguientes (tras morir) dice la versión corta.
+## Inicio del torneo como espectáculo. Retiene el arranque de la partida (`hold_start`), planta al
+## árbitro a oscuras (`Arbiter.begin_address`) y sigue esta coreografía:
+##   a. paneo lento de la cámara por el salón (solo el discurso completo);
+##   b. la cámara termina en el árbitro (oscuro) y hay una pausa;
+##   c. el foco teatral se enciende de golpe, con su sonido;
+##   d. habla el árbitro (`show_arbiter`);
+##   e. el foco se apaga, con su sonido;
+##   f. en la oscuridad: "Begin.";
+##   g. los jugadores de negras pulsan el reloj: al tocarlo arranca la partida (`end_address`, cámara
+##      de vuelta al tablero, `release_start`).
+## Versión corta (torneos siguientes del proceso): sin paneo y con una sola frase. Espacio o Enter
+## salta a e-f-g. Solo habla de verdad el primer torneo del proceso.
 ##
 ## No sale con `--autoplay`, `--screenshot`, `--walk-demo`, `--no-intro`, `--start-round` > 1 ni con
 ## demostraciones del árbitro/eventos; `--intro` lo fuerza (capturas).
@@ -21,16 +28,31 @@ const FULL_LINES: Array[String] = [
 	"Anyone caught cheating is eliminated.",
 	"If you see your opponent cheat, call me. If you are wrong, you will be warned. The third warning is an elimination.",
 	"The last player in this room walks out free of debt. And very rich.",
-	"I sat where you are sitting, once. Begin.",
 ]
-const SHORT_LINES: Array[String] = ["Another night. The same rules. Begin."]
+const SHORT_LINES: Array[String] = ["Another night. The same rules."]
 const SKIP_LINE := "Begin."
 ## Argumentos que desactivan el discurso salvo `--intro`.
 const BLOCKING_ARGS: Array[String] = [
 	"autoplay", "screenshot", "walk-demo", "no-intro", "force-execution", "lose-now", "win-now", "event",
 ]
-const TURN_SECONDS := 1.3
+const SFX := "res://assets/audio/sfx/"
+## Tiempos (s) de la coreografía.
+const PAN_SECONDS := 7.5          # paneo por el salón (completo)
+const PAN_SETTLE := 0.8           # pausa con la cámara ya en el árbitro a oscuras
+const TURN_SECONDS := 1.3         # giro al árbitro en la versión corta
+const SHORT_SETTLE := 0.6         # pausa tras el giro (corta)
+const LIGHT_ON_BEAT := 0.9        # tras encender el foco, antes de hablar
 const PHRASE_GAP := 0.35
+const LIGHT_OFF_BEAT := 0.8       # tras apagar el foco, antes de "Begin."
+const BEGIN_SECONDS := 1.5        # "Begin." en la oscuridad, antes de las pulsaciones
+const RETURN_SECONDS := 0.8       # la cámara vuelve al tablero durante la pulsación
+const PRESS_TIMEOUT := 3.5        # tope de espera al contacto con el reloj
+## Sonidos del foco (dB).
+const LIGHT_SFX_DB := 2.0
+## Paneo: tablas visibles (distancia en metros al jugador) y tope de yaw.
+const PAN_MIN_DIST := 2.0
+const PAN_MAX_DIST := 11.0
+const PAN_MAX_YAW := deg_to_rad(105.0)
 
 ## El discurso completo ya se dio en este proceso.
 static var _full_given: bool = false
@@ -39,6 +61,7 @@ var root: GameRoot
 var playing: bool = false
 
 var _skip: bool = false
+var _returning: bool = false
 var _hint: Label
 var _layer: CanvasLayer
 
@@ -115,49 +138,130 @@ func _run() -> void:
 		arb.begin_address()
 	_show_hint()
 	root.player.set_input_locked(true)
-	if addressing and arb.has_method("address_head_position"):
-		await _turn_to(arb.address_head_position(), TURN_SECONDS)
+	var head := arb.address_head_position() if addressing and arb.has_method("address_head_position") else Vector3.ZERO
+	# a-b. Paneo (completo) o giro directo (corto), y pausa en el árbitro a oscuras.
+	if addressing:
+		if full:
+			_log("fase a: paneo")
+			await _pan(head)
+		else:
+			_log("fase b: giro al árbitro")
+			await _turn_to(head, TURN_SECONDS)
+		await _wait(PAN_SETTLE if full else SHORT_SETTLE)
+	if not _alive():
+		return
+	# c-d. Foco encendido y discurso.
+	var lit := false
+	if not _skip:
+		_log("fase c: luz")
+		lit = true
+		_stage_light(true, arb if addressing else null)
+		await _wait(LIGHT_ON_BEAT)
 	for line in lines:
 		if _skip or not _alive():
 			break
-		if root.get_args().has("verbose"):
-			print("[discurso] ", line)
+		_log(line)
 		root.hud.show_arbiter(line, phrase_seconds(line))
 		await _wait(phrase_seconds(line) + PHRASE_GAP)
 	if not _alive():
 		return
-	if _skip:
-		# Atajo: pasa directo a "Begin.".
-		root.hud.show_arbiter(SKIP_LINE, 1.2)
-		_skip = false
-		_hide_hint()
-		await _wait(1.0)
-		if not _alive():
-			return
+	# Atajo (o fin normal): a partir de aquí no se interrumpe.
+	_skip = false
 	_hide_hint()
-	if addressing and arb.has_method("end_address"):
-		arb.end_address()
-	await _turn_back(0.9)
+	# e. Luz fuera.
+	if lit:
+		_log("fase e: luz fuera")
+		_stage_light(false, arb if addressing else null)
+		await _wait(LIGHT_OFF_BEAT)
+	elif addressing:
+		arb.set_address_light(false)
 	if not _alive():
 		return
-	root.player.set_input_locked(false)
+	# f. "Begin." en la oscuridad.
+	_log("fase f: Begin.")
+	root.hud.show_arbiter(SKIP_LINE, BEGIN_SECONDS + 0.6)
+	await _wait(BEGIN_SECONDS)
+	if not _alive():
+		return
+	# g. Las negras pulsan el reloj; al contacto arranca la partida.
+	_log("fase g: pulsan el reloj")
+	_returning = true
+	_return_view.call_deferred()
+	await _press_start_clocks()
+	if not _alive():
+		return
+	if addressing and arb.has_method("end_address"):
+		arb.end_address()
 	playing = false
-	if root.get_args().has("verbose"):
-		print("[discurso] terminado (completo=%s)" % full)
+	_log("terminado (completo=%s)" % full)
 	finished.emit(full)
 	root.release_start()
+	while _returning and _alive():
+		await get_tree().process_frame
+	if _alive():
+		root.player.set_input_locked(false)
+
+
+## Mensajes de las fases (solo con `--verbose`).
+func _log(text: String) -> void:
+	if root != null and root.get_args().has("verbose"):
+		print("[discurso] ", text)
+
+
+## Foco teatral: sonido fuerte (2D, bus SFX) y encendido/apagado de golpe.
+func _stage_light(on: bool, arb: Node) -> void:
+	if arb != null and arb.has_method("set_address_light"):
+		arb.set_address_light(on)
+	var p := AudioStreamPlayer.new()
+	p.bus = &"SFX" if AudioServer.get_bus_index(&"SFX") != -1 else &"Master"
+	p.stream = load(SFX + ("stage_light_on.wav" if on else "stage_light_off.wav"))
+	p.volume_db = LIGHT_SFX_DB
+	add_child(p)
+	p.finished.connect(p.queue_free)
+	p.play()
+
+
+## Las manos de negras pulsan el reloj: la del humano (mesa principal; con la entrada bloqueada si él
+## es negras) y la figura de negras de cada mesa de fondo. Vuelve al tocar el reloj la mano de la
+## mesa del humano (o por tope de tiempo).
+func _press_start_clocks() -> void:
+	for t in root.bg_tables.values():
+		if is_instance_valid(t) and t.has_method("press_start_clock"):
+			t.press_start_clock()
+	var hand: HandAnimator = root.animators[ChessPiece.BLACK]
+	if hand == null:
+		return
+	var state := {"hit": false}
+	var on_hit := func(_c: int) -> void: state.hit = true
+	hand.clock_hit.connect(on_hit, CONNECT_ONE_SHOT)
+	hand.enqueue_press()
+	var t := 0.0
+	while not state.hit and t < PRESS_TIMEOUT and _alive():
+		await get_tree().process_frame
+		t += get_process_delta_time()
+	if hand.clock_hit.is_connected(on_hit):
+		hand.clock_hit.disconnect(on_hit)
 
 
 # --- Cámara -----------------------------------------------------------------------------------
 
-func _turn_to(target: Vector3, seconds: float) -> void:
+## Yaw y pitch (en el marco del jugador) con que la cámara mira `target`.
+func _look_to(target: Vector3) -> Vector2:
 	var p := root.player
 	var d: Vector3 = p.global_transform.basis.inverse() * (target - p.camera.global_position)
 	if d.length() < 0.01:
-		return
-	var to_yaw := atan2(-d.x, -d.z)
-	var to_pitch := asin(clampf(d.y / d.length(), -1.0, 1.0))
-	await _blend_look(to_yaw, to_pitch, seconds)
+		return Vector2(p.yaw, p.pitch)
+	return Vector2(atan2(-d.x, -d.z), asin(clampf(d.y / d.length(), -1.0, 1.0)))
+
+
+func _turn_to(target: Vector3, seconds: float) -> void:
+	var l := _look_to(target)
+	await _blend_look(l.x, l.y, seconds)
+
+
+func _return_view() -> void:
+	await _turn_back(RETURN_SECONDS)
+	_returning = false
 
 
 func _turn_back(seconds: float) -> void:
@@ -169,13 +273,66 @@ func _blend_look(to_yaw: float, to_pitch: float, seconds: float) -> void:
 	var y0 := p.yaw
 	var p0 := p.pitch
 	var t := 0.0
-	while t < seconds and _alive():
+	while t < seconds and _alive() and not _skip:
 		await get_tree().process_frame
 		t += get_process_delta_time()
 		var k := smoothstep(0.0, 1.0, clampf(t / seconds, 0.0, 1.0))
 		p.set_look(lerpf(y0, to_yaw, k), lerpf(p0, to_pitch, k))
-	if _alive():
+	if _alive() and not _skip:
 		p.set_look(to_yaw, to_pitch)
+
+
+## Puntos de mira del paneo: del lado izquierdo al derecho por las mesas con gente a la vista y,
+## al final, el árbitro. Cada uno es (yaw, pitch).
+func _pan_path(head: Vector3) -> Array[Vector2]:
+	var p := root.player
+	var cam := p.camera.global_position
+	var best_l := Vector2(-INF, 0.0)
+	var best_r := Vector2(INF, 0.0)
+	for i in HallLayout.table_count():
+		if i == HallLayout.human_table:
+			continue
+		var target := HallLayout.table_position(i) + Vector3(0.0, 0.9, 0.0)
+		var dist := Vector2(target.x - cam.x, target.z - cam.z).length()
+		if dist < PAN_MIN_DIST or dist > PAN_MAX_DIST:
+			continue
+		var l := _look_to(target)
+		if absf(l.x) > PAN_MAX_YAW:
+			continue
+		if l.x > best_l.x:
+			best_l = l
+		if l.x < best_r.x:
+			best_r = l
+	var path: Array[Vector2] = [Vector2(p.yaw, p.pitch)]
+	if best_l.x > -INF and best_r.x < INF:
+		path.append(best_l)
+		path.append(best_r)
+	path.append(_look_to(head))
+	return path
+
+
+## Paneo lento (ease-in-out sobre todo el recorrido) por `_pan_path`.
+func _pan(head: Vector3) -> void:
+	var path := _pan_path(head)
+	var lens: Array[float] = []
+	var total := 0.0
+	for i in range(1, path.size()):
+		var d := (path[i] - path[i - 1]).length()
+		lens.append(d)
+		total += d
+	var t := 0.0
+	while t < PAN_SECONDS and _alive() and not _skip:
+		await get_tree().process_frame
+		t += get_process_delta_time()
+		var k := smoothstep(0.0, 1.0, clampf(t / PAN_SECONDS, 0.0, 1.0))
+		var at := k * total
+		var v := path[path.size() - 1]
+		for i in lens.size():
+			if at <= lens[i] or i == lens.size() - 1:
+				v = path[i].lerp(path[i + 1], clampf(at / maxf(lens[i], 0.0001), 0.0, 1.0))
+				break
+			at -= lens[i]
+		root.player.set_look(v.x, v.y)
 
 
 # --- Pista "SPACE: skip" -------------------------------------------------------------------------
