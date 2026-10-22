@@ -83,6 +83,9 @@ var _gaze_timer: float = 0.0
 var _headless: bool = false
 ## Captura que el juego pidió; si el navegador la suelta por su cuenta se avisa al HUD.
 var _captured: bool = false
+## El bloqueo de puntero llega con retraso en web: solo cuenta como perdido si ya se vio activo.
+var _lock_seen: bool = false
+var _debug_timer: float = 0.0
 ## Giro del ratón (rad) aún por aplicar; `_process` lo consume con el suavizado.
 var _pending_look: Vector2 = Vector2.ZERO
 var _web_mouse: bool = false
@@ -257,6 +260,19 @@ static func smooth_take(pending: Vector2, delta: float) -> Vector2:
 	return pending * (1.0 - exp(-delta / LOOK_SMOOTH))
 
 
+## Texto del panel de diagnóstico (F3): FPS, estado del ratón y, en web, el lienzo.
+func debug_text() -> String:
+	var t := "FPS %d\nmouse_mode %d  captured %s  lock_seen %s\nyaw %.2f  pitch %.2f  sens %.2f" % [
+			Engine.get_frames_per_second(), Input.mouse_mode, _captured, _lock_seen, yaw, pitch,
+			_sensitivity_scale()]
+	if _web_mouse:
+		t += "\n" + str(JavaScriptBridge.eval("(function(){var c=document.querySelector('canvas');"
+				+ "var r=c.getBoundingClientRect();return 'lock '+!!document.pointerLockElement+'  canvas '"
+				+ "+c.width+'x'+c.height+'  css '+Math.round(r.width)+'x'+Math.round(r.height)+'  dpr '"
+				+ "+devicePixelRatio+'  fullscreen '+!!document.fullscreenElement;})()", true))
+	return t
+
+
 func _consume_look(delta: float) -> void:
 	if _web_mouse:
 		var raw: PackedStringArray = str(JavaScriptBridge.eval(WEB_MOUSE_TAKE, true)).split(",")
@@ -285,12 +301,17 @@ func capture_mouse(on: bool) -> void:
 		return
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if on else Input.MOUSE_MODE_VISIBLE
 	_captured = on
+	_lock_seen = false
 	mouse_capture_changed.emit(on)
 
 
 func _process(delta: float) -> void:
 	if not _headless:
 		_consume_look(delta)
+		_debug_timer -= delta
+		if hud != null and hud.debug_visible and _debug_timer <= 0.0:
+			_debug_timer = 0.25
+			hud.set_debug(debug_text())
 	if server == null:
 		return
 	_gaze_timer -= delta
@@ -301,7 +322,9 @@ func _process(delta: float) -> void:
 	if not _headless:
 		_update_hover()
 		# El navegador puede soltar el puntero sin avisar (Esc, perder el foco del iframe).
-		if _captured and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		if _captured and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+			_lock_seen = true
+		elif _captured and _lock_seen:
 			_captured = false
 			mouse_capture_changed.emit(false)
 	# Si ya no se puede actuar (mano ocupada, acusación, fin), se suelta la pieza.

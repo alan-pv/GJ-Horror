@@ -24,6 +24,9 @@ var _banner_hint: Label
 var _banner_tween: Tween
 var _subtitle_tween: Tween
 var _arbiter_tween: Tween
+var _debug: Label
+## Panel de diagnóstico (F3) para las pruebas con jugadores; lo rellena `PlayerController`.
+var debug_visible: bool = false
 
 
 func _ready() -> void:
@@ -66,6 +69,11 @@ func _ready() -> void:
 	_crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_crosshair.visible = false
 	add_child(_crosshair)
+	_debug = _label(15, Color(0.6, 1.0, 0.6))
+	_debug.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_debug.position = Vector2(20, 70)
+	_debug.size = Vector2(900, 120)
+	_debug.visible = false
 	_capture_prompt = _label(22, Color(1.0, 0.85, 0.5))
 	_capture_prompt.anchor_left = 0.1
 	_capture_prompt.anchor_right = 0.9
@@ -209,6 +217,16 @@ func show_arbiter(text: String, seconds: float = 3.0) -> void:
 
 func set_warnings(count: int, maximum: int) -> void:
 	_warnings.text = "Warnings: %d/%d" % [count, maximum]
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F3:
+		debug_visible = not debug_visible
+		_debug.visible = debug_visible
+
+
+func set_debug(text: String) -> void:
+	_debug.text = text
 
 
 func set_hint(text: String) -> void:
