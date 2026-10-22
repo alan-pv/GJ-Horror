@@ -24,6 +24,24 @@ const MOUSE_SENSITIVITY := 0.0022
 ## Un evento de ratón que salta más que esto (píxeles de pantalla) se descarta: en web,
 ## el bloqueo de puntero a veces entrega un salto falso al capturar o al cambiar de ventana.
 const MOUSE_SPIKE_PX := 400.0
+## Constante de tiempo (s) del suavizado del giro: reparte los saltos de píxel entero del
+## ratón entre fotogramas para que la cámara no avance a escalones con sensibilidad alta.
+const LOOK_SMOOTH := 0.025
+## Web: acumula `movementX/Y` crudos del navegador mientras hay bloqueo de puntero. Godot los
+## escala por lienzo/recuadro CSS, y con el modo "fullscreen" de itch.io (lienzo redimensionado
+## dentro de la página) esa proporción se dispara y la cámara se clava en un tope.
+const WEB_MOUSE_JS := """
+if (!window.__lookAcc) {
+	window.__lookAcc = [0, 0];
+	document.addEventListener('mousemove', function (e) {
+		if (!document.pointerLockElement) return;
+		if (Math.abs(e.movementX) + Math.abs(e.movementY) > %d) return;
+		window.__lookAcc[0] += e.movementX;
+		window.__lookAcc[1] += e.movementY;
+	}, {capture: true, passive: true});
+}
+"""
+const WEB_MOUSE_TAKE := "(function(){var a=window.__lookAcc;var r=a[0]+','+a[1];a[0]=0;a[1]=0;return r;})()"
 const YAW_LIMIT := deg_to_rad(120.0)
 const PITCH_MIN := deg_to_rad(-80.0)
 const PITCH_MAX := deg_to_rad(55.0)
@@ -65,6 +83,9 @@ var _gaze_timer: float = 0.0
 var _headless: bool = false
 ## Captura que el juego pidió; si el navegador la suelta por su cuenta se avisa al HUD.
 var _captured: bool = false
+## Giro del ratón (rad) aún por aplicar; `_process` lo consume con el suavizado.
+var _pending_look: Vector2 = Vector2.ZERO
+var _web_mouse: bool = false
 
 
 func setup(p_server: MatchServer, p_board: BoardView, p_color: int, look: Dictionary = {}) -> void:
@@ -74,6 +95,9 @@ func setup(p_server: MatchServer, p_board: BoardView, p_color: int, look: Dictio
 	name = "Jugador"
 	position = EYE_POSITION
 	_headless = DisplayServer.get_name() == "headless"
+	if not _headless and OS.has_feature("web"):
+		_web_mouse = true
+		JavaScriptBridge.eval(WEB_MOUSE_JS % int(MOUSE_SPIKE_PX), true)
 	_head = Node3D.new()
 	_head.name = "Cabeza"
 	add_child(_head)
@@ -196,8 +220,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _headless or (input_locked and not walking):
 		return
 	if event is InputEventMouseMotion and is_mouse_captured():
-		var d := look_delta(event.screen_relative, _sensitivity_scale())
-		set_look(yaw - d.x, pitch - d.y)
+		if not _web_mouse:
+			_pending_look += look_delta(event.screen_relative, _sensitivity_scale())
 	elif walking:
 		return
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
@@ -228,6 +252,28 @@ static func look_delta(screen_relative: Vector2, sensitivity: float) -> Vector2:
 	return screen_relative * MOUSE_SENSITIVITY * sensitivity
 
 
+## Parte del giro pendiente que se aplica en un fotograma de `delta` segundos.
+static func smooth_take(pending: Vector2, delta: float) -> Vector2:
+	return pending * (1.0 - exp(-delta / LOOK_SMOOTH))
+
+
+func _consume_look(delta: float) -> void:
+	if _web_mouse:
+		var raw: PackedStringArray = str(JavaScriptBridge.eval(WEB_MOUSE_TAKE, true)).split(",")
+		if raw.size() == 2 and is_mouse_captured():
+			_pending_look += look_delta(Vector2(raw[0].to_float(), raw[1].to_float()), _sensitivity_scale())
+	if _pending_look == Vector2.ZERO:
+		return
+	if not is_mouse_captured() or (input_locked and not walking):
+		_pending_look = Vector2.ZERO
+		return
+	var take := smooth_take(_pending_look, delta)
+	if _pending_look.length() < 0.0005:
+		take = _pending_look
+	_pending_look -= take
+	set_look(yaw - take.x, pitch - take.y)
+
+
 ## Multiplicador de sensibilidad de los ajustes (1.0 si no existe el autoload).
 func _sensitivity_scale() -> float:
 	var settings := get_node_or_null("/root/GameSettings")
@@ -243,6 +289,8 @@ func capture_mouse(on: bool) -> void:
 
 
 func _process(delta: float) -> void:
+	if not _headless:
+		_consume_look(delta)
 	if server == null:
 		return
 	_gaze_timer -= delta

@@ -36,8 +36,14 @@ func set_fullscreen(on: bool) -> void:
 	changed.emit()
 
 
+## En web no se usa: pedir pantalla completa desde dentro del iframe de itch.io deja el lienzo
+## a medias (sin cubrir la barra del navegador) y descuadra el ratón; ahí sirve el botón de itch.
+static func fullscreen_supported() -> bool:
+	return not OS.has_feature("web")
+
+
 func _apply_fullscreen() -> void:
-	if DisplayServer.get_name() == "headless":
+	if DisplayServer.get_name() == "headless" or not fullscreen_supported():
 		return
 	DisplayServer.window_set_mode(
 			DisplayServer.WINDOW_MODE_FULLSCREEN if fullscreen else DisplayServer.WINDOW_MODE_WINDOWED)

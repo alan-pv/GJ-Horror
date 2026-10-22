@@ -107,11 +107,12 @@ func _rebuild_rows() -> void:
 	_sens_amount = _add_row("Mouse sensitivity", _game.mouse_sensitivity,
 			_game.SENSITIVITY_MIN, _game.SENSITIVITY_MAX,
 			_on_sensitivity_changed, "sens")
-	var full := CheckButton.new()
-	full.text = "Fullscreen"
-	full.button_pressed = _game.fullscreen
-	full.toggled.connect(func(on: bool) -> void: _game.set_fullscreen(on))
-	_rows.add_child(full)
+	if _game.fullscreen_supported():
+		var full := CheckButton.new()
+		full.text = "Fullscreen"
+		full.button_pressed = _game.fullscreen
+		full.toggled.connect(func(on: bool) -> void: _game.set_fullscreen(on))
+		_rows.add_child(full)
 
 
 ## Fila con título, porcentaje y deslizador. Devuelve la etiqueta del porcentaje.
