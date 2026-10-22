@@ -11,7 +11,7 @@ var _arbiter: Label
 var _warnings: Label
 var _hint: Label
 var _capture_prompt: Label
-var _crosshair: ColorRect
+var _crosshair: Control
 var _result_panel: ColorRect
 var _result_title: Label
 var _result_reason: Label
@@ -54,16 +54,15 @@ func _ready() -> void:
 	_hint.position = Vector2(20, 40)
 	_hint.size = Vector2(700, 24)
 	_hint.text = "Click: pick up any piece · A: accuse · X: abort · Esc: pause"
-	_crosshair = ColorRect.new()
-	_crosshair.color = Color(1, 1, 1, 0.55)
+	# Punto de mira: círculo claro con borde oscuro, visible sobre cualquier fondo.
+	_crosshair = Control.new()
 	_crosshair.anchor_left = 0.5
 	_crosshair.anchor_right = 0.5
 	_crosshair.anchor_top = 0.5
 	_crosshair.anchor_bottom = 0.5
-	_crosshair.offset_left = -2
-	_crosshair.offset_right = 2
-	_crosshair.offset_top = -2
-	_crosshair.offset_bottom = 2
+	_crosshair.draw.connect(func() -> void:
+		_crosshair.draw_circle(Vector2.ZERO, 5.0, Color(0, 0, 0, 0.6))
+		_crosshair.draw_circle(Vector2.ZERO, 3.5, Color(1, 0.97, 0.9, 0.9)))
 	_crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_crosshair.visible = false
 	add_child(_crosshair)
