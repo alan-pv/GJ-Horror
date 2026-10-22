@@ -6,11 +6,11 @@ Regla de mantenimiento: si una mecánica cambia, se corrige aquí en el mismo co
 
 ## 1. Resumen y reglas de arquitectura
 
-Juego de Godot 4.6+ (GDScript) para un humano contra bots: torneo de ajedrez por eliminación (32 jugadores por defecto) en un salón oscuro, con trampas físicas, acusaciones, un árbitro y eventos de distracción. Se exporta a web.
+Juego de Godot 4.6+ (GDScript; el proyecto declara la feature 4.7) para un humano contra bots: torneo de ajedrez por eliminación (32 jugadores por defecto) en un salón oscuro, con trampas físicas, acusaciones, un árbitro, eventos de distracción, estrés del jugador y un monólogo interior. Se exporta a web.
 
 | Regla | Cómo se cumple |
 | --- | --- |
-| **El servidor manda** | Todo lo que decide el resultado vive en `src/server/` (`MatchServer`). Cliente y bots envían solo intenciones: `submit_move`, `set_gaze`, `start_cheat`, `abort_cheat`, `accuse` (y `trigger_rival_event`). Dibujan lo que el servidor confirma por señales. Hoy corre todo en un proceso, pero no se cruza esa frontera. |
+| **El servidor manda** | Todo lo que decide el resultado vive en `src/server/` (`MatchServer`). Cliente y bots envían solo intenciones: `submit_move`, `press_clock`, `set_gaze`, `start_cheat`, `abort_cheat`, `accuse` (y `trigger_rival_event`). Dibujan lo que el servidor confirma por señales. Hoy corre todo en un proceso, pero no se cruza esa frontera. |
 | **Tablero físico** | `BoardState` es lo que hay sobre la mesa, no lo que resultaría de jugadas legales. Las trampas lo alteran por fuera de las reglas; las jugadas se validan siempre sobre él. |
 | **Bots = mismas entradas que un humano** | `BotController` usa las mismas intenciones y una cámara virtual para la mirada. Los cerebros devuelven una política `{uci: probabilidad}` que el bot muestrea. |
 | **Web es el objetivo** | Renderer `gl_compatibility` (sin niebla volumétrica; solo la niebla simple del `Environment`), sin procesos externos (nada de `OS.execute`). Maia-3 corre en el navegador con onnxruntime-web. |
@@ -34,20 +34,24 @@ flowchart LR
 
 | Clase | Ruta | Responsabilidad |
 | --- | --- | --- |
-| `MatchServer` | `src/server/match_server.gd` | Una partida: tablero, reloj, intenciones, trampas, acusaciones, eventos del rival, fin de partida y señales. |
+| `MatchServer` | `src/server/match_server.gd` | Una partida: tablero, reloj (y su pulsación), planillas, intenciones, trampas, acusaciones, eventos del rival, apagón, fin de partida y señales. |
 | `MatchConfig` | `src/server/match_config.gd` | `Resource` con los parámetros de la partida (ver sección 5). |
 | `PlayerSession` | `src/server/player_session.gd` | Datos que viven en el torneo: id, nombre, `is_bot`, advertencias, ayuda de principiantes (solo humanos). |
-| `ChessClock` | `src/server/chess_clock.gd` | Reloj sin incremento; señal `flagged`. |
+| `ChessClock` | `src/server/chess_clock.gd` | Reloj con incremento Fischer (`increment`); señal `flagged`. |
 | `Gaze` | `src/server/gaze.gd` | Cono de mirada y dirección a partir de yaw/pitch. |
 | `BeginnerHelper` | `src/server/beginner_helper.gd` | Detecta errores graves antes de aceptar una jugada. |
 | `TensionDirector` | `src/server/tension_director.gd` | Sortea eventos globales y disuasivos; lógica pura. |
 | `BoardState` | `src/server/chess/board_state.gd` | Tablero físico: casillas, desplazamientos finos, enroques, al paso, pilas de captura y piezas en la mano. FEN. |
 | `ChessRules` | `src/server/chess/chess_rules.gd` | Jugadas legales, jaque, aplicar jugada, material insuficiente, perft. |
 | `ChessPiece`, `ChessMove` | `src/server/chess/` | Codificación de piezas (tipo en 3 bits, color en el bit 3) y jugadas UCI. |
+| `San` | `src/server/chess/san.gd` | Notación algebraica (SAN) de una jugada, calculada antes de aplicarla (para las planillas). |
 | `CheatDef` | `src/server/cheats/cheat_def.gd` | Definición de una trampa como datos. |
 | `CheatRules` | `src/server/cheats/cheat_rules.gd` | Valida y aplica trampas sobre el tablero físico. |
 | `EventDef` | `src/server/events/event_def.gd` | Definición de un evento como datos. |
+| `Distraction` | `src/server/events/distraction.gd` | Tabla de tipos de distracción (probabilidad de voltear, duración de la mirada, respingo, radio) y su sorteo; ver 4.9. |
 | `TournamentManager` | `src/server/tournament/tournament_manager.gd` | Rondas, emparejamiento, descansos, final, campeón. |
+| `HallLayout` | `src/server/tournament/hall_layout.gd` | Disposición fija de las 16 mesas (numeración, podio, riqueza, desplazamiento del salón); ver 4.13. |
+| `RoundCut` | `src/server/tournament/round_cut.gd` | Lógica pura del corte de ronda: espera (`DELAY`) y reparto entre "última mesa" y mesas en silencio. |
 | `TournamentGame` | `src/server/tournament/tournament_game.gd` | Una partida de la ronda: colores, mesa, resultado, tiempo sobrante. |
 | `TournamentSession` | `src/server/tournament/tournament_session.gd` | Variables estáticas que sobreviven a la recarga de escena. |
 | `BackgroundMatch` | `src/server/tournament/background_match.gd` | Partida bot contra bot barata para las mesas lejanas. |
@@ -70,21 +74,47 @@ flowchart LR
 | Clase | Ruta | Responsabilidad |
 | --- | --- | --- |
 | `GameRoot` | `src/world/game_root.gd` | Raíz de la escena: arma torneo, partida, actores, módulos, mesas de fondo y flujo entre rondas. |
-| `Hall` | `src/world/hall.gd` | Salón, mesa principal, 9 mesas decorativas, lámparas, figuras sentadas. |
+| `Hall` | `src/world/hall.gd` | Salón de 18 × 19 m con las 16 mesas de `HallLayout` (la del humano y 15 decorativas), lámparas, podio, mesas con lujo por tramos. Las figuras sentadas no son suyas: las crea `BackgroundTable`. |
 | `BoardView` | `src/client/board_view.gd` | Tablero 3D, piezas, pilas, resaltados; reconcilia con el tablero físico (`sync`). |
-| `PieceFactory` | `src/client/piece_factory.gd` | Piezas por perfiles de revolución (placeholders), alturas reales. |
+| `PieceFactory` | `src/client/piece_factory.gd` | Piezas desde los `.glb` de Blender (una malla por tipo, recoloreada marfil / madera oscura), alturas reales y datos de agarre por tipo (`GRASPS`). |
 | `ClockView` | `src/client/clock_view.gd` | Reloj digital 3D: LCD de 7 segmentos y balancín. |
 | `PlayerController` | `src/client/player_controller.gd` | Cámara en primera persona, mirada, selección y envío de jugadas. |
 | `OpponentAvatar` | `src/client/opponent_avatar.gd` | Figura del rival, cabeza que sigue la mirada del bot, y tos. También fabrica las figuras sentadas de las mesas. |
 | `HandRig` | `src/client/hand_rig.gd` | Brazo con `Skeleton3D` + `TwoBoneIK3D`, dedos y temblor. |
 | `HandAnimator` | `src/client/hand_animator.gd` | Cola de animaciones de la mano por fases. |
 | `Arbiter` | `src/client/arbiter.gd` | Figura del árbitro: camina, mira el tablero, gesto de veredicto, `pass_behind`. |
-| `Hud` | `src/client/hud.gd` | Subtítulos, mensajes del árbitro, advertencias, ronda, cuadro, pantallas, viñeta, punto de mira central (solo con el ratón capturado) y panel de diagnóstico con F3 (FPS, estado del ratón y, en web, tamaño del lienzo). |
-| `CheatModule` | `src/client/cheats/cheat_module.gd` | Módulo: conecta las señales de trampas con las manos; crea entrada, panel y árbitro; guiones de demostración. |
+| `Hud` | `src/client/hud.gd` | Subtítulos, mensajes del árbitro, advertencias, pista de controles, ronda, estado de espera, rótulo del paseo, pantallas completas, viñeta (también la del estrés), punto de mira central (solo con el ratón capturado) y panel de diagnóstico con F3 (FPS, estado del ratón y, en web, tamaño del lienzo). |
+| `CheatModule` | `src/client/cheats/cheat_module.gd` | Módulo: conecta las señales de trampas con las manos (también la pulsación tras una trampa-jugada) y corre los guiones `--cheat-demo`. La entrada del jugador vive en `PlayerController` y `PieceInteraction`. |
 | `PieceInteraction` | `src/client/cheats/piece_interaction.gd` | Selección de cualquier pieza, mapa de calor y enrutado del clic (jugada o trampa). |
 | `EventModule` | `src/client/events/event_module.gd` | Módulo: dueño del `TensionDirector`, avisa a los bots, maneja al árbitro disuasivo. |
 | `EventStage` | `src/client/events/event_stage.gd` | Escenografía de eventos (apagón, banqueta, acusador). |
 | `EventSounds` | `src/client/events/event_sounds.gd` | Sonidos sintetizados por código. |
+| `ChairFollow` | `src/client/events/chair_follow.gd` | Retirada de la silla calculada con la pose real de la figura (ver 4.18). |
+| `ArbiterModule` | `src/client/arbiter_module.gd` | Módulo: crea el `Arbiter`, avisa `set_arbiter_near`, las distracciones `arbiter_pass`, las mesas activas de su patrulla y los argumentos de depuración del árbitro (ver 4.8). |
+| `ArbiterRoutes` | `src/client/arbiter_routes.gd` | Lógica pura de pasillos y rutas (patrulla, ejecuciones, paseo del jugador); las rutas nunca cruzan una mesa. |
+| `ExecutionQueue` | `src/client/execution_queue.gd` | Lógica pura de la cola de ejecuciones del árbitro. |
+| `Condemned` | `src/client/condemned.gd` | Reacción del condenado (suplicar, llorar, paralizarse) y su muerte; cuelga de la figura. |
+| `ScoresheetView` | `src/client/scoresheet_view.gd` | Las dos planillas con su pluma; muestra cada `sheet_entry` (11 renglones por hoja). |
+| `SeatedFigure` | `src/client/seated_figure.gd` | `CharacterFigure` sentada con inclinación del tronco (`TorsoLeanModifier`) y `ArmPoseModifier`; cuerpo del jugador y del rival. |
+| `FigureBase`, `CharacterFigure`, `ArbiterFigure` | `src/client/character/` | Figuras del `.glb` (ver 4.18); `AnimRoles` (contrato de roles de animación) y `FigureLookModifier` (mirada aditiva). |
+| `ArmPoseModifier`, `TorsoLeanModifier` | `src/client/` | `SkeletonModifier3D` de la mano (dedo por dedo) y de la inclinación del tronco (ver 4.14 y 4.20). |
+| `BlinkOverlay` | `src/client/blink_overlay.gd` | Párpados negros (`close`, `open`, `blink`) para esconder el corte de la recarga entre rondas. |
+| `StressModule`, `StressModel` | `src/client/stress/` | Estrés del jugador y sus efectos (ver 4.21). |
+| `IntroModule`, `InnerVoice`, `VoiceLines`, `VoiceQueue`, `VoiceRules` | `src/client/voice/` | Discurso del árbitro y monólogo interior (ver 4.22). |
+| `RoundWalk`, `HallWalk` | `src/world/` | Paseo en primera persona a la mesa de la ronda siguiente y su ruta pura (ver 4.13). |
+| `BackgroundTable` | `src/world/background_table.gd` | Vida de una mesa de fondo: dos figuras, tablero y relojes (ver 4.19). |
+| `HallMemory` | `src/world/hall_memory.gd` | Memoria visual del salón entre recargas (ver 4.19). |
+| `MeshBaker`, `StaticBoard` | `src/world/` | Fusión de mallas por material y tablero decorativo fusionado en dos superficies. |
+
+### Menús y autoloads
+
+| Clase / autoload | Ruta | Responsabilidad |
+| --- | --- | --- |
+| `MainMenu` | `src/ui/main_menu.gd` | Escena principal (`main_menu.tscn`): título, Play, Settings y Quit (Quit no sale en web). |
+| `PauseMenu` | `src/ui/pause_menu.gd` | Pausa con Esc: Resume, Settings, Main menu (ver 4.16). |
+| `SettingsPanel` | `src/ui/settings_panel.gd` | Ajustes superpuestos: volumen de Master / Music / SFX, sensibilidad del ratón y pantalla completa. |
+| `UiTheme` | `src/ui/ui_theme.gd` | Tema de los menús construido en código (negro, rojo apagado, fuente IM Fell Double Pica SC). |
+| `GameSettings`, `SceneSwitcher`, `AudioManager`, `UiSounds`, `UiIntro` | `autoloads/` | Autoloads de `project.godot` (ver 4.16). |
 
 ### Otras carpetas
 
@@ -93,7 +123,11 @@ flowchart LR
 | `data/cheats/`, `data/events/`, `data/personalities/` | Recursos `.tres`. |
 | `data/maia3/moves.json` | Vocabulario de Maia-3 (generado por `tools/export_maia3_onnx.py`). |
 | `web/` | Ignorada por Godot (`.gdignore`): `maia_bridge.js`, `maia3_5m.onnx`, `ort/` (onnxruntime-web). |
-| `tools/` | `build_web.sh`, `export_maia3_onnx.py`, `check_onnx.py`, `check_bridge.js`. |
+| `tools/` | `.gdignore`. Exportación web y Maia: `build_web.sh`, `export_maia3_onnx.py`, `check_onnx.py`, `check_bridge.js`. Arte: `export_models.sh` (reexporta los `.blend` a `.glb`), `check_props.gd` (nodos y medidas de la utilería), `check_characters.gd` (huesos, materiales y animaciones de los personajes), `anim_preview.gd` (captura un rol sentado en una mesa real; necesita pantalla). Medición y rendimiento: `check_arm_clearance.gd`, `measure_posture.gd`, `bench_turn.gd`, `bench_background.gd`. Audio: `gen_sfx.py` (sintetiza `assets/audio/sfx/`). Los `.gd` se corren con `godot --headless --path . --script res://tools/<archivo>`. |
+| `art/` | `.blend` editables y scripts de Blender (ver 4.15); `.gdignore`. |
+| `assets/` | `models/` (`.glb` exportados), `audio/sfx/` (sintetizados, ver su `CREDITS.md`), `audio/ui/` (clic y hover), `shaders/` (`iris`, `menu_background`, `stress_blur`), `fonts/` (IM Fell, OFL) y `CREDITS.md`. |
+| `docs/` | Este documento, `documento-diseno.md`, `documento-tecnico.md` y `contrato-arte.md` (roles de animación). |
+| `default_bus_layout.tres`, `export_presets.cfg` | Buses `Master` / `SFX` / `Music` y preset de exportación "Web". |
 | `tests/` | Pruebas propias (`extends TestCase`) y `fixtures/maia3_reference.json`. |
 | `src/world/main.tscn` | Escena principal: `GameRoot` + `WorldEnvironment` ("Entorno": fondo casi negro, ambiente 0,2, niebla simple de densidad 0,07). |
 
@@ -103,22 +137,23 @@ flowchart LR
 
 1. Lee los argumentos (`--clave=valor`) y fija semilla y escala de tiempo.
 2. Ejecuta `_setup_tournament`: `TournamentSession.ensure()` crea el `TournamentManager` solo si no existe (sobrevive a las recargas). Si el torneo terminó, empieza uno nuevo; si la ronda estaba cerrada, la cierra (`finish_round`); si está en reposo, llama `start_round()`. Con `--start-round=N` simula las rondas previas dejando ganar al humano. Después fija `HallLayout.set_human_table(manager.human_table())` y recién entonces crea y arma el `Hall` (el salón se desplaza para dejar la mesa del humano en el origen).
-3. Obtiene la partida del humano (`tgame`), su color y su rival. Si descansa (`bye`), `tgame` es `null`.
-4. Crea `BoardView` y `ClockView`; `_build_match` carga las 4 trampas de `data/cheats/` y crea el `MatchServer` con las **sesiones del torneo** (así las advertencias se arrastran).
+3. Obtiene la partida del humano (`tgame`), su color y su rival. Si descansa (`bye`), `tgame` es `null` (la mesa queda sin partida, el avatar oculto y el estado "You advance to the next round without playing").
+4. Crea `BoardView` y `ClockView`; `_build_match` carga las 3 trampas de `data/cheats/` (`own`, `enemy`, `steal`), fija `require_clock_press = true` y crea el `MatchServer` con las **sesiones del torneo** (así las advertencias se arrastran).
 5. `_build_actors`: `PlayerController`, `OpponentAvatar`, un `HandAnimator` por mano (`animators[color]`), el bot rival (`_make_bot`) y, con `--autoplay`, un segundo bot que juega por el humano.
-6. Crea `Hud`, conecta señales (`_connect_signals`), instala los módulos, puebla el salón (`_populate_hall`), arranca las partidas de fondo (`_start_background`) y llama `server.start()`. Después emite `match_started(server)`.
+6. Crea `Hud` y `PauseMenu`, conecta señales (`_connect_signals`), instala los módulos, puebla el salón (`_populate_hall`) y arranca las partidas de fondo (`_start_background`). Si ningún módulo retiene el arranque (`hold_start` / `release_start`, ver abajo), llama `_begin_match()`: `server.start()` y emite `match_started(server)`. `GameRoot._process` avanza las partidas de fondo, las mesas de fondo (`BackgroundTable.tick`), el servidor, el corte de ronda y el cierre de ronda; con `--quit-after` imprime un resumen (`[resumen]`: jugadas, rendimiento de las mesas de fondo, FPS, torneo, correcciones de sincronía, FEN y relojes).
 
 ### Módulos instalados (`GameRoot.MODULES`)
 
-Cada módulo es un script cuyo `new()` da un `Node` con `install(root)`; `GameRoot` los añade como hijos tras armar la partida y antes de arrancar. Para añadir uno basta con agregar su ruta.
+Cada módulo es un script cuyo `new()` da un `Node` con `install(root)`; `GameRoot` los añade como hijos tras armar la partida y antes de arrancar. Para añadir uno basta con agregar su ruta. Un módulo puede retener el arranque con `hold_start()` (solo durante `install`) y soltarlo con `release_start()`; `match_begun()` informa si ya arrancó.
 
 | Módulo | Instala |
 | --- | --- |
-| `cheat_module.gd` | Conexión de señales de trampas con las manos (también la pulsación tras una trampa-jugada) y guiones `--cheat-demo`. |
-| `stress_module.gd` | `StressModel` del humano y sus efectos (cámara, desenfoque, viñeta, audio). Ver 4.21. |
-| `event_module.gd` | `TensionDirector`, `EventStage`, disuasivo del árbitro, eventos del rival, aviso a los bots. |
+| `cheats/cheat_module.gd` | Conexión de señales de trampas con las manos (también la pulsación tras una trampa-jugada) y guiones `--cheat-demo`. |
+| `arbiter_module.gd` | Crea el `Arbiter` (`root.arbiter`), `set_arbiter_near`, mesas activas de la patrulla, aviso `arbiter_pass` y argumentos de depuración del árbitro. Ver 4.8. |
+| `events/event_module.gd` | `TensionDirector`, `EventStage`, eventos del rival, reparto de distracciones a los bots y mesas de fondo. |
 | `voice/intro_module.gd` | Discurso del árbitro al empezar el torneo (retiene el arranque con `hold_start`); ver 4.22. |
 | `voice/inner_voice.gd` | Monólogo interior del jugador (subtítulos según lo que ocurre); ver 4.22. |
+| `stress/stress_module.gd` | `StressModel` del humano y sus efectos (cámara, desenfoque, viñeta, audio). Ver 4.21. |
 
 ### Señales principales
 
@@ -128,24 +163,34 @@ Cada módulo es un script cuyo `new()` da un `Node` con `install(root)`; `GameRo
 | | `state_changed` | `GameRoot` → `BoardView.sync` |
 | | `beginner_warning(color, uci, text)` | `GameRoot` → subtítulo y titubeo de la mano |
 | | `cheat_started / cheat_finished / cheat_aborted` | `CheatModule` → animación de trampa; `PieceInteraction` |
+| | `clock_pressed(color)` | (nadie en el juego; la usan las pruebas) |
+| | `sheet_entry(color, move_number, san)` | `GameRoot` → `ScoresheetView.add_entry` |
 | | `accusation_started / accusation_resolved(accuser, correct, warnings)` | `GameRoot` (HUD), `Arbiter`, `BotController` |
 | | `game_over(winner, reason)` | `GameRoot` |
 | | `rival_event(color, event_id)` | `EventModule` |
 | `GameRoot` | `match_started(server)` | módulos |
 | | `table_eliminated(table, position, seat)` | `ArbiterModule` (encola la ejecución) |
 | | `players_remaining_changed(remaining, total)` | `EventModule` → `TensionDirector` |
+| | `round_cut(last_table)`, `last_execution_done(table)` | `InnerVoice` (corte de ronda, ver sección 3) |
+| | `human_condemned` | `InnerVoice`, `StressModule` |
+| | `champion_crowned` | `InnerVoice` |
+| `Arbiter` | `executed(table, seat)` | `GameRoot` (lámpara y `last_execution_done`), `InnerVoice` |
+| | `accusation_done` | `GameRoot._on_game_over` (espera el veredicto) |
+| | `player_executed` | (la espera `execute_player`) |
 | `TensionDirector` | `event_triggered(id, origin, duration)` | `EventModule` |
 | `BotController` | `looked(yaw, pitch)` | `OpponentAvatar` (gira la cabeza) |
-| `HandAnimator` | `job_done(kind)`, `idle`, `phase_changed` | `GameRoot`, `CheatModule` |
+| | `startled(world_pos)` | `OpponentAvatar` (respingo `sit_startle`) |
+| `HandAnimator` | `clock_hit(color)` | `GameRoot` → `server.press_clock` (se reintenta si la mano está en una trampa) |
+| | `job_done(kind)`, `idle`, `phase_changed` | `GameRoot`, `CheatModule`, `OpponentAvatar` |
 
 ### Fin de partida y recarga
 
-1. `MatchServer.game_over` → `GameRoot._on_game_over` informa al `TournamentManager` (`report_result` con los segundos sobrantes) y espera 1,2 s para ver la última jugada.
-2. Si el humano pierde y no es la final, muestra "Eliminado" 5 s y recarga con torneo nuevo (`_restart_tournament`, también con la tecla `R`). En la final, perder la primera partida no elimina.
+1. `MatchServer.game_over` → `GameRoot._on_game_over` informa al `TournamentManager` (`report_result` con los segundos sobrantes), espera 1,2 s para ver la última jugada y, si el árbitro aún da el veredicto de una acusación, espera `accusation_done`. Si el humano gana muestra el subtítulo "You won: motivo" (3 s) y el árbitro ejecuta al rival en su mesa; en la final solo al decidirse la serie.
+2. Si el humano pierde y no es la final (`_human_eliminated`): ejecución en primera persona (`Arbiter.execute_player`), pantalla "Eliminated" con el motivo y "Entering a new tournament..." y, a los 5 s (3 s con `--autoplay`), recarga con torneo nuevo (`_restart_tournament`, también con la tecla `R`). En la final, perder la primera partida no elimina (subtítulo "You lost this game of the final"). Mientras faltan otras mesas, el HUD muestra "Waiting for the other tables...".
 3. **Corte de ronda:** al quedar `_human_settled` (y no `_ending`) arranca una espera aleatoria de 10-20 s (`RoundCut.DELAY`; `--round-cut=S` la fija). Si la ronda se completa sola antes, sigue sin corte. Al vencer (`GameRoot._do_round_cut`, solo con árbitro) `RoundCut.plan` (estática pura) elige UNA "última mesa" cuya ejecución se verá: la que el árbitro ejecuta ahora (`queue.current`); si no, la que tomaría de la cola (`ExecutionQueue.peek_next`); si no, la partida de fondo sin terminar más cercana al árbitro, que se cierra con `BackgroundMatch.force_end` (resultado simulado) y se ejecuta normal; si no queda nada, `-1`. Las demás partidas de fondo sin terminar se cierran con `force_end` y se reportan al torneo, pero sus perdedores se resuelven "en silencio" (`Arbiter.resolve_silently`, sin `table_eliminated` ni ejecución); las demás entradas de la cola se descartan con `Arbiter.skip_pending(última_mesa)` (`ExecutionQueue.skip_pending`: quedan como hechas, su `Condemned` calla con `silence()`). Los cadáveres silenciosos quedan registrados (`_silent_corpses`): su figura pasa a `condemned` (así `_remember_round` los apunta en `HallMemory` con `BackgroundTable.corpse_seat()`) y se les pone la pose final (`hold_final_pose(&"death_slump_table")`, lámpara a `CORPSE_LEVEL`) en `clear_tables_for_next_round()`, con los ojos del jugador cerrados. Señales: `round_cut(last_table)` al cortar y `last_execution_done(table)` cuando el árbitro termina esa ejecución (`Arbiter.executed`). Después el flujo sigue igual, sin trabajo pendiente. Si el humano fue eliminado no hay corte.
 4. Cuando todas las partidas terminaron y el humano ya "se asentó" (`_human_settled`), `_finish_round_flow` espera 1,5 s, apunta en `HallMemory` el estado final de las mesas (`_remember_round()`, ver 4.19) y llama `finish_round()`:
-   - Torneo terminado: si el humano es campeón (`champion_crowned`), el árbitro dice "Your debt is settled." (3,5 s) y "The House is always in need of a new arbiter." (4,5 s) con `hud.show_arbiter` y sigue la pantalla "Campeón" (12 s; "You won the N-player tournament", detalle, "Your debt is paid. The mask is yours now."); si pierde la final, "Eliminado" (5 s). Después, torneo nuevo.
-   - Si no: `start_round()`. Si la mesa del humano cambia, **paseo en primera persona** (`RoundWalk`, ver 4.13) y, al sentarse, `reload_current_scene()`; la escena nueva monta el salón desplazado a la mesa nueva con la cámara en la misma pose. El paseo termina con un parpadeo (`BlinkOverlay`, ver 4.13) y la escena nueva abre los ojos (`BlinkOverlay.resume_if_pending`), así que el corte no se nota. Si no cambia (segunda partida de la final, en la mesa 1): pantalla de ronda 4 s y recarga.
+   - Torneo terminado: si el humano es campeón (`champion_crowned`), el árbitro dice "Your debt is settled." (3,5 s) y "The House is always in need of a new arbiter." (4,5 s) con `hud.show_arbiter` y sigue la pantalla "Champion!" (12 s, 4 s con `--autoplay`; "You won the N-player tournament", "Final a-b", "Your debt is paid. The mask is yours now."); si pierde la final, "Eliminated" ("<campeón> won the final", 5 s). Después, torneo nuevo.
+   - Si no: `start_round()`. Si la mesa del humano cambia, **paseo en primera persona** (`RoundWalk`, ver 4.13) y, al sentarse, `reload_current_scene()`; la escena nueva monta el salón desplazado a la mesa nueva con la cámara en la misma pose. El paseo termina con un parpadeo (`BlinkOverlay`, ver 4.13) y la escena nueva abre los ojos (`BlinkOverlay.resume_if_pending`), así que el corte no se nota. Si no cambia (segunda partida de la final, en la mesa 1): pantalla de ronda ("Final · game 2 of 2", con el resultado de la primera partida) 4 s y recarga.
 5. La recarga destruye la escena; el torneo persiste en `TournamentSession` y la memoria visual del salón en `HallMemory` (variables estáticas; `_restart_tournament` borra esta última). Al cerrar la ronda (sin trabajo pendiente del árbitro, antes de `finish_round()`) `_remember_round()` guarda por mesa las piezas y el cadáver del perdedor; `_populate_hall` de la escena nueva los restaura. Todas las corrutinas (árbitro, manos, bots, eventos) comprueban `is_inside_tree()` o un contador de generación tras cada `await` y abandonan si la escena se recargó.
 
 ### Torneo (`TournamentManager`)
@@ -171,16 +216,16 @@ Detalles en la sección 4.12.
 - Coronación sin elegir: si la jugada no indica pieza, se corona a dama (el jugador siempre corona a dama).
 - **Cada partida tiene ganador: las tablas ganan las negras** (ahogado, triple repetición, 50 jugadas, material insuficiente). Mate gana el rival del que no tiene jugadas; tiempo agotado pierde quien cae.
 - Repetición y 50 jugadas usan la posición física (`position_key`: piezas, turno, enroques, al paso). Toda trampa reinicia el contador de 50 jugadas (`halfmove_clock = 0`).
-- Motivos de fin (`REASON_*`): `jaque mate`, `tiempo agotado`, `ahogado: las tablas ganan negras`, `triple repetición...`, `regla de 50 jugadas...`, `material insuficiente...`, `trampa descubierta`, `tercera acusación falsa`.
+- Motivos de fin (`MatchServer.REASON_*`, en inglés porque el jugador los lee): `checkmate`, `time ran out`, `stalemate: draws go to Black`, `threefold repetition: draws go to Black`, `fifty-move rule: draws go to Black`, `insufficient material: draws go to Black`, `cheating caught`, `third false accusation` y `resignation` (solo las partidas de fondo simuladas, `force_end`).
 - La jugada se registra al soltar la pieza (clic); la animación es solo visual y no consume reloj.
 - Tras una jugada o trampa se comprueba el fin de partida con el mismo método, así una trampa también puede provocar mate o tablas.
 
 ### 4.2 Reloj (`chess_clock.gd`)
 
-- 3+2: 180 s por jugador (`white_seconds` / `black_seconds`) y 2 s de incremento (`increment_seconds`) que gana quien pulsa.
+- 3+2: 180 s por jugador (`white_seconds` / `black_seconds`) y 2 s de incremento (`increment_seconds`) que gana quien pulsa; `--clock=S` cambia los segundos.
 - `press(color)` suma el incremento y pasa el turno al rival; `tick` descuenta solo del color que corre. Se detiene si `paused` (acusación pendiente) o al terminar.
 - Al agotarse emite `flagged` y el servidor da la victoria al rival.
-- **Pulsar el reloj** (`MatchConfig.require_clock_press`, hoy `false` hasta que las manos lo cableen): `submit_move` aplica la jugada pero no pulsa; `pending_press` / `awaiting_press(color)` marcan que falta pulsar, el reloj de quien movió sigue corriendo y el rival no puede mover ("opponent has not pressed the clock"). `press_clock(color)` pulsa y emite `clock_pressed`. Si la jugada termina la partida no se espera la pulsación; si cae la bandera antes de pulsar, pierde por tiempo. Con `false`, se pulsa dentro de `submit_move`.
+- **Pulsar el reloj** (`MatchConfig.require_clock_press`: `false` por defecto, pero `GameRoot` lo pone en `true` y la mano pulsa al final de cada jugada; las partidas de fondo y las pruebas usan `false`): `submit_move` aplica la jugada pero no pulsa; `pending_press` / `awaiting_press(color)` marcan que falta pulsar, el reloj de quien movió sigue corriendo y el rival no puede mover ("opponent has not pressed the clock"). `press_clock(color)` pulsa y emite `clock_pressed`. Si la jugada termina la partida no se espera la pulsación; si cae la bandera antes de pulsar, pierde por tiempo. Una pulsación con la mano ocupada en una trampa se rechaza ("your hand is busy") y `GameRoot` la reintenta al terminar o abortar la trampa (`_press_retry`). Con `false`, se pulsa dentro de `submit_move`.
 - **Planillas:** cada color anota en SAN (`San.of`, calculada antes de aplicar; desambiguación, enroque, coronación, `+`/`#`) solo sus jugadas legales, al pulsar. `scoresheet(color)` y la señal `sheet_entry(color, move_number, san)`. Las trampas nunca se anotan. Las partidas de fondo no llevan planilla (`keep_scoresheet = false`). La acusación sigue usando la ventana desde la última jugada; las planillas son para la revisión visual del árbitro.
 - Vista: ver 4.16. La mano pulsa su lado del balancín al final de cada jugada.
 
@@ -220,7 +265,7 @@ Duración = `base_time + time_per_square × distancia de rey recorrida` (el robo
 
 **Reglas que se mantienen:** una sola mano (con una trampa activa no se juega, ni acusa, ni empieza otra); el reloj de quien mueve sigue corriendo; se actualizan los derechos de enroque y se reinicia la regla de 50 jugadas; el servidor revalida al terminar y aborta si ya no vale; la pieza queda **descentrada** (`offset_amount`, evidencia visual); si la partida termina con una trampa en curso, se marca `aborted`. `cheat_log` guarda `{color, cheat_id, from, to, start, end, ply, seen, status, level, evidence, as_move, dark}` (`dark`: estuvo en curso durante un apagón sin haber sido vista; ver 4.5).
 
-**Entrada del jugador** (`PlayerController` + `PieceInteraction`): no hay teclas de trampa ni panel. Clic izquierdo sobre cualquier pieza (también un rey) la selecciona si la mano está libre (anotar no cuenta); `PieceInteraction` pide `cheat_preview` y le suma como nivel 0 las jugadas legales. `BoardView.set_heatmap` pinta cada casilla por nivel: 0 verde, 1 naranja, 2 rojo, 3+ rojo cada vez más oscuro, con opacidad 0,55 / 0,45 / 0,30 / 0,12 / 0,04 para que lo lejano casi desaparezca; contorno claro en la casilla elegida y en la del cursor; anillo en las capturas legales. Con una pieza rival elegida se ilumina la zona de la pila propia y el clic sobre ella es `TO_PILE`. Clic en destino: nivel 0 → `submit_move`; otro → `start_cheat`. Otra pieza cambia la selección; la misma pieza, clic derecho o `Esc` la sueltan; con el rey rival elegido, el clic en la pila la suelta; un destino rechazado, "...no, not that: motivo". `X` aborta la trampa en curso; `A` acusa.
+**Entrada del jugador** (`PlayerController` + `PieceInteraction`): no hay teclas de trampa ni panel. Clic izquierdo sobre cualquier pieza (también un rey) la selecciona si la mano está libre (anotar no cuenta); `PieceInteraction` pide `cheat_preview` y le suma como nivel 0 las jugadas legales. `BoardView.set_heatmap` pinta cada casilla por nivel: 0 verde, 1 naranja, 2 rojo, 3+ rojo cada vez más oscuro, con opacidad 0,55 / 0,45 / 0,30 / 0,12 / 0,04 para que lo lejano casi desaparezca; contorno claro en la casilla elegida y en la del cursor; anillo en las capturas legales. Con una pieza rival elegida se ilumina la zona de la pila propia y el clic sobre ella es `TO_PILE`. Clic en destino: nivel 0 → `submit_move`; otro → `start_cheat`. Otra pieza cambia la selección; la misma pieza o el clic derecho la sueltan (`Esc` abre la pausa: `PauseMenu` consume la acción antes que el jugador); con el rey rival elegido, el clic en la pila la suelta; un destino rechazado, "...no, not that: motivo". `X` aborta la trampa en curso; `A` acusa.
 
 ### 4.5 Exposición y mirada (`gaze.gd`, `match_server.gd`)
 
@@ -229,7 +274,7 @@ Duración = `base_time + time_per_square × distancia de rey recorrida` (el robo
 - **Exposición:** `cheat.seen` se marca al empezar si el rival mira (o el árbitro está cerca) y se actualiza en cada `tick` mientras la trampa dura. Una trampa "vista" no acusa sola: el rival aún debe acusar.
 - Con `set_arbiter_near(true)` toda trampa en curso cuenta como vista (ver 4.9).
 - **Apagón** (`MatchConfig.blackout_hides_cheats`, por defecto sí): `set_blackout(dark)` / `is_blackout()` los llama `EventModule` (el cliente solo informa). Mientras está oscuro ninguna trampa se marca `seen` (ni por mirada ni por árbitro cerca). Toda entrada que esté en curso durante la oscuridad sin haber sido vista antes lleva `dark = true`; si al volver la luz sigue en curso y alguien mira, pasa a `seen = true` y `dark = false` (se la ve terminar). Una trampa vista antes del apagón sigue vista. En `accuse`, una entrada `dark` no cuenta para que la acusación sea correcta; los bots solo acusan con `entry.seen` y no juzgan trampas `dark`. Con la opción en `false` el apagón no cambia nada.
-- Jugador: ratón capturado (clic para capturar, `Esc` suelta; si el navegador suelta el puntero solo, el HUD vuelve a pedir el clic; como en web el bloqueo llega con retraso, solo cuenta como perdido si ya se vio activo), sensibilidad 0,0022 rad por píxel de pantalla (`screen_relative`, no `relative`, para que no dependa del tamaño del lienzo) por el ajuste de Settings (25 %–500 %); saltos de más de 400 px en un evento se descartan (fallo del bloqueo de puntero en web). En web el giro no sale de los eventos de Godot sino de `movementX/Y` crudos que un listener JS acumula y `_process` recoge (Godot los escala por lienzo/recuadro CSS, y el modo pantalla completa de itch.io dispara esa proporción). Ese listener también pide el bloqueo con `unadjustedMovement` (movimiento crudo, sin aceleración del sistema; Chromium en Windows/macOS/ChromeOS) y, si el navegador lo rechaza (Chrome en Linux, Firefox), repite la petición normal; F3 muestra cuál quedó (`input raw/plain`). El giro se aplica suavizado (constante 0,025 s en escritorio, 0,06 s en web, donde llegan pasos de píxel entero) para que no vaya a escalones con sensibilidad alta. En web no hay opción Fullscreen en Settings: se usa el botón de itch. Giro ±120°, inclinación −80° a +55°, FOV 62° (con estrés se cierra suavemente hasta 57°, ver 4.21). Los ojos están en (0; 1,13; 0,52).
+- Jugador: ratón capturado (clic para capturar, `Esc` abre la pausa y lo suelta; si el navegador suelta el puntero solo, el HUD vuelve a pedir el clic; como en web el bloqueo llega con retraso, solo cuenta como perdido si ya se vio activo), sensibilidad 0,0022 rad por píxel de pantalla (`screen_relative`, no `relative`, para que no dependa del tamaño del lienzo) por el ajuste de Settings (25 %–500 %); saltos de más de 400 px en un evento se descartan (fallo del bloqueo de puntero en web). En web el giro no sale de los eventos de Godot sino de `movementX/Y` crudos que un listener JS acumula y `_process` recoge (Godot los escala por lienzo/recuadro CSS, y el modo pantalla completa de itch.io dispara esa proporción). Ese listener también pide el bloqueo con `unadjustedMovement` (movimiento crudo, sin aceleración del sistema; Chromium en Windows/macOS/ChromeOS) y, si el navegador lo rechaza (Chrome en Linux, Firefox), repite la petición normal; F3 muestra cuál quedó (`input raw/plain`). El giro se aplica suavizado (constante 0,025 s en escritorio, 0,06 s en web, donde llegan pasos de píxel entero) para que no vaya a escalones con sensibilidad alta. En web no hay opción Fullscreen en Settings: se usa el botón de itch. Giro ±120°, inclinación −80° a +55°, FOV 62° (con estrés se cierra suavemente hasta 57°, ver 4.21). Los ojos están en (0; 1,146; 0,45) (`PlayerController.EYE_POSITION`, derivado de los ojos de la figura sentada en `SEAT.z` = 0,72). La mirada que se manda al servidor sale de la cabeza, no de la cámara (que lleva el balanceo del estrés, ver 4.21).
 
 ### 4.6 Abortar
 
@@ -242,16 +287,16 @@ Duración = `base_time + time_per_square × distancia de rey recorrida` (el robo
 - `accuse(color)` (tecla `A` para el humano): se rechaza si la mano está ocupada o ya hay una acusación pendiente.
 - **Ventana** (`MatchConfig.accusation_window_moves`, 3): la acusación es correcta si el rival tiene una trampa con `status != "aborted"` (la que está en curso cuenta) que empezó desde la N-ésima jugada más reciente del acusador, o desde el inicio de la partida si ha jugado menos de N. El inicio efectivo (`MatchServer.accusation_window_start`) es el mayor entre el instante de esa jugada y el de la última acusación falsa del acusador. Con N = 1 solo cubre lo ocurrido desde su última jugada.
 - El servidor decide al instante, pero la resolución se retrasa `arbiter_delay` (3 s) para el suspenso. Durante ese tiempo el reloj y las trampas en curso se congelan (`pause_clock_on_accusation = true`) y no se acepta ninguna otra intención.
-- **Correcta:** `accusation_resolved(accuser, true, ...)` y gana el acusador (`trampa descubierta`). Con `correct_accusation_clears_warning` (desactivado) borraría una advertencia.
-- **Falsa:** el acusador recibe una advertencia en su `PlayerSession`; la ventana de su siguiente acusación no retrocede de ese instante (no se repite sobre lo mismo). A la tercera (`false_accusations_to_eliminate = 3`) pierde la partida (`tercera acusación falsa`).
+- **Correcta:** `accusation_resolved(accuser, true, ...)` y gana el acusador (`cheating caught`). Con `correct_accusation_clears_warning` (desactivado) borraría una advertencia.
+- **Falsa:** el acusador recibe una advertencia en su `PlayerSession`; la ventana de su siguiente acusación no retrocede de ese instante (no se repite sobre lo mismo). A la tercera (`false_accusations_to_eliminate = 3`) pierde la partida (`third false accusation`).
 - Las advertencias viven en `PlayerSession`, no en la partida: se arrastran entre partidas y se reinician con `reset_for_tournament()` al empezar un torneo nuevo.
-- HUD: contador de advertencias arriba a la izquierda; mensaje del árbitro con el veredicto.
+- HUD: contador "Warnings: n/3" arriba a la izquierda. Al acusar sale "The arbiter is coming to the table..."; el veredicto lo anuncia el `Arbiter` (4 s, `Hud.show_arbiter`): "Cheating confirmed. The opponent is disqualified." / "You were caught cheating." si es correcta, "Nothing irregular. Warning n of 3." / "Nothing irregular. The accusation was false." si es falsa. Si hubo trampa señala al acusado (`point_accuse`); si no, niega con la cabeza. Sin árbitro (pruebas) `GameRoot` muestra "Cheating confirmed" / "You were caught" / "False accusation: warning n/3" / "The opponent accused you falsely".
 
 ### 4.8 Árbitro verdugo (`arbiter.gd`, `arbiter_module.gd`)
 
 - `ArbiterModule` crea el `Arbiter` (`root.arbiter`), avisa `server.set_arbiter_near` mientras está a ≤ 2 m del centro de la mesa del humano y, como respaldo, pide la ejecución de cada `table_eliminated`. Usa `ArbiterFigure`.
 - **Patrulla** (`ArbiterRoutes`, lógica pura): recorre a ~1 m/s (`set_walk_speed` ajusta el paso) solo los pasillos que bordean mesas con partida en juego (`Arbiter.set_active_tables`; `ArbiterModule.active_tables()` las calcula cada fotograma: la del humano si su servidor no terminó y las `BackgroundMatch` sin terminar, y solo avisa al cambiar; sin torneo no limita). `patrol_route` elige una esquina de una mesa activa y camina por los lados de las mesas activas (BFS por tramos permitidos; hasta el primer nodo permitido sale por la red normal). Pausas de 1,6-4 s mirando solo mesas activas y, si la del humano sigue activa, a veces cruza por detrás de su silla. Sin mesas activas espera quieto donde está. Las rutas nunca cruzan mesas (probado). `pass_behind` (evento `arbitro_pasa`) desvía la patrulla por la espalda del jugador.
-- **Pasos:** 3 `AudioStreamPlayer3D` en rotación, uno por apoyo de la animación `walk` (en 0,00 y 0,65 s del ciclo), `footstep_1..6` con tono ±7 %. Distancia inversa, `unit_size` 4, `max_distance` 28, base -2 dB: +3 dB (tope) hasta 1,6 m, 0 dB a 4 m, -6 a 8 m, -12 a 16 m, -16 a 25 m; filtro paso bajo 4,5 kHz con -18 dB (`Arbiter.footstep_gain_db`).
+- **Pasos:** 3 `AudioStreamPlayer3D` en rotación, uno por apoyo de la animación `walk` (en 0,00 y 0,65 s del ciclo), `footstep_1..6` con tono ±7 %. Distancia inversa, `unit_size` 4, `max_distance` 28, base -2 dB: +3 dB (tope del motor) hasta 2,3 m, 0 dB a 3,2 m, -6 a 6,3 m, -12 a 12,7 m, -18 a 25 m, mudo desde 28 m; filtro paso bajo 4,5 kHz con -18 dB (`Arbiter.footstep_gain_db`).
 - **Cola** (`ExecutionQueue`): `request_execution(table, seat)` (sin duplicados), primero la mesa del humano y luego la más cercana. Camina a 1,25 m/s (hasta 1,9 si la cola crece) al costado de la mesa y **revisa la mesa** (`_review_table`, ~3 s, una vez por mesa: tablero, clip `inspect_sheets` y cada jugador con `look_at_point`; no se repite si ya la revisó por una acusación; en la ejecución del jugador también, girando su cámara); luego se coloca a 0,85 m al lado del condenado, amartilla, apunta (`aim`, `aim_hold` 1-2,5 s), dispara (estampido 3D, `OmniLight3D` y chispas en `muzzle()`), el condenado cae, `lower_gun`, emite `executed` y sigue. `has_pending_work()` = cola, ejecución, acusación o jugador pendientes.
 - **Condenado** (`Condemned`): mientras espera reacciona; mesas delanteras y laterales (filas 0-2): suplicar (usa el clip `sit_cry`, con lloriqueos), llorar, o paralizarse, siempre sentado (ya no hay huida ni muerte de pie; `Condemned.Mode` es `SOB`, `BEG`, `CRY` o `FROZEN`); la muerte es `death_slump_table`: cae hacia delante y acaba con la cabeza (mejilla) apoyada en la cara superior de la mesa (holgura ≤ 1 cm, sin mirada: `die()` pone `set_look(0, 0)` y `hold_final_pose` también), un brazo sobre la mesa y el otro colgando; `test_character_figure.gd` comprueba la altura de la cabeza; mesas de la fila trasera: llorar o paralizarse. Sonidos 3D en su cabeza. El cuerpo queda hasta el fin de la ronda. Si `condemn_seat` devuelve null, se crea una figura temporal.
 - **Humano gana:** tras el fin de partida el árbitro ejecuta al rival en la mesa del humano (en la final, solo al decidirse la serie). Al condenarlo, `GameRoot.condemn_seat` llama `_freeze_rival()`: `OpponentAvatar.condemn()` detiene la pose ambiental, desconecta la mirada del bot, bloquea la tos y desactiva sus manos, y se apaga el `process` del `BotController` y del `HandAnimator` rival; el cadáver queda quieto hasta el fin de la ronda. **Humano pierde:** ejecución en primera persona (`execute_player`): se bloquea toda la entrada del jugador (`PlayerController.set_input_locked(true)`: no mueve, no hace trampa, no acusa ni mira; la cámara la gira solo el árbitro), latido y respiración, la cámara gira hacia el cañón, disparo, negro instantáneo con `ear_ring` y luego la pantalla "Eliminated".
@@ -282,7 +327,7 @@ Duración = `base_time + time_per_square × distancia de rey recorrida` (el robo
 
 **Eventos del rival:** `cough` no lo sortea el director; lo provoca un jugador sobre sí mismo con `MatchServer.trigger_rival_event(color, id)`. Espera por color y evento: `rival_event_cooldown` = 20 s. Rechazado si hay acusación pendiente, la partida no empieza/terminó. `rival_event_wait()` informa la espera restante. Son sospechosos en sí mismos. Solo los provocan los bots; el humano no tiene tecla para ello.
 
-**Disuasivo:** mientras el árbitro esté a menos de 1,5 m del centro de la mesa (`ARBITER_NEAR_RADIUS`), `EventModule` llama `server.set_arbiter_near(true)` y toda trampa en curso (también las que empiecen entonces) queda marcada como vista.
+**Disuasivo:** mientras el árbitro esté a menos de 2 m del centro de la mesa del humano (`ArbiterModule.NEAR_RADIUS`), `ArbiterModule` llama `server.set_arbiter_near(true)` y toda trampa en curso (también las que empiecen entonces) queda marcada como vista. El evento `arbitro_pasa` lo provoca el director: `EventModule` llama `Arbiter.pass_behind(ARBITER_BEHIND, duración)`.
 
 **Distracciones** (`src/server/events/distraction.gd`, lógica pura): cada `EventDef` lleva `turn_chance` y `distraction`; `apagon` 0,8 (`blackout`), `acusacion_ajena` 0,8 (`accusation`), `arbitro_pasa` 0,45 (`arbiter_pass`); `ruido_detras` y `cough` valen 0. Los avisos que no son `EventDef` están en `Distraction.SPECS`:
 
@@ -299,14 +344,14 @@ Las miradas fuera del tablero (salvo `arbiter_pass`, de reojo) duran ~1,8× lo q
 
 Descartados a propósito (no hacen voltear): lámpara a media luz tras una ejecución, banqueta o golpe detrás, puerta, tos o ruido del jugador. Quien produce el aviso llama `Distraction.broadcast(node, kind, pos, table)` (grupo `distraction_listeners`); `EventModule.on_distraction` lo reparte a los bots (`BotController.notice_event(pos, chance, kind)`) y a las mesas de fondo (`BackgroundTable.notice_event`) según el radio, y los bots de la mesa del humano ignoran avisos de su propia mesa.
 
-**Sonido** (`event_sounds.gd`): todo sintetizado por código, `AudioStreamWAV` mono de 16 bits a 22 050 Hz, generado la primera vez y guardado en caché. Claves: `slam`, `thud`, `cough`, `shout`, `clack`, `bulb_pop`, `struggle`, `steps`, `swoosh`. Se reproducen con `AudioStreamPlayer3D` en el origen del evento.
+**Sonido** (`event_sounds.gd`): todo sintetizado por código, `AudioStreamWAV` mono de 16 bits a 22 050 Hz, generado la primera vez y guardado en caché. Claves: `slam`, `thud`, `cough`, `shout`, `clack`, `bulb_pop`, `struggle`, `steps`, `swoosh`, `flag` (pitido de la bandera de una mesa de fondo). Se reproducen con `AudioStreamPlayer3D` en el origen del evento.
 
 ### 4.10 Ayuda para principiantes (`beginner_helper.gd`)
 
 - Solo para sesiones humanas (`PlayerSession.beginner_help`) con `config.beginner_help` y con al menos `beginner_help_min_clock` = 30 s en el reloj propio (`MatchServer.beginner_help_active`): con menos tiempo se juega lo que se quiera, sin aviso ni titubeo. Los bots no la usan; `--autoplay` la desactiva.
 - Antes de aceptar la jugada, `check_move` evalúa sobre el tablero físico: para cada jugada, el peor caso tras la mejor respuesta rival (más la mejor recaptura estimada), con material en centipeones.
-- Bloquea si la jugada **permite mate en 1** ("...espera, eso permite mate.") o si pierde al menos `blunder_threshold_cp` = 300 centipeones frente a la mejor alternativa ("...no, eso deja la dama colgada." según la pieza; "...mmm, no. Eso pierde material." si no hay pieza concreta). No avisa si solo hay una jugada legal. Nunca sugiere la mejor.
-- Solo la primera vez por posición y jugada (`_warned`): al repetir la misma, se permite. Emite `beginner_warning`; la vista muestra el subtítulo y la mano titubea (`enqueue_hesitate`: se acerca a la pieza y se detiene ~1 s). `submit_move` devuelve `reason = "advertencia"`.
+- Bloquea si la jugada **permite mate en 1** ("...wait, that allows mate.") o si pierde al menos `blunder_threshold_cp` = 300 centipeones frente a la mejor alternativa ("...no, that leaves the queen hanging." según la pieza —`the pawn`, `the knight`, `the bishop`, `the rook`, `the queen`—; "...hmm, no. That loses material." si no hay pieza concreta). No avisa si solo hay una jugada legal. Nunca sugiere la mejor.
+- Solo la primera vez por posición y jugada (`_warned`): al repetir la misma, se permite. Emite `beginner_warning`; la vista muestra el subtítulo y la mano titubea (`enqueue_hesitate`: se acerca a la pieza y se detiene ~1 s). `submit_move` devuelve `reason = "warning"`.
 
 ### 4.11 Bots
 
@@ -314,7 +359,7 @@ Descartados a propósito (no hacen voltear): lámpara a media luz tras una ejecu
 
 | Parámetro | honesto | paranoico | tramposo_nervioso |
 | --- | --- | --- | --- |
-| `display_name` | El honesto | El paranoico | El tramposo nervioso |
+| `display_name` | The honest one | The paranoid one | The nervous cheater |
 | `elo` (base; el torneo lo sustituye) | 1300 | 1200 | 1100 |
 | `temperature` | 1,0 | 1,0 | 1,1 |
 | `think_time_scale` | 1,0 | 1,2 | 0,8 |
@@ -364,11 +409,11 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (2, 4,5) s 
 - **Rondas sincronizadas:** `start_round()` baraja a los vivos y los empareja; los colores de cada partida son aleatorios (50 %). La siguiente ronda empieza cuando termina la última partida (`report_result` pasa a `ROUND_DONE`).
 - **Impares:** si sobra uno, descansa (`byes`; pasa sin jugar) el que menos veces haya descansado. Si es el humano, se queda en su mesa sin rival ("You advance to the next round without playing"); también camina a su mesa nueva al acabar la ronda.
 - **Eliminación:** `finish_round()` elimina a los perdedores (`eliminated_log` con ronda, mesa y motivo).
-- **Final:** cuando quedan 2, se juega a dos partidas; la segunda con colores invertidos. Gana quien tenga más victorias; con 1-1, quien sume más tiempo sobrante en el reloj; si empatan también, al azar. La primera partida perdida por el humano no lo elimina. Etiquetas: "Ronda N", "Ronda N · Semifinales" (≤ 4 jugadores) y "Final · partida X de 2".
+- **Final:** cuando quedan 2, se juega a dos partidas; la segunda con colores invertidos. Gana quien tenga más victorias; con 1-1, quien sume más tiempo sobrante en el reloj; si empatan también, al azar. La primera partida perdida por el humano no lo elimina. Etiquetas (`round_label`, en inglés): "Round N", "Round N · Semifinals" (≤ 4 jugadores) y "Final · game X of 2".
 - **Mesas** (`HallLayout`): 16 mesas fijas en cuadrícula 4x4 (separación 3,0 m en X y 3,2 m en Z, misma orientación), **numeradas del 1 al 16** (índice = número - 1). Las 1-4 forman la fila del fondo (fila 0, la más lejana en -Z, delante del jugador) y las 13-16 la más cercana; en cada fila el orden de izquierda a derecha es 3-1-2-4 (`SLOT_COLUMNS`), así que las 1 y 2 quedan en el centro del fondo, sobre el **podio** (tarima de 0,18 m con rampas de 0,4 m en los bordes; `floor_height`, `floor_y(p)`). En cada ronda las partidas y descansos ocupan las mesas 1..N (N = partidas + descansos, tope 16) y el **humano la N** (`HallLayout.human_table_for(N)`, `TournamentManager.human_table()`): con 32 jugadores 16 -> 8 -> 4 -> 2 -> 1 (la final y sus dos partidas, en la 1). Sube por el lado derecho hacia el podio y el salón se vacía desde atrás. Los que no caben (más de 32 jugadores) quedan sin mesa (`TABLE_NONE`).
 - **Origen y desplazamiento del salón:** la vista supone la mesa del humano en `Vector3.ZERO`. `HallLayout.human_table` (variable estática) la fija `GameRoot` antes de armar el `Hall`; `table_position(i)` es relativa a ella (`grid_position(i) - grid_position(human_table)`), `room_position(i)` está en el marco fijo de la sala y `room_offset()` desplaza el nodo `Sala` de `Hall` (suelo, muros, techo, podio; y baja en Y si el humano está sobre el podio). Las mesas del podio llevan `root.y = floor_height(i) - floor_height(humano)`. El árbitro y `ArbiterRoutes` (`seat_position`) ajustan su altura con `floor_y`; los pasillos (`aisle_xs/zs`) se calculan con la celda del humano (`cell_of`).
-- **Riqueza por tramos** (`HallLayout.richness`, `Hall._dress_table`): 9-16 sencillas; 5-8 con mantel verde; 3-4 con mantel granate, ribete y marco dorados alrededor del tablero, candelero con llama (material sin luz) y piezas de marfil/ébano pulidas; 1-2 (podio) mantel carmesí, dos candeleros y tarjeta dorada. Todo es geometría fusionada en la malla de la mesa (sin luces nuevas). Cada mesa lleva la tarjeta de número (`Tarjeta/Numero`, `Label3D` "TABLE n") a la izquierda del tablero, legible desde la silla.
-- **Paseo entre rondas** (`RoundWalk`, `HallWalk`, `src/world/`): tras ganar (o descansar) y llamar a `start_round()`, si la mesa cambia `GameRoot._walk_to_next_round` instala un `RoundWalk`. El cuerpo del jugador (`player.body`, que pasa a `top_level`) se levanta con `stand_up` mientras `ChairFollow` retira la silla (0,6 m, con sonido), gira, camina con `walk` a 1,1 m/s (pasos, ritmo de zancada) y se sienta con `sit_down` en la silla de la mesa destino, que se retira al acercarse y vuelve con `ChairFollow`. La cámara (hijo del `PlayerController`) se coloca cada fotograma en `body.eye_global_position()` y la mirada del ratón sigue libre (`PlayerController.walking`, `begin_walk()`: sin clics ni teclas de juego, IK de brazos a 0). La ruta (`HallWalk.route`) sale de lado por el hueco entre la silla y la mesa hasta el pasillo vertical contiguo, usa `ArbiterRoutes.route` y entra de lado por el hueco de la silla destino; elige entre los cuatro lados la más corta y nunca cruza una mesa ajena (`is_blocked`, probado para las 240 parejas). Mientras camina, un rótulo superpuesto no bloqueante (`Hud.show_banner`: "Round N", "Table N · M players left", "SPACE: skip the walk") sustituye a la pantalla de ronda; Espacio salta el paseo (corte directo, pero también con el parpadeo final).
+- **Riqueza por tramos** (`HallLayout.richness`, `Hall._dress_table`): 9-16 sencillas; 5-8 con mantel verde; 3-4 con mantel granate, ribete y marco dorados alrededor del tablero, candelero con llama (material sin luz) y piezas de marfil/ébano pulidas; 1-2 (podio) mantel carmesí, dos candeleros y tarjeta dorada. Todo es geometría fusionada en la malla de la mesa (sin luces nuevas). Cada mesa lleva una tarjeta con el número (un `Label3D` con el número y otro "TABLE") a la izquierda del tablero, legible desde la silla.
+- **Paseo entre rondas** (`RoundWalk`, `HallWalk`, `src/world/`): tras ganar (o descansar) y llamar a `start_round()`, si la mesa cambia `GameRoot._walk_to_next_round` instala un `RoundWalk`. El cuerpo del jugador (`player.body`, que pasa a `top_level`) se levanta con `stand_up` mientras `ChairFollow` retira la silla (0,6 m, con sonido), gira, camina con `walk` a 1,1 m/s (pasos, ritmo de zancada) y se sienta con `sit_down` en la silla de la mesa destino, que se retira al acercarse y vuelve con `ChairFollow`. La cámara (hijo del `PlayerController`) se coloca cada fotograma en `body.eye_global_position()` y la mirada del ratón sigue libre (`PlayerController.walking`, `begin_walk()`: sin clics ni teclas de juego, IK de brazos a 0). La ruta (`HallWalk.route`) sale de lado por el hueco entre la silla y la mesa hasta el pasillo vertical contiguo, usa `ArbiterRoutes.route` y entra de lado por el hueco de la silla destino; elige entre los cuatro lados la más corta y nunca cruza una mesa ajena (`is_blocked`, probado para las 240 parejas). Mientras camina, un rótulo superpuesto no bloqueante (`Hud.show_banner`: `round_label()`, "Table N · M players left" o "Table N · the final", y "SPACE: skip the walk"; `Hud.set_walk_mode` oculta pista, advertencias y ronda) sustituye a la pantalla de ronda; Espacio salta el paseo (corte directo, pero también con el parpadeo final).
   **Giro suave:** la trayectoria no cambia; solo la orientación del cuerpo y la cámara. `RoundWalk` apunta a un punto `LOOK_AHEAD` = 0,8 m por delante sobre la ruta (`HallWalk.look_ahead`), así que empieza a girar antes del vértice, y `HallWalk.smooth_yaw` aplica un resorte críticamente amortiguado (`TURN_OMEGA` = 5,5 1/s) con velocidad angular máxima `TURN_MAX` = 3 rad/s: no hay saltos al cambiar de tramo. El giro inicial al salir de la silla y el final hacia la mesa (desde `FINAL_TURN` = 1,4 m antes y durante `sit_down`) usan el mismo resorte.
   **Parpadeo** (`BlinkOverlay`, `src/client/`): dos párpados negros con borde curvo y suave (shader de canvas, válido en Compatibility) con `close()`, `open()` y `blink()` awaitables. `RoundWalk` parpadea 0,4 s después de empezar a levantarse y, con los ojos cerrados, llama a `GameRoot.clear_tables_for_next_round()` (el salón queda ya como la escena nueva: los ganadores salen de sus mesas viejas y los nuevos emparejamientos aparecen sentados en las de la ronda nueva). Al sentarse (o al saltar el paseo) cierra los ojos y deja `BlinkOverlay.pending_open = true` antes de recargar; `GameRoot._ready` llama a `BlinkOverlay.resume_if_pending(self)` y la escena nueva abre los ojos.
   **Corte sin saltos:** al acercarse, la mesa destino se deja como la verá la escena nueva (`RoundWalk._prepare_destination`): las figuras viejas se ocultan, el rival de la ronda ya está sentado (misma ropa por semilla `rival<id>`, `sit_wait`), el tablero decorativo muestra la posición inicial girada según el color (`Hall.set_table_start_position`; los tableros decorativos usan los mismos colores que `BoardView`) y la lámpara toma el aspecto de la del humano (`Hall.make_lamp_like_main`). En los últimos 0,9 s de `sit_down` la posición y la mirada de la cámara se funden con las de reposo del `PlayerController` (`EYE_POSITION`, `rest_pitch()`); al terminar se llama a `reload_current_scene()`. Perder no camina (pantalla "Eliminated").
@@ -378,19 +423,19 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (2, 4,5) s 
 - **Corte de ronda:** terminada la partida del humano, la ronda no espera a todas las mesas: a los 10-20 s se cierran las partidas de fondo restantes con resultado simulado (`BackgroundMatch.force_end`) y solo se ve la ejecución de una "última mesa"; los demás perdedores se resuelven en silencio y sus cadáveres aparecen en la pose final en la ronda siguiente (ver sección 3 y 4.8).
 - **Eliminaciones en otras mesas:** al terminar una partida de fondo con mesa visible, `GameRoot` emite `table_eliminated(mesa, posición, asiento_del_perdedor)`. `ArbiterModule` la escucha y encola la ejecución; sin árbitro (`--no-arbiter-exec`) la figura se levanta (`stand_up`) y camina a la oscuridad (`BackgroundTable.send_away`, `Hall.remove_occupant`).
 - **Advertencias:** viven en la `PlayerSession` del torneo; se arrastran entre partidas y se reinician con `new_tournament()`.
-- **Cola automática:** al ser eliminado (o perder la final) se muestra "Eliminado" y tras 5 s (o con `R`) se recarga con `new_tournament()`: mismos jugadores, advertencias a cero.
-- **Pantallas** (`Hud.show_screen`): entre rondas ("Quedan N jugadores", rival y color), "Eliminado" y "¡Campeón!" con el marcador de la final. HUD del torneo: ronda y jugadores restantes arriba a la derecha y cuadro de las partidas de la ronda (el humano marcado con `»`).
+- **Cola automática:** al ser eliminado (o perder la final) se muestra "Eliminated" y tras 5 s (o con `R`) se recarga con `new_tournament()`: mismos jugadores, advertencias a cero.
+- **Pantallas** (`Hud.show_screen`): entre rondas, solo cuando la mesa no cambia (título de la ronda, "N players left" o el resultado de la primera partida de la final, rival y color; ver `_next_round_text`), "Eliminated" y "Champion!" con el marcador de la final. HUD del torneo: solo "Round N / M" (o "Final") arriba a la derecha; sin nombres ni cuadro de partidas.
 - **Simulación:** `simulate_result` / `simulate_round` resuelven partidas por probabilidad logística del Elo (pruebas y saltos de depuración).
 
 ### 4.14 Cliente 3D
 
-**Salón (`Hall`):** habitación de 22 × 26 m con paredes y columnas oscuras, mesa principal de 1,30 × 0,90 m con dos sillas y 9 mesas decorativas con sillas y siluetas sentadas (posiciones de `HallLayout`; la del humano no lleva ocupantes propios). Sin niebla volumétrica: la niebla es la simple del `Environment`.
+**Salón (`Hall`):** sala de 18 × 19 m y 3 m de alto (`ROOM_HALF_X` 9, `ROOM_HALF_Z` 9,5, `CEILING_Y` 3) con muros y columnas oscuros, puertas y estandartes; 16 mesas de 1,30 × 0,90 m con dos sillas (posiciones de `HallLayout`; la del humano es la única con sombras y no lleva ocupantes propios: los de las demás los crea `BackgroundTable`). Ver 4.19. Sin niebla volumétrica: la niebla es la simple del `Environment`.
 
-**Lámparas:** la principal es un `SpotLight3D` a 1,95 m (ángulo 31°, rango 4 m, energía 1,4, con sombras; `--no-shadows` las quita) más un cono falso aditivo (shader sin iluminación) para el haz, y dos `OmniLight3D` de relleno a los lados del tablero para leer los costados de las piezas. Cada mesa decorativa tiene su propio foco (energía 2,2) y bombilla; `set_table_active` los enciende y apaga con o sin atenuación (1,4 s).
+**Lámparas:** la principal es un `SpotLight3D` a ~1,93 m sobre el suelo (ángulo 31°, rango 4 m, energía 0,8, color cálido, con sombras; `--no-shadows` las quita) más un cono falso aditivo (shader sin iluminación) para el haz, y dos `OmniLight3D` de relleno (energía 0,2) a los lados del tablero para leer los costados de las piezas. Cada mesa decorativa tiene su propio foco (ángulo 38°, rango 2,9 m, energía 2,2, ámbar, sin sombras) y bombilla con material emisivo; `set_table_active` y `set_table_level` los encienden, apagan y atenúan (1,4 s; con parpadeo opcional).
 
-**Cámara:** primera persona sentada (ver 4.5), `Camera3D` hija de una cabeza que gira por yaw/pitch. Una retícula aparece al capturar el ratón; el resaltado muestra la casilla bajo el centro, la selección y los destinos legales (captura distinta).
+**Cámara:** primera persona sentada (ver 4.5), `Camera3D` hija de una cabeza que gira por yaw/pitch (con un nodo `Balanceo` entre ambas para el estrés). Una retícula aparece al capturar el ratón; el resaltado muestra la casilla bajo el centro, la selección y el mapa de calor (ver 4.4).
 
-**Jugar:** clic en pieza propia resalta destinos legales; clic en destino → `submit_move`. Solo se puede si es tu turno, tu mano está libre y no hay animación en curso. Coronación siempre a dama.
+**Jugar:** clic en una pieza muestra el mapa de calor (ver 4.4); clic en un destino de nivel 0 → `submit_move`, en otro → `start_cheat`. Solo se puede si tu mano no está en una acción (`HandAnimator.is_busy_for_action`, anotar no cuenta) y la entrada no está bloqueada. Coronación siempre a dama.
 
 **Mano (`HandRig` + `HandAnimator`):**
 
@@ -409,9 +454,9 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (2, 4,5) s 
 
 **Rival (`OpponentAvatar`):** figura sentada (maniquí gris, ver 4.18); la cabeza gira con la cámara virtual del bot para que el jugador lea hacia dónde mira. Animación de tos.
 
-**HUD (`Hud`):** subtítulos del personaje (abajo), mensajes del árbitro (arriba), contador de advertencias, pista de controles, aviso para capturar el ratón, ronda ("Round N / M" o "Final"), estado de espera, pantallas completas y viñeta oscura. Pista de controles: "Click: pick up any piece · A: accuse · X: abort · Esc: pause".
+**HUD (`Hud`, `CanvasLayer` 10):** subtítulos del personaje (abajo), mensajes del árbitro (arriba), contador de advertencias ("Warnings: n/3", arriba a la izquierda), pista de controles, aviso "Click to take control of the mouse", ronda ("Round N / M" o "Final", arriba a la derecha), estado de espera (`set_status`), rótulo del paseo (`show_banner`), pantallas completas (`show_screen`, `show_result`), punto de mira y viñeta oscura (la del estrés, `set_stress_vignette`). Pista de controles: "Click: pick up any piece · A: accuse · X: abort · Esc: pause" (con `--autoplay`, "Autoplay mode"). F3 muestra u oculta el panel de diagnóstico.
 
-**Sonidos:** solo sintetizados (ver 4.9). No hay audio ambiente ni música.
+**Sonidos:** los de eventos se sintetizan por código (`EventSounds`, ver 4.9); el resto son los `.wav` de `assets/audio/sfx/` (ver 4.16). No hay música: `AudioManager` reproduciría en bucle un `assets/audio/music.ogg|mp3|wav` si existiera.
 
 ### 4.15 Arte (Blender)
 
@@ -424,16 +469,21 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (2, 4,5) s 
   - Árbitro (`arbiter.glb`): figura alta con máscara pálida y pistola hija de `Hand.R` (Empty `Muzzle`; el cañón va a lo largo del eje Y de la mano, hacia abajo en reposo y hacia el blanco al apuntar, y la empuñadura cruza la palma según Z; los dedos usan el agarre `GRIP`: índice casi recto junto al guardamonte, los otros tres cerrados); `idle, walk` (0,744 m/s, paso 0,483 m), `aim_hold` (cíclicas) y `inspect_sheets, aim, shoot, lower_gun, point_accuse`.
   - `tools/check_characters.gd` comprueba huesos, materiales, animaciones e imprime el informe del contrato de roles; `tools/anim_preview.gd` captura un rol sentado en una mesa real.
 - Si se edita un `.blend` a mano se reexporta con `tools/export_models.sh` (no se regenera). `tools/check_props.gd` comprueba nodos y medidas.
-- Aún no se usan en el juego: el salón y la mesa siguen hechos con primitivas por código.
+- Todos se usan en el juego: `Hall` instancia o hornea mesa, silla, lámpara, tablero, reloj, planillas, pluma, puerta, estandarte, columna y panel; `BoardView`, `ClockView`, `ScoresheetView` y `PieceFactory` cargan los suyos; la pistola es un nodo de `arbiter.glb` (`props/pistol.glb` no se carga). Con primitivas por código quedan el suelo, el techo, el podio, la tarjeta de número, el cono de luz y la banqueta del evento `ruido_detras`.
 
 ### 4.16 Menús, HUD e idioma
 
 - Lo que ve u oye el jugador está en inglés (servidor, cliente y `data/*.tres`); comentarios y docs en español.
-- Autoloads (`autoloads/`, adaptados de tic-tac-toe): `GameSettings` (título provisional `GAME_TITLE`, sensibilidad del ratón, pantalla completa; `user://settings.cfg`), `SceneSwitcher` (transición de iris, `go_to`), `AudioManager` (buses Master/SFX/Music de `default_bus_layout.tres`, volúmenes en `user://audio.cfg`, `play_sfx`, música si existe `assets/audio/music.*`), `UiSounds`, `UiIntro`. Los scripts que también corren en pruebas `--script` los piden por ruta (`/root/...`).
-- La escena principal es `src/ui/main_menu.tscn` (Play, Settings, Quit). Con argumentos de usuario se arranca directo `main.tscn`; `--menu`, `--menu-screen=settings` y `--menu-play` son para capturas. Esc pausa el árbol (`PauseMenu`: Resume, Settings, Main menu).
+- Autoloads (`autoloads/`, adaptados de tic-tac-toe; los scripts que también corren en pruebas `--script` los piden por ruta, `/root/...`):
+  - `GameSettings`: `GAME_TITLE` ("Checkmate", provisional), `MENU_SCENE` / `GAME_SCENE`, sensibilidad del ratón (0,25 a 5,0; en Settings 25 %–500 %) y pantalla completa (no en web, `fullscreen_supported()`), en `user://settings.cfg`; señal `changed`.
+  - `SceneSwitcher`: `go_to(escena)` con transición de iris centrada en el cursor (0,5 s al cerrar y 0,5 s al abrir; carga la escena en segundo plano), `set_next_origin`, `quit_game()` y las señales `transition_started` / `transition_finished`. Despausa el árbol al cambiar.
+  - `AudioManager`: reproductores de SFX (`play_sfx`, con variación de tono), música de fondo con fundido si existe `assets/audio/music.ogg|mp3|wav` (hoy no hay), volumen por bus (`bus_volume`, `set_bus_volume`) y buses `Master` / `SFX` / `Music` de `default_bus_layout.tres`, guardados en `user://audio.cfg`.
+  - `UiSounds`: sonido (`assets/audio/ui/hover.wav`, `click.wav`) y un pequeño rebote en todo `BaseButton` que entra al árbol.
+  - `UiIntro`: animación de entrada de las pantallas de interfaz (solo escenas con raíz `Control`; los nodos del grupo `no_intro` se saltan).
+- La escena principal es `src/ui/main_menu.tscn` (`MainMenu`: Play, Settings y, salvo en web, Quit; Play crea un torneo nuevo). Con argumentos de usuario se arranca directo `main.tscn`; `--menu`, `--menu-screen=settings` y `--menu-play` son para capturas (con `--menu`, `--screenshot=ruta` y `--shot-delay=S` capturan el menú). `Esc` pausa el árbol (`PauseMenu`, capa 60: "Paused" con Resume, Settings y Main menu; al abrir suelta el ratón y al reanudar lo recaptura; `--demo-pause` la abre al arrancar). Todos los textos de los menús están en inglés y usan `UiTheme`.
 - Reloj 3D: El reloj (`ClockView`, `chess_clock.glb`) es un reloj digital de torneo al costado del tablero (x = 0,42), caja de madera oscura inclinada hacia atrás con el frente (LCD) mirando al centro de la mesa. El LCD muestra los dos tiempos con dígitos de 7 segmentos ("M:SS"; "S.d" con décimas bajo 10 s) hechos con mallas planas casi pegadas al cristal, sin `Label3D`: los ilumina la escena, sin brillo propio, y los segmentos apagados se ven como un fantasma tenue. Visto de frente, el campo derecho es del jugador cercano y el izquierdo del lejano. Un triángulo de turno central apunta al campo que corre y sus dos puntos parpadean. Arriba, un balancín (`Rocker`, mitad blanca del cercano y roja del lejano) sustituye a los botones: `press_button(color)` hunde ese lado con un pequeño rebote, `set_running` deja arriba el lado que corre y `button_top_world(color)` devuelve su `Contact_*` en la pose actual. Las tres teclas bajo el LCD (`Button_1..3`) son decorativas. Las mesas de fondo hornean el mismo modelo (LCD con "88:88" fantasma). Tic-tac en un `AudioStreamPlayer3D` (bus SFX) con `assets/audio/sfx/clock_tick/tock.wav`, más fuerte y agudo con menos de 20 s del jugador.
 - HUD: sin relojes en pantalla (el tiempo se lee en el reloj 3D); del torneo solo "Round N / M" arriba a la derecha.
-- Sonidos (`assets/audio/sfx/`, generados por `tools/gen_sfx.py`, ver su `CREDITS.md`): tic-tac, reloj, piezas, pluma, pasos, disparo, cuerpos, silla, sollozo, respiración, pitido, latido y ambiente. Cableados: tic-tac, el disparo y el zumbido de la ejecución, y con el estrés `heartbeat_loop`, `panic_breath_loop` y `ear_ring` (ver 4.21). El resto, sin cablear.
+- Sonidos (`assets/audio/sfx/`, generados por `tools/gen_sfx.py`, ver su `CREDITS.md`). Cableados: tic-tac del reloj (`clock_tick` / `clock_tock`, también en las mesas de fondo), `footstep_1..6` (árbitro y paseo), `gun_cock` y `gunshot`, `chair_scrape` (paseo), `body_slump_table`, `sob_loop` y `whimper` (condenado), `heartbeat_loop`, `panic_breath_loop` y `ear_ring` (estrés y ejecución en primera persona, ver 4.21), `piece_place_*` y `clock_press` (solo en las mesas de fondo). Sin cablear: `body_fall_floor`, `pen_write_loop`, `room_tone_loop`.
 
 ### 4.17 Rendimiento del turno
 
@@ -462,6 +512,7 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (2, 4,5) s 
 - Para el límite de luces por objeto de Compatibility, el suelo va en una baldosa por mesa y el decorado se fusiona por muro (`MeshBaker`); las piezas de fondo son una malla por bando (`StaticBoard`).
 - API: `table_root`, `chair`, `seat_transform(i, seat)`, `set_table_level(i, nivel, animado, parpadeo)`, `set_table_board`/`set_table_fen`, `mid_game_fen`.
 - `BackgroundTable`: dos `CharacterFigure` (`bot_look`) por mesa activa. Alternan los roles `sit_wait` / `sit_think` / `sit_nervous` según turno y reloj cada 5-12 s (sin cambiar de pose mientras dura una mezcla); voltean ante las distracciones con las mismas probabilidades que los bots (factor por asiento 0,7-1,3) y las fuertes les hacen `sit_startle`. `lend`/`give_back` prestan una figura al evento de acusación ajena. Con cada `move_made` de su `BackgroundMatch` quien movió hace `sit_move_piece` → `sit_press_clock` → `sit_write` y el tablero se actualiza. Al terminar: el ganador se queda quieto y el perdedor nervioso. Mesas lejanas o fuera de cuadro animan a 10 Hz / 2 Hz (0,13 ms/fotograma de media con 30 figuras). Mezclas: ambiental 0,8 s, `sit_move_piece` 0,7, `sit_press_clock` 0,4, `sit_write` 0,6 y `sit_frozen` del ganador 1,0; los condenados entran en sus poses con 0,6-0,8 s.
+- **Sonido de las mesas de fondo** (`BackgroundTable`, bus SFX, sutil): mientras su partida corre (`clock_running()`: `bg.server.started`, sin terminar y con alguna figura viva visible) un `AudioStreamPlayer3D` reutilizado por mesa (`TicTac`, en `CLOCK_LOCAL`, el reloj horneado) alterna `clock_tick`/`clock_tock` una vez por segundo con fase al azar y tono ±5 % (`tick_index(time, phase)`, pura); `TICK_VOLUME_DB` -12, `TICK_UNIT_SIZE` 1,5 con atenuación cuadrática (~-24 dB a 3 m) y nada a más de `TICK_MAX_DISTANCE` = 9 m (distancia al oyente medida una vez por segundo). Para al terminar la partida o vaciarse la mesa. En `_sequence`, `clock_press` suena a mitad de `sit_press_clock` (`PRESS_VOLUME_DB` -10) y un `piece_place_1..3` al cambiar el tablero (`PLACE_VOLUME_DB` -16), hasta 11 m. `press_start_clock()`: la figura de negras pulsa el reloj una vez por ronda (al "Begin." del discurso), sin pisar una jugada que llegue después.
 - `GameRoot.figure_at(table, seat)` y `condemn_seat(table, seat)` (detiene la vida ambiental y la entrega al árbitro). Al terminar una partida de fondo se emite `table_eliminated` y se llama `arbiter.request_execution(mesa, color_perdedor)`; tras cada ejecución la lámpara parpadea y queda al 40 % y las demás mesas voltean. La ronda termina cuando acabaron las partidas y `arbiter.has_pending_work()` es false. Entre rondas las mesas se conservan; las sin partida quedan vacías pero con la luz encendida.
 - **Memoria del salón** (`HallMemory`, `src/world/hall_memory.gd`, variables estáticas, solo vista): por mesa de rondas pasadas guarda las casillas del tablero físico (`BoardState.squares`, no un FEN: el tablero puede no ser legal) y, si hubo ejecución, el asiento y el aspecto (`FigureBase.applied_look`) del cadáver. Los ganadores no se guardan (se fueron a su mesa nueva); quien descansa no deja nada. Incluye la mesa anterior del humano (su rival muerto si ganó y la posición final de su partida). `GameRoot._remember_round` lo escribe al cerrar la ronda; `_populate_hall` primero borra los recuerdos de las mesas que se usan en la ronda (`release_used(N)`; con la ronda 1 borra todo) y restaura el resto (`_restore_table`: piezas con `Hall.set_table_board` y una `CharacterFigure` "Cadaver<n>" quieta en su asiento con `hold_final_pose(&"death_slump_table")`, que salta al último fotograma del clip y lo sostiene; lámpara al 40 %). Se acumula entre rondas hasta que la mesa se reutiliza; `HallMemory.clear()` en un torneo nuevo.
 - `GameRoot.clear_tables_for_next_round()` (lo llama el paseo en el primer parpadeo, tras `start_round()`, que ya fijó los nuevos emparejamientos): deja el salón como lo verá la escena recargada, salvo la mesa destino del humano (la prepara `RoundWalk._prepare_destination`). Los ganadores vivos de las mesas viejas se ocultan (`BackgroundTable.hide_living`; el avatar del rival si no murió); las mesas de la ronda nueva (`HallMemory.tables_to_fill`) se vacían y se repueblan con `_seat_round_table` (el mismo código que `_start_background` usa tras recargar): jugadores sentados en `sit_wait`, tablero en posición inicial y lámpara al 100 %, sin partida todavía; las de rondas pasadas conservan cadáver y piezas (`HallMemory`) y las sin recuerdo y fuera de la ronda (`tables_to_empty`, p. ej. donde alguien descansó) quedan vacías. La ropa de cada bot sale del id del jugador (`BackgroundTable.player_look`, semilla `rival<id>`, la misma del rival del humano), así que no cambia entre antes y después de recargar. Idempotente y opcional. Depuración: `--walk-mid-shot=ruta` captura ~1 s tras abrir los ojos y `--aerial-room=...` da una cámara aérea en el marco de la sala (misma vista en ambas escenas).
@@ -469,7 +520,7 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (2, 4,5) s 
 
 ### 4.20 Mesa del jugador (`opponent_avatar.gd`, `player_controller.gd`, `hand_rig.gd`, `hand_animator.gd`)
 
-- Rival y cuerpo del jugador son `SeatedFigure` (subclase de `CharacterFigure` con inclinación, giro y desplazamiento de torso: `TorsoLeanModifier`) en las sillas a z = ∓0,80 (`RIVAL_SEAT`, `PlayerController.SEAT`). El jugador tiene la cabeza oculta y la cámara en los ojos. La cabeza del rival sigue `bot.looked`. Pide roles: `sit_wait` mientras espera, `sit_think` en su turno, `sit_nervous` con menos de 30 s; cambia de pose cada 5-12 s y de rol tras ≥ 2,5 s, nunca durante una mezcla ni con el IK activo. Tos `sit_cough` (sonido retrasado 0,55 s) y respingo `sit_startle`; con la mano ocupada quedan los gestos de cabeza y tronco. Al ser condenado (`condemn`) todo se detiene.
+- Rival y cuerpo del jugador son `SeatedFigure` (subclase de `CharacterFigure` con inclinación, giro y desplazamiento de torso: `TorsoLeanModifier`) en las sillas del salón (a z = ∓0,80, `Hall.SEAT_Z`); sus figuras se colocan a z = ∓0,72 (`GameRoot.RIVAL_SEAT`, `PlayerController.SEAT`) para llegar al tablero. El jugador tiene la cabeza oculta y la cámara en los ojos. La cabeza del rival sigue `bot.looked`. Pide roles: `sit_wait` mientras espera, `sit_think` en su turno, `sit_nervous` con menos de 30 s; cambia de pose cada 5-12 s y de rol tras ≥ 2,5 s, nunca durante una mezcla ni con el IK activo. Tos `sit_cough` (sonido retrasado 0,55 s) y respingo `sit_startle`; con la mano ocupada quedan los gestos de cabeza y tronco. Al ser condenado (`condemn`) todo se detiene.
 - `HandRig` mueve el brazo del personaje por IK (`enable_arm_ik`), orienta la mano y cierra dedos y pulgar con `ArmPoseModifier`, e inclina/adelanta el torso para casillas lejanas. **Inclinación del torso:** `HandRig._solve_lean` busca el menor adelanto (0, 10 o 20 cm: `SHIFT_MAX` = 0,20) y la menor inclinación (`LEAN_MAX` = 0,70 rad) con que la muñeca queda a ≤ 0,55 m del hombro. `TorsoLeanModifier.SHARES` reparte el ángulo como una persona que se inclina desde la cadera: pelvis (`Hips`) 60 %, Spine 20 %, Chest 20 % (con el tope: 24°/8°/8°, espalda casi recta); Neck y Head compensan −0,27 cada uno y los muslos se contrarrotan para que las piernas no se muevan. La cinemática directa del hombro (`HandRig._upper_arm_after_lean`) usa esos mismos pesos. Con ello la cabeza queda ≥ 0,26 m sobre la mesa en las 1064 posturas de `tools/check_arm_clearance.gd` (antes 0,24 m con Spine/Chest a 27°) y solo 3 posturas extremas (pitch 75-80° en la esquina lejana, pieza alta) quedan a 3,5-4,5 cm; a máxima inclinación el vientre queda ~1 cm dentro del borde de la mesa. `tests/test_torso_lean.gd` fija el reparto, cabeza ≥ 0,25 m, Spine/Chest ≤ 14° y alcance. API conservada: `set_grip`, `set_pose`, `attach_piece`, `release_piece`, `carry_anchor`, `stress`. El rival mueve las piezas y pulsa el reloj con el brazo izquierdo (lado del reloj) y el jugador con el derecho; el otro brazo descansa (`idle_rig`, antebrazo sobre la mesa junto al tablero, `drives_posture = false` para no pelear con el tronco de la mano que trabaja). **IK y animación:** en reposo el IK de ambos brazos del rival está apagado (`HandRig.set_ik_weight`, mezcla de 0,45 s) para que se vean las poses de espera; `OpponentAvatar` vigila su `HandAnimator` (`bind_animator`) y al haber trabajo (jugada, trampa, pulsación o escritura) el IK vuelve a 1 en 0,35 s; se apaga 0,8 s después de quedar libre.
 - **Codo:** `HandRig._update_pole` recalcula el polo cada fotograma. Calcula el codo analíticamente (longitudes de brazo y antebrazo, plano hombro-muñeca) y elige el ángulo más bajo (preferido -50°: codo que cuelga, por fuera y 0,35 hacia atrás de la mano) con el que, sobre la huella de la mesa, el codo queda ≥ 5 cm sobre ella; sube de golpe y baja suavemente. Resultado medido con `check_arm_clearance`: codo medio 5,7 cm bajo el hombro erguido (antes 5,3 cm sobre él), 2,8 % de posturas con el codo sobre el hombro (antes 91,5 %).
 - **Planillas:** la del humano está en (+0,54, +0,30) y la del rival en (-0,54, -0,30), a la derecha de cada uno. El rival pulsa el reloj con la izquierda, la retira y escribe con la derecha (`HandAnimator.write_rig` = `OpponentAvatar.idle_rig`, `set_write_rig`); el humano escribe con la misma mano que pulsa.
@@ -535,7 +586,10 @@ Con `--verbose` imprime cada frase del discurso y del monólogo. `tests/test_inn
 
 | Campo | Valor por defecto | Significado |
 | --- | --- | --- |
-| `white_seconds`, `black_seconds` | 180 | Tiempo por jugador (Armageddon: 180 / 150). |
+| `white_seconds`, `black_seconds` | 180 | Tiempo por jugador (Armageddon: 180 / 150). `--clock=S` los fija. |
+| `increment_seconds` | 2,0 s | Incremento por jugada (3+2) que gana quien pulsa el reloj. |
+| `require_clock_press` | `false` (`GameRoot` pone `true`) | El turno pasa al pulsar el reloj, no al mover (ver 4.2). |
+| `keep_scoresheet` | `true` (las partidas de fondo, `false`) | Lleva las planillas SAN. |
 | `pause_clock_on_accusation` | `true` | El reloj se detiene mientras llega el árbitro. |
 | `arbiter_delay` | 3,0 s (`GameRoot` pone 6,5) | Suspenso antes del veredicto. |
 | `false_accusations_to_eliminate` | 3 | La tercera acusación falsa elimina. |
@@ -546,7 +600,7 @@ Con `--verbose` imprime cada frase del discurso y del monólogo. `tests/test_inn
 | `blunder_threshold_cp` | 300 | Umbral de la ayuda. |
 | `gaze_cos_threshold` | 0,82 | Coseno del medio ángulo del cono (≈ 35°). |
 | `board_center` | `Vector3.ZERO` (`GameRoot` pone `BoardView.CENTER`) | Centro del tablero para la mirada. |
-| `cheats` | `[]` (`GameRoot` carga las 4) | Trampas disponibles. |
+| `cheats` | `[]` (`GameRoot` carga las 3) | Trampas disponibles. |
 | `rival_event_cooldown` | 20 s | Espera por color y evento del rival. |
 | `blackout_hides_cheats` | `true` | Durante un apagón nadie ve las trampas y una acusación no prospera por las hechas a oscuras (ver 4.5 y 4.9). |
 
@@ -558,9 +612,9 @@ Se leen como `--clave` o `--clave=valor` en `GameRoot._parse_args`; `get_args()`
 
 | Argumento | Efecto |
 | --- | --- |
-| `--autoplay` | Un segundo bot juega por el humano; sin entrada de trampas ni panel; desactiva su ayuda; implica `--verbose`. |
+| `--autoplay` | Un segundo bot juega por el humano (el jugador no manda su mirada); desactiva su ayuda; acorta a 3-4 s las pantallas de eliminación y campeón; implica `--verbose`. |
 | `--human=white\|black` | Fuerza el color del humano en su partida. |
-| `--seed=N` | Semilla del azar de la partida, del torneo y del director. |
+| `--seed=N` | Semilla del azar de la partida, del torneo y del director de tensión. |
 | `--speed=X` | `Engine.time_scale`. |
 | `--quit-after=S` | Termina tras S segundos (acumulados entre recargas) e imprime un resumen. |
 | `--players=N` | Jugadores del torneo (32). |
@@ -572,15 +626,25 @@ Se leen como `--clave` o `--clave=valor` en `GameRoot._parse_args`; `get_args()`
 | `--verbose` | Imprime el desarrollo de la partida. |
 | `--screenshot=ruta`, `--shot-delay=S`, `--shot-look=yaw,pitch`, `--shot-when=rival_carry\|player_carry`, `--shot-phase=reach\|grab\|carry\|release\|press\|write` (con `--shot-rival`, la mano del rival), `--shot-write` (con `--shot-rel`, apunta a la mano que escribe, p. ej. la del rival), `--shot-rel=dx,dy,dz[,fov]` (cámara pegada a la mano, con `--shot-cam=side`), `--shot-after=S`, `--shot-select=e2` | Capturas de depuración. |
 | `--demo-screen=between\|champion\|eliminated` | Muestra esa pantalla al arrancar. |
-| `--cheat-demo=own\|ownlong\|enemy\|steal\|abort\|accuse\|asmove\|input\|all` | Guion automático de trampas (`CheatModule`); usar `--human=white --fen="r3k3/p7/2n1p3/8/8/8/PPPP1PPP/R3K2R w - - 0 1"`. |
+| `--cheat-demo=own\|ownlong\|enemy\|steal\|abort\|rival\|accuse\|asmove\|input\|all` | Guion automático de trampas (`CheatModule`; `rival` = solo la trampa del rival; al final comprueba que la vista coincide con el servidor); usar `--human=white --fen="r3k3/p7/2n1p3/8/8/8/PPPP1PPP/R3K2R w - - 0 1"`. |
 | `--event=apagon\|ruido\|acusacion\|arbitro\|toser`, `--event-at=S`, `--event-table=N`, `--event-side=human` | Fuerza un evento (`EventModule`); en la demostración el director automático se desactiva. |
 | `--no-events` | Sin eventos automáticos. |
 | `--round-cut=S` | Fija la espera (s) del corte de ronda (10-20 s al azar por defecto). |
+| `--arbiter-delay=S` | Suspenso (s) de una acusación antes del veredicto (6,5 por defecto). |
+| `--no-arbiter-exec` | Las eliminaciones de fondo no pasan por el árbitro (el perdedor se levanta y se va); desactiva el corte de ronda. |
+| `--force-execution=mesa,asiento[,modo][;...]`, `--force-at=S` | El árbitro ejecuta ese asiento (0 = blancas, 1 = negras; modo `beg`, `cry`, `frozen` o `sob`) a los S s de partida (3 por defecto). |
+| `--lose-now` / `--win-now` | El humano pierde / gana a los `--force-at` s (ejecución en primera persona / ejecutan al rival). |
+| `--arb-start=x,z` | Posición inicial del árbitro. |
+| `--aerial[=x,y,z,tx,ty,tz]`, `--aerial-room=x,y,z,tx,ty,tz` | Cámara aérea sin techo; la segunda da los valores en el marco de la sala (misma vista antes y después de recargar). |
+| `--shot-cam=side\|sidenear\|sidefar\|px,py,pz,tx,ty,tz[,fov]` | Cámara fija de depuración (`PlayerController`); desactiva el balanceo del estrés. |
+| `--walk-end-shot=ruta`, `--walk-start-shot=ruta`, `--walk-mid-shot=ruta` | Con el paseo entre rondas: último fotograma antes de recargar, primero de la escena nueva y ~1 s después de abrir los ojos tras el primer parpadeo. |
+| `--demo-pause` | Abre el menú de pausa al arrancar (el bucle sigue corriendo para la captura). |
+| `--menu`, `--menu-screen=settings`, `--menu-play` | Se quedan en el menú principal / abren los ajustes / pulsan Play solo (ver 4.16). |
 | `--address-demo` | El árbitro da el discurso y se queda plantado (`ArbiterModule`; capturas con `--shot-look=yaw,pitch`). |
 | `--intro` / `--no-intro` | Fuerza (incluso con `--screenshot`) / desactiva el discurso del árbitro de la ronda 1 (4.22). |
 | `--no-stress`, `--stress=V` | Sin efectos de estrés / estrés fijo en V (0..1; capturas). |
 
-Controles del jugador (`project.godot`): clic izquierdo (capturar ratón / elegir pieza / soltarla en un destino), clic derecho o `Esc` (soltar la pieza; `Esc` también suelta el ratón), `A` acusar, `X` abortar, `R` reiniciar torneo.
+Controles del jugador (`project.godot`): clic izquierdo (capturar ratón / elegir pieza / soltarla en un destino), clic derecho (soltar la pieza), `Esc` (abre y cierra la pausa; al abrirla suelta el ratón), `A` acusar (`accuse`), `X` abortar la trampa (`cheat_abort`), `R` reiniciar el torneo (`restart`), `F3` panel de diagnóstico, `Espacio` salta el paseo entre rondas (y el discurso). Existen también las acciones `cheat_1`..`cheat_4` (teclas 1 a 4) en `project.godot`, pero ningún script las lee.
 
 ## 6. Pruebas y exportación web
 
@@ -592,7 +656,7 @@ godot --headless --path . --script res://tests/run_tests.gd          # todas
 godot --headless --path . --script res://tests/run_tests.gd -- --filter=cheats
 ```
 
-`tests/run_tests.gd` ejecuta los métodos `test_*` de cada archivo listado en `TEST_FILES` (los que no existen se omiten sin avisar) y sale con código 1 si algo falla. `TestCase` ofrece `check` y `check_eq`.
+`tests/run_tests.gd` ejecuta los métodos `test_*` de cada archivo listado en `TEST_FILES` (los que no existen se omiten sin avisar; las pruebas pueden ser corrutinas y reciben `tree` para esperar fotogramas) e imprime `N pruebas, M fallos`. `--filter=texto` corre solo los archivos cuya ruta lo contenga. `TestCase` ofrece `check` y `check_eq`.
 
 ### Qué cubre cada archivo
 
@@ -600,9 +664,11 @@ godot --headless --path . --script res://tests/run_tests.gd -- --filter=cheats
 | --- | --- |
 | `test_chess_rules.gd` | FEN, perft (inicial, Kiwipete, posiciones 3-5), al paso y pila de capturas, enroque (por jaque y sin torre), coronación a dama, material insuficiente, nunca capturar rey. |
 | `test_match_server.gd` | Turnos y reloj, tiempo agotado, mate, ahogado y repetición (ganan negras), material insuficiente, ayuda para principiantes (aviso y luego permitida; apagada para bots). |
+| `test_beginner_helper.gd` | Texto del aviso en inglés, jugada tranquila aceptada, jugada ilegal o nula ignorada, permitir mate en 1 y que `precompute_async` da la misma respuesta. |
 | `test_cheats.gd` | Reyes que se agarran (enroque a nivel 0, trampa con rey propio y rival, rey rival nunca a la pila, nunca en jaque ni pegado al otro rey, pierde el enroque), límites de cada trampa, jaques ilegales, robo y duración, mano ocupada, revalidación al final, acusaciones (correcta, ventana, tres falsas, trampa abortada), exposición, reinicio de 50 jugadas, `cheat_aborted` al terminar la partida, caché de jugadas legales. |
 | `test_cheat_input.gd` | Enrutado de clics (legal → jugada, otro nivel → trampa, pila → robo), pieza rival, rey seleccionable (enroque) y rey rival sin pila, deselección, mano ocupada, colores y opacidades del mapa de calor, zona de la pila. |
 | `test_gaze.gd` | Cono de mirada y dirección desde ángulos. |
+| `test_mouse_look.gd` | Giro del ratón proporcional a los píxeles de pantalla, descarte de saltos falsos y convergencia del suavizado. |
 | `test_bots.gd` | Muestreo de política, `FallbackBrain` (toma la dama colgada; el débil es más aleatorio), límites del tiempo de pensar. |
 | `test_bot_cheats.gd` | Candidatas siempre válidas (incluido fuzz), mezcla de tipos y robos grandes raros, puntaje, bot audaz vs prudente, acusación a ciegas por advertencias, espera de eventos, aleatoriedad, probabilidades de intentar y abortar, flujo servidor-planificador. |
 | `test_maia_encoding.gd` | Vocabulario, Elo continuo, codificación idéntica al fixture de PyTorch, índices de jugadas legales, espejado, reconstrucción del historial (captura, al paso, enroque, cambios por trampa, cerebro compartido) y respaldo sin web. |
@@ -613,13 +679,23 @@ godot --headless --path . --script res://tests/run_tests.gd -- --filter=cheats
 | `test_tension_director.gd` | Carga de definiciones, primer evento, separación y no repetición, frecuencia según jugadores, misma semilla, esperas, orígenes, disparo forzado, desactivado. |
 | `test_rival_events.gd` | Señal de evento del rival, esperas por color y evento, rechazo durante acusación, toser con la mano ocupada, árbitro cerca marca trampas como vistas. |
 | `test_blackout.gd` | Apagón: trampa a oscuras no se ve ni prospera la acusación, vista antes sí, la que sigue tras volver la luz y se ve, opción desactivada, el bot no juzga trampas oscuras y el umbral de oscuridad del cliente. |
-| `test_hand_flow.gd` | Perfil de mínimo jerk, spline que pasa por los puntos de paso con tangente continua, `is_busy_for_action` y escritura a medias de `ScoresheetView`. |
+| `test_hand_flow.gd` | Perfil de mínimo jerk, spline que pasa por los puntos de paso con tangente continua, `is_busy_for_action`, escritura a medias de `ScoresheetView`, curva única del traslado y del empujón, duración de la trampa igual a la del servidor, abortar antes de empezar y escritura del rival en paralelo. |
+| `test_hand_grasp.gd` | Datos de agarre por pieza, perfil sacado de la malla, cinco dedos leídos del esqueleto y flexión independiente, yemas que tocan sin atravesar, palma hacia la pieza, oposición pulgar-índice por pieza, suelo de la mesa, pulgar a la altura de la pinza, temblor que solo abre, plan de pinza derivado de la geometría y respaldo con el esqueleto viejo. |
+| `test_hand_pen.gd` | Orientación de la mano sobre la pluma tumbada, eje de la pluma sin entrar en las falanges, pivote continuo y geometría del agarre trípode (yemas enfrentadas a través de la pluma). |
+| `test_torso_lean.gd` | Reparto de la inclinación del torso (suma 1, la espalda casi recta) y alcance lejano con la cabeza arriba. |
+| `test_opponent_avatar.gd` | El avatar condenado queda quieto. |
+| `test_walk_turn.gd` | Giro suave del paseo: `smooth_yaw` acotado y continuo, sin salto al dar la vuelta, `look_ahead` en recta y esquina, rumbo suave en todas las rutas, y valor cerrado del parpadeo. |
 | `test_tournament.gd` | Emparejamiento de 16, colores aleatorios, descansos (también del humano), progresión de rondas, espera de todas las partidas, final con colores invertidos y desempate, advertencias que persisten y se reinician, eliminación del humano y torneo nuevo, torneos completos simulados con un solo campeón, `BackgroundMatch` y su política. |
+| `test_clock_sheet.gd` | Incremento del reloj, turno al pulsar (`press_clock`), pulsación sin jugada pendiente, bandera antes de pulsar, mate sin pulsar, trampas con pulsación pendiente, ventana de acusación desde la jugada, planillas SAN (también al paso) y que omiten las trampas, pulsación rechazada con la mano ocupada y `ScoresheetView`. |
 | `test_hall_layout.gd` | Numeración 1-16 y podio, mesa del humano en el origen para cualquier mesa, desplazamiento de la sala, altura del suelo en rampas, riqueza por tramos y ruta del paseo (sin cruzar mesas, acaba en la silla destino). |
-| `test_hall.gd` | Salón de 16 mesas, sala desplazada por mesa del humano, podio, tarjetas de número, lujo por tramos, lámparas y posiciones de medio juego. |
+| `test_hall.gd` | Salón de 16 mesas, sala desplazada por mesa del humano, podio, tarjetas de número, lujo por tramos, lámparas, posiciones de medio juego, `MeshBaker` (agrupa por material) y `BackgroundTable` sin partida. |
 | `test_hall_memory.gd` | Memoria del salón: acumulación entre rondas, mesas que se reutilizan, borrado con torneo nuevo, reparto de mesas del salón entre ronda nueva, recordadas y vacías (`tables_to_fill`/`tables_to_empty`), aspecto de bot determinista por id y pose final instantánea de la figura (igual a la del clip terminado). |
+| `test_background_clock_sound.gd` | Tic-tac de las mesas de fondo: alternancia tic/toc una vez por segundo, desfase por mesa y que los sonidos existen. |
+| `test_character_figure.gd` | `player.glb` / `arbiter.glb`: animaciones y bucles, `play_once` (termina y sostiene la pose), recoloreo por instancia, `random_look` y `bot_look` (maniquí gris), mirada acotada, `attach`, IK de brazo, API y pistola del árbitro (cañón, empuñadura), cabeza oculta en primera persona, roles de animación (variantes, respaldos, nombres mal escritos, bucles sin salto) y cabeza apoyada en la mesa al morir. |
+| `test_chair_follow.gd` | La silla libera las piernas al levantarse, vuelve al sentarse, las piernas sentadas no la empujan y la postura sentada es erguida (`test_seated_posture_is_upright`). |
+| `test_arbiter.gd` | `ExecutionQueue` (cercanía, prioridad, duplicados, ocupada), trabajo pendiente, pasillos y rutas del árbitro (nunca cruzan mesas, llegan a cada puesto de ejecución, ruta del lado del humano y por detrás), signo del asiento, atenuación de los pasos (`footstep_gain_db`) y patrulla solo alrededor de mesas activas. |
 
-No hay pruebas de la vista 3D (manos, salón, HUD): esos cambios se verifican con capturas (`--screenshot`) y los guiones `--cheat-demo` / `--event`. Tampoco hay pruebas de `BeginnerHelper` aparte de las de `test_match_server.gd`.
+No hay pruebas del HUD, del paseo completo ni de la escena `GameRoot`: esos cambios se verifican con capturas (`--screenshot`) y los guiones `--cheat-demo` / `--event`.
 
 ### Exportación web
 
