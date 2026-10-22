@@ -27,18 +27,38 @@ const MOUSE_SPIKE_PX := 400.0
 ## Constante de tiempo (s) del suavizado del giro: reparte los saltos de píxel entero del
 ## ratón entre fotogramas para que la cámara no avance a escalones con sensibilidad alta.
 const LOOK_SMOOTH := 0.025
+## En web es mayor: Chrome en Linux no da movimiento crudo y entrega pasos de píxel entero, que
+## con sensibilidad alta se ven como saltos de la cámara si no se reparten en más fotogramas.
+const LOOK_SMOOTH_WEB := 0.06
 ## Web: acumula `movementX/Y` crudos del navegador mientras hay bloqueo de puntero. Godot los
 ## escala por lienzo/recuadro CSS, y con el modo "fullscreen" de itch.io (lienzo redimensionado
 ## dentro de la página) esa proporción se dispara y la cámara se clava en un tope.
 const WEB_MOUSE_JS := """
 if (!window.__lookAcc) {
 	window.__lookAcc = [0, 0];
+	window.__lookRaw = 'pending';
 	document.addEventListener('mousemove', function (e) {
 		if (!document.pointerLockElement) return;
 		if (Math.abs(e.movementX) + Math.abs(e.movementY) > %d) return;
 		window.__lookAcc[0] += e.movementX;
 		window.__lookAcc[1] += e.movementY;
 	}, {capture: true, passive: true});
+	// Movimiento crudo (sin aceleración ni escala del sistema): sin él Chrome entrega pasos de
+	// píxel entero ya reducidos y la cámara va lenta y a escalones. Si no se soporta, el normal.
+	var plain = Element.prototype.requestPointerLock;
+	Element.prototype.requestPointerLock = function (opts) {
+		var el = this;
+		var p;
+		try { p = plain.call(el, {unadjustedMovement: true}); } catch (err) { p = null; }
+		if (p && p.then) {
+			return p.then(function () { window.__lookRaw = 'raw'; }, function () {
+				window.__lookRaw = 'plain';
+				return plain.call(el, opts);
+			});
+		}
+		window.__lookRaw = 'plain';
+		return p === null ? plain.call(el, opts) : p;
+	};
 }
 """
 const WEB_MOUSE_TAKE := "(function(){var a=window.__lookAcc;var r=a[0]+','+a[1];a[0]=0;a[1]=0;return r;})()"
@@ -256,8 +276,8 @@ static func look_delta(screen_relative: Vector2, sensitivity: float) -> Vector2:
 
 
 ## Parte del giro pendiente que se aplica en un fotograma de `delta` segundos.
-static func smooth_take(pending: Vector2, delta: float) -> Vector2:
-	return pending * (1.0 - exp(-delta / LOOK_SMOOTH))
+static func smooth_take(pending: Vector2, delta: float, tau: float = LOOK_SMOOTH) -> Vector2:
+	return pending * (1.0 - exp(-delta / tau))
 
 
 ## Texto del panel de diagnóstico (F3): FPS, estado del ratón y, en web, el lienzo.
@@ -269,7 +289,7 @@ func debug_text() -> String:
 		t += "\n" + str(JavaScriptBridge.eval("(function(){var c=document.querySelector('canvas');"
 				+ "var r=c.getBoundingClientRect();return 'lock '+!!document.pointerLockElement+'  canvas '"
 				+ "+c.width+'x'+c.height+'  css '+Math.round(r.width)+'x'+Math.round(r.height)+'  dpr '"
-				+ "+devicePixelRatio+'  fullscreen '+!!document.fullscreenElement;})()", true))
+				+ "+devicePixelRatio+'  fullscreen '+!!document.fullscreenElement+'  input '+window.__lookRaw;})()", true))
 	return t
 
 
@@ -283,7 +303,7 @@ func _consume_look(delta: float) -> void:
 	if not is_mouse_captured() or (input_locked and not walking):
 		_pending_look = Vector2.ZERO
 		return
-	var take := smooth_take(_pending_look, delta)
+	var take := smooth_take(_pending_look, delta, LOOK_SMOOTH_WEB if _web_mouse else LOOK_SMOOTH)
 	if _pending_look.length() < 0.0005:
 		take = _pending_look
 	_pending_look -= take
