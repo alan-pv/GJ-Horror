@@ -255,23 +255,18 @@ func shout(pos: Vector3, parent: Node3D = null, spatial: bool = true, pitch: flo
 # --- Acusación ajena ---------------------------------------------------------------------
 
 ## Alguien de otra mesa (una figura real, prestada por su `BackgroundTable`) se queda sentado,
-## vuelve la cabeza hacia el jugador con un respingo (`sit_startle`), grita y, pasado el evento,
+## vuelve la cabeza hacia el jugador con un respingo (`sit_startle`), en silencio y, pasado el evento,
 ## recupera su vida ambiental. Sin silla ni levantarse.
 func accuser(origin: Vector3, duration: float, toward: Vector3) -> void:
 	var table := _table_index(origin)
 	var loan := _borrow(table)
 	if loan.is_empty():
-		# Sin figura libre en esa mesa: solo se oye el grito.
-		shout(origin + Vector3(0.0, 1.5, 0.0))
 		return
 	var f: CharacterFigure = loan.fig
 	var seat: int = loan.seat
 	var bt: BackgroundTable = loan.bt
 	f.look_at_point(toward)
 	f.play_role_once(&"sit_startle")
-	get_tree().create_timer(0.5).timeout.connect(func() -> void:
-		if is_instance_valid(f):
-			shout(f.head_global_position()))
 	if not await _pause(maxf(duration, 1.5)):
 		return
 	if is_instance_valid(f):

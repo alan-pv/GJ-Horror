@@ -124,7 +124,6 @@ func _on_event(id: StringName, origin: Vector3, duration: float) -> void:
 			stage.fall_behind(origin)
 		&"acusacion_ajena":
 			stage.accuser(origin, duration, root.player.global_position)
-			root.hud.show_subtitle("Cheater!", 2.2, false)
 			notice_pos = origin + Vector3(0.0, 1.5, 0.0)
 		&"arbitro_pasa":
 			# El aviso lo da `ArbiterModule` cuando el árbitro llega de verdad cerca de la mesa.
@@ -193,13 +192,14 @@ func _start_arbiter_pass(duration: float) -> bool:
 	return true
 
 
-## Quien acusa grita "Cheater!" con voz de 8 bits: el rival, desde su cabeza (espacial);
-## el humano, con voz propia y más grave, sin espacialidad.
+## Solo cuando el rival acusa al humano suena el grito de 8 bits (desde su cabeza, espacial) y
+## sale el subtítulo "Cheater!"; así ese grito significa siempre "te acusaron". Cuando acusa el
+## humano, o una figura de otra mesa, no hay grito ni subtítulo.
 func _on_accusation_shout(accuser: int) -> void:
-	if accuser == root.rival_color:
-		stage.shout(root.avatar.head.global_position)
-	else:
-		stage.shout(Vector3.ZERO, null, false, 0.8)
+	if accuser != root.rival_color:
+		return
+	stage.shout(root.avatar.head.global_position)
+	root.hud.show_subtitle("Cheater!", 2.2, false)
 
 
 # --- Eventos del rival ----------------------------------------------------------------------------

@@ -52,9 +52,9 @@ const PLACE_PATHS: Array[String] = [
 	"res://assets/audio/sfx/piece_place_1.wav", "res://assets/audio/sfx/piece_place_2.wav",
 	"res://assets/audio/sfx/piece_place_3.wav",
 ]
-const TICK_VOLUME_DB := -5.0
-const TICK_UNIT_SIZE := 2.5
-const TICK_MAX_DISTANCE := 12.0
+const TICK_VOLUME_DB := -12.0
+const TICK_UNIT_SIZE := 1.5
+const TICK_MAX_DISTANCE := 9.0
 const TICK_PITCH_JITTER := 0.05
 const PRESS_VOLUME_DB := -10.0
 const PLACE_VOLUME_DB := -16.0

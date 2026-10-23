@@ -26,8 +26,8 @@ func test_sound_assets_exist() -> void:
 
 
 func test_background_ticks_are_audible_nearby() -> void:
-	# A 3 m (mesa contigua) el murmullo queda por encima de -12 dB; a 6 m, por encima de -24 dB.
-	check(BackgroundTable.tick_effective_db(3.0) > -12.0, "mesa contigua audible")
-	check(BackgroundTable.tick_effective_db(6.0) > -24.0, "mesa a 6 m aún se percibe")
+	# A 3 m (mesa contigua) el murmullo queda por encima de -26 dB; a 6 m, por encima de -38 dB.
+	check(BackgroundTable.tick_effective_db(3.0) > -26.0, "mesa contigua audible")
+	check(BackgroundTable.tick_effective_db(6.0) > -38.0, "mesa a 6 m aún se percibe")
 	check(BackgroundTable.tick_effective_db(3.0) < -3.0, "por debajo del reloj propio")
 	check(BackgroundTable.tick_effective_db(6.0) < BackgroundTable.tick_effective_db(3.0), "decae con la distancia")
