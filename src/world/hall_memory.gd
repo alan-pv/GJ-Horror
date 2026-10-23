@@ -1,22 +1,22 @@
 class_name HallMemory
 extends RefCounted
 ## Memoria visual del salón entre recargas de escena (variables estáticas, como
-## `TournamentSession`). Guarda, por mesa de una ronda pasada, la posición final de las piezas y el
-## cadáver del perdedor (aspecto y asiento) para que `GameRoot` los vuelva a poner tras recargar.
-## Es solo vista: nada de esto lo lee el servidor. Una mesa se olvida cuando se reutiliza en una
-## ronda nueva (`release_used`) y todo se borra con un torneo nuevo (`clear`).
+## `TournamentSession`). Guarda, por mesa de una ronda pasada, la posición final de las piezas para
+## que `GameRoot` las vuelva a poner tras recargar. Las mesas recordadas quedan sin nadie (los
+## ganadores se fueron a su mesa nueva y los cadáveres desaparecen con el primer parpadeo del
+## paseo), con la lámpara atenuada. Es solo vista: nada de esto lo lee el servidor. Una mesa se
+## olvida cuando se reutiliza en una ronda nueva (`release_used`) y todo se borra con un torneo
+## nuevo (`clear`).
 
-## Mesa (índice de `HallLayout`) -> `{squares: PackedInt32Array, seat: int, look: Dictionary}`.
-## `seat` = color del asiento del cadáver, o -1 si no quedó ninguno (sin ejecución).
+## Mesa (índice de `HallLayout`) -> `{squares: PackedInt32Array}`.
 static var tables: Dictionary = {}
 
 
-## Apunta la mesa `table`: casillas del tablero físico (a1 = 0) y, si lo hay, el cadáver del
-## perdedor en el asiento `seat` con su aspecto `look`.
-static func remember(table: int, squares: PackedInt32Array, seat: int = -1, look: Dictionary = {}) -> void:
+## Apunta la mesa `table`: casillas del tablero físico (a1 = 0).
+static func remember(table: int, squares: PackedInt32Array) -> void:
 	if table < 0:
 		return
-	tables[table] = {"squares": squares.duplicate(), "seat": seat, "look": look.duplicate(true)}
+	tables[table] = {"squares": squares.duplicate()}
 
 
 static func has(table: int) -> bool:
@@ -26,10 +26,6 @@ static func has(table: int) -> bool:
 ## Datos de la mesa, o diccionario vacío si no se recuerda nada.
 static func entry(table: int) -> Dictionary:
 	return tables.get(table, {})
-
-
-static func has_corpse(table: int) -> bool:
-	return tables.has(table) and int(tables[table].seat) >= 0
 
 
 ## Mesas recordadas, ordenadas.
@@ -64,7 +60,7 @@ static func tables_to_fill(used_count: int, keep: int) -> Array[int]:
 
 
 ## Mesas fuera de la ronda nueva (`used_count` en adelante, salvo `keep`) que quedan vacías porque no
-## guardan recuerdo (p. ej. donde alguien descansó). Las que sí lo tienen conservan cadáver y piezas.
+## guardan recuerdo (p. ej. donde alguien descansó). Las que sí lo tienen conservan las piezas.
 ## Con `tables_to_fill` y las recordadas cubre todo el salón.
 static func tables_to_empty(table_count: int, used_count: int, keep: int) -> Array[int]:
 	var out: Array[int] = []

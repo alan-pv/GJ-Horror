@@ -7,10 +7,10 @@ extends Node
 ## de la mesa actual (`HallWalk.route`); al sentarse `GameRoot` recarga la escena y la nueva (con el
 ## salón desplazado) deja la cámara en la misma pose, así que el corte no se nota.
 ##
-## Para que el corte no delate nada, al acercarse la mesa destino se deja como la verá la escena
-## nueva: sus ocupantes viejos desaparecen, el rival de la ronda ya está sentado (figura igual a la de
-## `OpponentAvatar`), el tablero muestra la posición inicial girada según el color y la lámpara toma
-## el aspecto de la del humano. Espacio salta el paseo (corte directo).
+## Para que el corte no delate nada, en el primer parpadeo (con los ojos cerrados) la mesa destino se
+## deja como la verá la escena nueva: sus ocupantes viejos desaparecen, el rival de la ronda ya está
+## sentado (figura igual a la de `OpponentAvatar`), el tablero muestra la posición inicial girada
+## según el color y la lámpara toma el aspecto de la del humano. Espacio salta el paseo (corte directo).
 ##
 ## Quien lo usa: `GameRoot._walk_to_next_round`. Se instala como hijo de `GameRoot`.
 
@@ -154,15 +154,21 @@ func run() -> void:
 	_finish()
 
 
-## Parpadeo al levantarse: con los ojos cerrados desaparecen los ganadores de sus mesas viejas y las
-## mesas de la ronda nueva se pueblan con sus emparejamientos (`GameRoot.clear_tables_for_next_round`).
+## Parpadeo al levantarse: con los ojos cerrados se hacen todos los cambios de la ronda nueva
+## (`GameRoot.clear_tables_for_next_round`): desaparecen los cadáveres y los ganadores de sus mesas
+## viejas, las mesas de la ronda se pueblan con sus emparejamientos y la mesa destino se prepara
+## (`_prepare_destination`).
 func _blink_clear_tables() -> void:
 	await get_tree().create_timer(BLINK_DELAY).timeout
 	if _aborted() or _skipping:
 		return
+	await _shot_arg("walk-pre-shot")
 	await _blink.close()
 	if root.has_method(&"clear_tables_for_next_round"):
 		root.call(&"clear_tables_for_next_round")
+	# Con los ojos cerrados también se sienta al rival en la mesa destino: al abrirlos todo el salón
+	# ya está como en la ronda nueva.
+	_prepare_destination()
 	if _aborted() or _skipping:
 		return
 	await get_tree().create_timer(0.1).timeout
@@ -170,6 +176,16 @@ func _blink_clear_tables() -> void:
 		return
 	await _blink.open()
 	_mid_shot()
+
+
+## `--walk-pre-shot=ruta` (depuración): captura justo antes del primer parpadeo, con el salón
+## todavía como lo dejó la ronda (ver `_blink_clear_tables`).
+func _shot_arg(key: String) -> void:
+	var args: Dictionary = root.get_args()
+	if not args.has(key):
+		return
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(str(args[key]))
 
 
 ## `--walk-mid-shot=ruta` (depuración): ~1 s después de abrir los ojos tras el primer parpadeo guarda
@@ -416,7 +432,7 @@ func _prepare_destination() -> void:
 			if f != null:
 				f.visible = false
 	_hall.set_table_start_position(to_table, _next_color)
-	_hall.make_lamp_like_main(to_table, 1.2)
+	_hall.make_lamp_like_main(to_table, 0.0)
 	if _next_rival >= 0:
 		var look_rng := RandomNumberGenerator.new()
 		look_rng.seed = hash("rival%d" % _next_rival)

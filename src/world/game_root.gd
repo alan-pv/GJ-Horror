@@ -114,14 +114,12 @@ var _ending: bool = false
 var _human_settled: bool = false
 ## Corte de ronda: cuenta atrás desde que el humano se asienta; `_cut_last` es la mesa cuya
 ## ejecución se ve (-1 = ninguna); `_silent_tables` las mesas de fondo cerradas en silencio
-## (mesa -> true) y `_silent_corpses` sus perdedores (mesa -> asiento), que reciben la pose final
-## con los ojos del jugador cerrados (`clear_tables_for_next_round`).
+## (mesa -> true).
 var _cut_armed: bool = false
 var _cut_left: float = 0.0
 var _cut_done: bool = false
 var _cut_last: int = -1
 var _silent_tables: Dictionary = {}
-var _silent_corpses: Dictionary = {}
 var _bg_cost_ms: float = 0.0
 var _bg_max_ms: float = 0.0
 var _bg_frames: int = 0
@@ -136,8 +134,6 @@ var _shot_done: bool = false
 var _shot_armed_at: float = -1.0
 ## Vida de las mesas de fondo: índice de mesa -> BackgroundTable.
 var bg_tables: Dictionary = {}
-## Cadáveres restaurados de rondas pasadas (mesa -> `CharacterFigure`), ver `_restore_table`.
-var _corpses: Dictionary = {}
 var _bt_cost_ms: float = 0.0
 var _bt_max_ms: float = 0.0
 var _bt_frames: int = 0
@@ -497,9 +493,9 @@ func _on_game_over(winner: int, reason: String) -> void:
 		_human_eliminated(reason)
 		return
 	if won:
-		hud.show_subtitle("You won: %s" % reason, 3.0)
+		hud.show_subtitle("You won: %s" % reason, 3.0, false)
 	else:
-		hud.show_subtitle("You lost this game of the final", 3.0)
+		hud.show_subtitle("You lost this game of the final", 3.0, false)
 	if rival_dies and arbiter != null and tgame != null:
 		# El árbitro viene y ejecuta al rival frente al jugador.
 		arbiter.request_execution(HallLayout.human_table, rival_color)
@@ -567,9 +563,8 @@ func _setup_tournament(rng: RandomNumberGenerator) -> void:
 
 ## Lámparas del salón: las 16 mesas siguen encendidas en todas las rondas (las vacías
 ## también, para que el salón no se vaya quedando a oscuras). Las mesas de rondas pasadas
-## conservan lo que recuerda `HallMemory` (cadáver del perdedor y posición final de las piezas);
-## el resto queda sin figuras ni piezas. La atenuación llega con las ejecuciones (y los cadáveres
-## restaurados vuelven a la luz tenue con la que se quedaron).
+## conservan solo la posición final de las piezas (`HallMemory`) y la lámpara tenue: no queda
+## ninguna figura (ni cadáveres). El resto queda sin figuras ni piezas.
 func _populate_hall() -> void:
 	if manager.round_no <= 1:
 		HallMemory.clear()
@@ -584,28 +579,16 @@ func _populate_hall() -> void:
 			_restore_table(i)
 
 
-## Pone en la mesa `table` lo que recuerda `HallMemory`: piezas y, si lo hubo, el cadáver del
-## perdedor quieto en su asiento, en la pose final de `death_slump_table`.
+## Deja la mesa `table` como la de una ronda pasada: las piezas donde quedaron, sin nadie y con la
+## lámpara a `CORPSE_LEVEL`. Es el aspecto que tienen antes (`clear_tables_for_next_round`) y
+## después de recargar la escena.
 func _restore_table(table: int) -> void:
-	var e := HallMemory.entry(table)
-	hall.set_table_board(table, e.squares)
-	var seat: int = e.seat
-	if seat < 0:
-		return
-	var f := CharacterFigure.new()
-	f.name = "Cadaver%d" % table
-	hall.table_root(table).add_child(f)
-	f.position = Hall.seat_local(seat)
-	f.rotation.y = PI if seat == ChessPiece.WHITE else 0.0
-	f.setup(e.look)
-	f.hold_final_pose(&"death_slump_table")
-	_corpses[table] = f
+	hall.set_table_board(table, HallMemory.entry(table).squares)
 	hall.set_table_level(table, CORPSE_LEVEL, false)
 
 
-## Apunta en `HallMemory` el estado final de cada mesa de la ronda que se cierra: piezas y
-## cadáver del perdedor (solo si lo ejecutaron). Los ganadores no se guardan: se van a su mesa
-## nueva. Quien descansa no deja nada.
+## Apunta en `HallMemory` la posición final de las piezas de cada mesa de la ronda que se cierra.
+## Ni los ganadores (se van a su mesa nueva) ni los cadáveres se guardan. Quien descansa no deja nada.
 func _remember_round() -> void:
 	for g in manager.games:
 		var t := g.table
@@ -614,25 +597,23 @@ func _remember_round() -> void:
 		if t == HallLayout.human_table:
 			if tgame == null or server == null:
 				continue
-			var dead := avatar != null and avatar.condemned and avatar.figure != null
-			HallMemory.remember(t, server.board.squares, rival_color if dead else -1,
-					avatar.figure.applied_look if dead else {})
+			HallMemory.remember(t, server.board.squares)
 			continue
 		var bt: BackgroundTable = bg_tables.get(t)
 		if bt == null or bt.bg == null:
 			continue
-		var seat := bt.corpse_seat()
-		HallMemory.remember(t, bt.bg.server.board.squares, seat,
-				bt.figures[seat].applied_look if seat >= 0 else {})
-		_log("Recuerdo mesa %d: cadáver en asiento %d%s" % [t, seat, " (en silencio)" if _silent_corpses.has(t) else ""])
+		HallMemory.remember(t, bt.bg.server.board.squares)
+		_log("Recuerdo mesa %d%s" % [t, " (en silencio)" if _silent_tables.has(t) else ""])
 
 
 ## Para el paseo (`RoundWalk`), en el primer parpadeo al levantarse y después de `start_round()`:
-## deja el salón como lo verá la escena recargada, salvo la mesa destino del humano (la prepara el
-## paseo). Los ganadores vivos de la ronda anterior desaparecen de sus mesas viejas; las mesas de la
-## ronda nueva se repueblan con sus emparejamientos sentados y las piezas en la posición inicial
-## (`_seat_round_table`, el mismo código y la misma ropa por id que `_start_background`); las de
-## rondas pasadas conservan cadáver y piezas (`HallMemory`) y las sin recuerdo quedan vacías. Idempotente.
+## deja el salón exactamente como lo verá la escena recargada, salvo la mesa destino del humano (la
+## completa `RoundWalk._prepare_destination`). Desaparecen TODOS los cadáveres (los de esta ronda, los
+## ejecutados en silencio, el rival condenado del humano) y los ganadores de sus mesas viejas; las
+## mesas de la ronda nueva se repueblan con sus emparejamientos sentados y las piezas en la posición
+## inicial (`_seat_round_table`, el mismo código y la misma ropa por id que `_start_background`); las
+## demás mesas con recuerdo quedan sin nadie, con las piezas como acabaron y la lámpara tenue
+## (`_restore_table`), y las sin recuerdo, vacías. Idempotente.
 func clear_tables_for_next_round() -> void:
 	if hall == null or manager == null:
 		return
@@ -640,17 +621,22 @@ func clear_tables_for_next_round() -> void:
 	var used := dest + 1 if dest >= 0 else 0
 	HallMemory.release_used(used)
 	var fill := HallMemory.tables_to_fill(used, dest)
-	var emptied := HallMemory.tables_to_empty(hall.table_count(), used, dest)
-	for t in fill:
+	for t in hall.table_count():
+		if t == HallLayout.human_table or t == dest:
+			continue
 		_empty_table(t)
-	for t in emptied:
-		if t != HallLayout.human_table:
-			_empty_table(t)
-	for t in bg_tables:
-		if not emptied.has(t) and not fill.has(t):
-			(bg_tables[t] as BackgroundTable).hide_living()
-			hall.set_table_level(t, CORPSE_LEVEL if HallMemory.has_corpse(t) else 1.0, false)
-			_pose_silent_corpse(t)
+		if not fill.has(t) and HallMemory.has(t):
+			_restore_table(t)
+	# La mesa destino: nadie de la ronda anterior y con la luz plena que tendrá la mesa del humano.
+	var dbt: BackgroundTable = bg_tables.get(dest)
+	if dbt != null:
+		dbt.hide_all()
+	if dest >= 0:
+		hall.set_table_level(dest, 1.0, false)
+	# La mesa vieja del humano (su tablero sigue siendo el `BoardView`): sin el rival condenado y tenue.
+	if avatar != null:
+		avatar.visible = false
+	hall.set_table_level(HallLayout.human_table, CORPSE_LEVEL, false)
 	for g in manager.pending_games():
 		if fill.has(g.table):
 			_seat_round_table(g.table, null, [g.white, g.black])
@@ -659,21 +645,6 @@ func clear_tables_for_next_round() -> void:
 		if fill.has(t) and not bg_tables.has(t):
 			_seat_round_table(t, null, [id, -1])
 	_link_bg_neighbors()
-	if avatar != null and not avatar.condemned:
-		avatar.visible = false
-
-
-## Un perdedor resuelto en silencio (corte de ronda) pasa a la pose final de los ejecutados: se llama
-## con los ojos del jugador cerrados para que no se vea aparecer el cadáver.
-func _pose_silent_corpse(table: int) -> void:
-	if not _silent_corpses.has(table):
-		return
-	var bt: BackgroundTable = bg_tables.get(table)
-	var seat: int = _silent_corpses[table]
-	if bt == null or bt.corpse_seat() != seat or bt.figures[seat] == null:
-		return
-	bt.figures[seat].hold_final_pose(&"death_slump_table")
-	hall.set_table_level(table, CORPSE_LEVEL, false)
 
 
 func _empty_table(table: int) -> void:
@@ -682,10 +653,6 @@ func _empty_table(table: int) -> void:
 		bt.hide_all()
 		bt.queue_free()
 		bg_tables.erase(table)
-	var corpse: CharacterFigure = _corpses.get(table)
-	if corpse != null:
-		corpse.queue_free()
-		_corpses.erase(table)
 	hall.clear_table_board(table)
 	hall.set_table_level(table, 1.0, false)
 
@@ -748,7 +715,6 @@ func _on_background_finished(g: TournamentGame, bg: BackgroundMatch) -> void:
 			sbt.on_game_over(bg.server.winner)
 		if arbiter != null:
 			arbiter.resolve_silently(g.table, loser_color)
-		_silent_corpses[g.table] = loser_color
 	elif g.table >= 0:
 		var bt: BackgroundTable = bg_tables.get(g.table)
 		if bt != null:
@@ -808,8 +774,7 @@ func _do_round_cut() -> void:
 			unfinished.append({"table": bg.table, "dist": d})
 	var plan := RoundCut.plan(current, next_queued, unfinished)
 	_cut_last = plan.last_table
-	for e in arbiter.skip_pending(_cut_last):
-		_silent_corpses[int(e.table)] = int(e.seat)
+	arbiter.skip_pending(_cut_last)
 	for t in plan.silent:
 		_silent_tables[t] = true
 	_log("Corte de ronda: última mesa %d, en silencio %s" % [_cut_last, str(plan.silent)])

@@ -1,5 +1,5 @@
 extends TestCase
-## Memoria del salón entre rondas (`HallMemory`) y pose final instantánea de las figuras.
+## Memoria del salón entre rondas (`HallMemory`: solo piezas, sin cadáveres) y pose final instantánea de las figuras.
 
 
 func _board() -> PackedInt32Array:
@@ -8,14 +8,10 @@ func _board() -> PackedInt32Array:
 
 func test_remember_and_read() -> void:
 	HallMemory.clear()
-	HallMemory.remember(9, _board(), ChessPiece.BLACK, {"jacket": Color.RED})
+	HallMemory.remember(9, _board())
 	check(HallMemory.has(9))
-	check(HallMemory.has_corpse(9))
-	check_eq(HallMemory.entry(9).seat, ChessPiece.BLACK)
 	check_eq(HallMemory.entry(9).squares.size(), 64)
-	check_eq(HallMemory.entry(9).look.jacket, Color.RED)
-	HallMemory.remember(10, _board())
-	check(HallMemory.has(10) and not HallMemory.has_corpse(10), "mesa sin ejecución: solo piezas")
+	check_eq(HallMemory.entry(9).keys(), ["squares"], "solo guarda las piezas: ningún cadáver")
 	check(not HallMemory.has(3))
 	check_eq(HallMemory.entry(3).size(), 0)
 
@@ -23,7 +19,7 @@ func test_remember_and_read() -> void:
 func test_remember_copies_data() -> void:
 	HallMemory.clear()
 	var sq := _board()
-	HallMemory.remember(12, sq, 0, {})
+	HallMemory.remember(12, sq)
 	sq[0] = ChessPiece.NONE
 	check(HallMemory.entry(12).squares[0] != ChessPiece.NONE, "guarda una copia")
 
@@ -32,7 +28,7 @@ func test_release_used_keeps_old_tables() -> void:
 	HallMemory.clear()
 	# Ronda 1: mesas 0..15 recordadas. La ronda 2 usa 0..7: se conservan las 8..15.
 	for t in 16:
-		HallMemory.remember(t, _board(), 1, {})
+		HallMemory.remember(t, _board())
 	HallMemory.release_used(8)
 	check_eq(HallMemory.remembered(), [8, 9, 10, 11, 12, 13, 14, 15] as Array[int])
 
@@ -40,19 +36,18 @@ func test_release_used_keeps_old_tables() -> void:
 func test_accumulates_between_rounds() -> void:
 	HallMemory.clear()
 	for t in 16:
-		HallMemory.remember(t, _board(), 1, {})
+		HallMemory.remember(t, _board())
 	HallMemory.release_used(8)         # empieza la ronda 2 (8 mesas)
 	for t in 8:
-		HallMemory.remember(t, _board(), 0, {})  # termina la ronda 2
+		HallMemory.remember(t, _board())  # termina la ronda 2
 	HallMemory.release_used(4)         # empieza la ronda 3 (4 mesas)
 	check_eq(HallMemory.remembered().size(), 12, "4..7 de la ronda 2 y 8..15 de la 1")
-	check_eq(HallMemory.entry(5).seat, 0, "la 5 es de la ronda 2")
-	check_eq(HallMemory.entry(12).seat, 1, "la 12 sigue siendo de la ronda 1")
+	check(HallMemory.has(5) and HallMemory.has(12), "la 5 es de la ronda 2 y la 12 de la 1")
 	check(not HallMemory.has(2), "la 2 se reutiliza")
 
 
 func test_clear_for_new_tournament() -> void:
-	HallMemory.remember(9, _board(), 1, {})
+	HallMemory.remember(9, _board())
 	HallMemory.clear()
 	check(HallMemory.remembered().is_empty())
 
@@ -61,7 +56,7 @@ func test_table_plan_covers_hall() -> void:
 	HallMemory.clear()
 	# Ronda 2 con 8 mesas (destino = índice 7). Recuerdos en 8..13; la 14 y la 15 nunca se usaron.
 	for t in range(8, 14):
-		HallMemory.remember(t, _board(), 1, {})
+		HallMemory.remember(t, _board())
 	var fill := HallMemory.tables_to_fill(8, 7)
 	check_eq(fill, [0, 1, 2, 3, 4, 5, 6] as Array[int], "la ronda nueva se puebla, salvo la destino")
 	var e := HallMemory.tables_to_empty(16, 8, 7)
