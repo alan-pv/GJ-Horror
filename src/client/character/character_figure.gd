@@ -77,13 +77,11 @@ static func random_look(rng: RandomNumberGenerator) -> Dictionary:
 
 
 ## Aspecto de un bot: maniquí gris sin rasgos. Conserva la ropa de `base` (si viene vacío,
-## la saca de `random_look(rng)`); la piel y los ojos son del mismo gris mate. Los ojos son una caja con material `Eyes` dentro de la malla del cuerpo,
-## así que se pintan del color de la piel; la nariz y las orejas son geometría de `Skin` y
+## la saca de `random_look(rng)`); la piel es de un gris mate. Los personajes no tienen ojos; la nariz y las orejas son geometría de `Skin` y
 ## quedan como relieve sutil. El cuerpo del humano y el árbitro NO usan esto.
 static func bot_look(rng: RandomNumberGenerator, base: Dictionary = {}) -> Dictionary:
 	var look: Dictionary = base.duplicate() if not base.is_empty() else random_look(rng)
 	look["skin"] = BOT_SKIN
-	look["eyes"] = BOT_SKIN
 	return look
 
 

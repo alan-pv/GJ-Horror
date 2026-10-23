@@ -216,6 +216,42 @@ func _pause(seconds: float) -> bool:
 	return is_inside_tree()
 
 
+## "Cheater!" gritado con voz de 8 bits (`VoiceBlips.Speaker.ACCUSER`). Con `parent` (la
+## cabeza de quien grita) o `pos` suena espacial; con `spatial = false` es un reproductor
+## plano (la voz del propio jugador). `pitch` baja o sube la voz.
+func shout(pos: Vector3, parent: Node3D = null, spatial: bool = true, pitch: float = 1.0) -> Node:
+	var stream := VoiceBlips.build(VoiceBlips.Speaker.ACCUSER, "Cheater!")
+	if stream == null:
+		return null
+	var vol := VoiceBlips.volume_db(VoiceBlips.Speaker.ACCUSER)
+	var p: Node
+	if spatial:
+		var p3 := AudioStreamPlayer3D.new()
+		p3.stream = stream
+		p3.unit_size = 6.0
+		p3.max_distance = 45.0
+		p3.volume_db = vol + 6.0
+		p3.pitch_scale = pitch
+		p = p3
+	else:
+		var p2 := AudioStreamPlayer.new()
+		p2.stream = stream
+		p2.volume_db = vol
+		p2.pitch_scale = pitch
+		p2.bus = &"SFX" if AudioServer.get_bus_index(&"SFX") >= 0 else &"Master"
+		p = p2
+	if spatial and parent != null:
+		parent.add_child(p)
+		(p as Node3D).position = Vector3(0.0, 1.5, 0.0)
+	else:
+		add_child(p)
+		if spatial:
+			(p as Node3D).global_position = pos
+	p.connect(&"finished", p.queue_free)
+	p.call(&"play")
+	return p
+
+
 # --- Acusación ajena ---------------------------------------------------------------------
 
 ## Alguien de otra mesa (una figura real, prestada por su `BackgroundTable`) se queda sentado,
@@ -226,7 +262,7 @@ func accuser(origin: Vector3, duration: float, toward: Vector3) -> void:
 	var loan := _borrow(table)
 	if loan.is_empty():
 		# Sin figura libre en esa mesa: solo se oye el grito.
-		play_sound(&"shout", origin + Vector3(0.0, 1.5, 0.0), 6.0)
+		shout(origin + Vector3(0.0, 1.5, 0.0))
 		return
 	var f: CharacterFigure = loan.fig
 	var seat: int = loan.seat
@@ -235,7 +271,7 @@ func accuser(origin: Vector3, duration: float, toward: Vector3) -> void:
 	f.play_role_once(&"sit_startle")
 	get_tree().create_timer(0.5).timeout.connect(func() -> void:
 		if is_instance_valid(f):
-			play_sound(&"shout", f.head_global_position(), 6.0))
+			shout(f.head_global_position()))
 	if not await _pause(maxf(duration, 1.5)):
 		return
 	if is_instance_valid(f):

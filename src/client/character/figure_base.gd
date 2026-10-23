@@ -25,7 +25,7 @@ const MAX_PITCH := deg_to_rad(35.0)
 ## Hueso -> nombre del material que lleva `setup`.
 const LOOK_MATERIALS := {
 	"skin": "Skin", "shirt": "Shirt", "jacket": "Jacket",
-	"pants": "Pants", "shoes": "Shoes", "eyes": "Eyes",
+	"pants": "Pants", "shoes": "Shoes",
 }
 ## Posición aproximada entre los ojos / centro de la cabeza respecto al origen del hueso
 ## Head en reposo, en ejes del esqueleto (el modelo mira a +Z).
@@ -105,9 +105,9 @@ func _process(delta: float) -> void:
 
 # --- Aspecto ----------------------------------------------------------------------
 
-## Aplica un aspecto. Claves opcionales: `skin`, `shirt`, `jacket`, `pants`, `shoes`,
-## `eyes` (Color). Los materiales son propios de
-## esta instancia: no tiñe a las demás.
+## Aplica un aspecto. Claves opcionales: `skin`, `shirt`, `jacket`, `pants`, `shoes`
+## (Color). Los materiales son propios de esta instancia: no tiñe a las demás. Los
+## personajes no tienen ojos (no hay material `Eyes`).
 func setup(look: Dictionary) -> void:
 	applied_look = look.duplicate()
 	for key in LOOK_MATERIALS:
@@ -127,6 +127,13 @@ func _remove_hair() -> void:
 			node.free()
 
 
+## Nombre sin el sufijo `.NNN` de Blender (`Skin.001` -> `Skin`).
+static func _base_name(n: String) -> String:
+	var re := RegEx.new()
+	re.compile("\\.\\d{3}$")
+	return re.sub(n, "")
+
+
 ## Duplica los materiales de cada malla para poder teñirlos sin afectar otras instancias.
 func _own_materials(root: Node) -> void:
 	var copies := {}  # material original -> copia (misma copia en todas las superficies)
@@ -142,9 +149,11 @@ func _own_materials(root: Node) -> void:
 				var c := orig.duplicate() as Material
 				copies[orig] = c
 				if c is StandardMaterial3D:
-					var arr: Array = _materials.get(c.resource_name, [])
+					# Se indexa sin el sufijo `.NNN` que Blender añade a nombres repetidos.
+					var key := _base_name(c.resource_name)
+					var arr: Array = _materials.get(key, [])
 					arr.append(c)
-					_materials[c.resource_name] = arr
+					_materials[key] = arr
 			(mi as MeshInstance3D).set_surface_override_material(s, copies[orig])
 
 

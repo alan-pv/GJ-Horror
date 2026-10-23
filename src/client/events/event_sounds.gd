@@ -27,8 +27,6 @@ static func _generate(key: StringName) -> PackedFloat32Array:
 			return _thud()
 		&"cough":
 			return _cough()
-		&"shout":
-			return _shout()
 		&"clack":
 			return _clack()
 		&"bulb_pop":
@@ -142,26 +140,6 @@ static func _cough() -> PackedFloat32Array:
 			voiced[i] = (sin(ph) + 0.5 * sin(ph * 2.0)) * exp(-t * 15.0) * minf(t / 0.01, 1.0)
 		b = _mix(b, burst, at, 1.0)
 		b = _mix(b, voiced, at, 0.5)
-	return b
-
-
-## Grito de "¡trampa!": pulso vocal con vibrato, armónicos y un fondo de aire.
-static func _shout() -> PackedFloat32Array:
-	var r := _rng(14)
-	var seconds := 0.85
-	var b := _buffer(seconds)
-	var ph := 0.0
-	for i in b.size():
-		var t := float(i) / RATE
-		var f := 210.0 + 70.0 * sin(t * 5.5) * 0.4 + 90.0 * t
-		ph += TAU * f / RATE
-		# Dos formantes burdos: vocal "a" alternando con la "i" de la última sílaba.
-		var open := 1.0 if t < 0.55 else 0.55
-		var wave := sin(ph) + 0.6 * sin(ph * 2.0) * open + 0.5 * sin(ph * 3.0) + 0.25 * sin(ph * 5.0) * (1.0 - open * 0.5)
-		var env := minf(t / 0.03, 1.0) * (1.0 - smoothstep(0.6, seconds, t))
-		# Corte entre sílabas (tram-pa).
-		env *= 1.0 - 0.8 * exp(-pow((t - 0.38) / 0.025, 2.0))
-		b[i] = wave * env * 0.35 + r.randf_range(-1.0, 1.0) * env * 0.05
 	return b
 
 

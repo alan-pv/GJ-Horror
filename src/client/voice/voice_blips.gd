@@ -6,9 +6,11 @@ extends RefCounted
 ## quien reproduce es `Hud` (un reproductor por hablante: la voz nueva corta la anterior).
 ##
 ## Dos hablantes: el jugador (agudo y suave: seno/triángulo) y el árbitro (grave y áspero:
-## cuadrada + diente de sierra desafinados, vibrato lento y un eco corto).
+## cuadrada + diente de sierra desafinados, vibrato lento y un eco corto). Un tercero, el
+## acusador (`ACCUSER`), es el grito de "Cheater!": pulso estrecho agudo, blips cortos y
+## rápidos, tono que sube a lo largo de la palabra y más volumen.
 
-enum Speaker { PLAYER, ARBITER }
+enum Speaker { PLAYER, ARBITER, ACCUSER }
 
 const RATE := 22050
 ## Tope del balbuceo: un texto largo no hace sonar más que esto.
@@ -23,6 +25,12 @@ static var _cache: Dictionary = {}
 
 ## Parámetros de cada voz. `interval` = separación entre blips; `length` = duración de cada uno.
 static func params(speaker: Speaker) -> Dictionary:
+	if speaker == Speaker.ACCUSER:
+		# `rise` = semitonos que sube el tono de cada blip respecto al anterior (grito creciente).
+		return {
+			"base": 700.0, "interval": 0.042, "length": 0.05, "volume_db": -2.0,
+			"scale": [0, 4, 7, 12, 5, 9], "echo_delay": 0.0, "echo_gain": 0.0, "rise": 0.9,
+		}
 	if speaker == Speaker.ARBITER:
 		return {
 			"base": 92.0, "interval": 0.085, "length": 0.085, "volume_db": -4.0,
@@ -50,6 +58,7 @@ static func plan(speaker: Speaker, text: String) -> Array[Dictionary]:
 	var p := params(speaker)
 	var scale: Array = p.scale
 	var step: float = p.interval
+	var rise: float = p.get("rise", 0.0)
 	var t := 0.0
 	for i in text.length():
 		var c := text.unicode_at(i)
@@ -69,7 +78,8 @@ static func plan(speaker: Speaker, text: String) -> Array[Dictionary]:
 			break
 		# Tono determinista según la letra y su posición (suena a "habla" y no a escala).
 		var semis: int = scale[(c * 5 + i * 3) % scale.size()]
-		out.append({"t": t, "freq": float(p.base) * pow(2.0, semis / 12.0)})
+		var up := rise * float(out.size())
+		out.append({"t": t, "freq": float(p.base) * pow(2.0, (semis + up) / 12.0)})
 		t += step
 	return out
 
@@ -107,6 +117,13 @@ static func synth_blip(speaker: Speaker, freq: float) -> PackedFloat32Array:
 			v = 0.55 * square + 0.45 * saw
 			# Un polo para quitarle el filo más agudo (suena más sordo).
 			lp += (v - lp) * 0.35
+			v = lp
+		elif speaker == Speaker.ACCUSER:
+			# Pulso estrecho (25 %) con deslizamiento hacia arriba: chillido de chip.
+			var f3 := freq * (1.0 + 0.18 * u)
+			phase = fposmod(phase + f3 / RATE, 1.0)
+			v = 1.0 if phase < 0.25 else -1.0
+			lp += (v - lp) * 0.6
 			v = lp
 		else:
 			var f2 := freq * (1.0 + 0.05 * u)

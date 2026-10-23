@@ -62,6 +62,7 @@ func install(p_root: GameRoot) -> void:
 	stage.darkness_changed.connect(root.server.set_blackout)
 
 	root.server.rival_event.connect(_on_rival_event)
+	root.server.accusation_started.connect(_on_accusation_shout)
 	root.players_remaining_changed.connect(set_players_remaining)
 	set_players_remaining(root.players_left(), root.manager.player_count)
 
@@ -190,6 +191,15 @@ func _start_arbiter_pass(duration: float) -> bool:
 		return false
 	arbiter.pass_behind(ARBITER_BEHIND, duration)
 	return true
+
+
+## Quien acusa grita "Cheater!" con voz de 8 bits: el rival, desde su cabeza (espacial);
+## el humano, con voz propia y más grave, sin espacialidad.
+func _on_accusation_shout(accuser: int) -> void:
+	if accuser == root.rival_color:
+		stage.shout(root.avatar.head.global_position)
+	else:
+		stage.shout(Vector3.ZERO, null, false, 0.8)
 
 
 # --- Eventos del rival ----------------------------------------------------------------------------

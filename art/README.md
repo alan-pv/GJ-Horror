@@ -17,6 +17,7 @@ están en `assets/models/`, reflejando la ruta (`art/props/x.blend` -> `assets/m
    Se excluyen cámaras, luces y todo lo que esté en una colección llamada `Reference`.
 4. **Importar en Godot** (una vez tras exportar): `godot --headless --path . --editor --quit-after 60`.
 5. **Comprobar**: `godot --headless --path . --script res://tools/check_props.gd` (nodos y medidas).
+6. **Limpiar un `.glb` exportado a mano** (sin Blender): `python3 art/fix_glb.py entrada.glb salida.glb [--remove-anims a,b] [--rename-anim viejo=nuevo] [--keep-suffixes]`. Quita los sufijos `.NNN` de mallas y materiales (el código busca materiales por nombre), borra o renombra animaciones y recompacta el buffer sin datos sin usar. Así se limpió el `player.glb` editado a mano, que traía las animaciones del árbitro y `walk.001`.
 
 ## Convenciones
 

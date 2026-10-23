@@ -77,3 +77,28 @@ func test_build_stream_cached_and_sized() -> void:
 	check(VoiceBlips.build(P, "...") == null, "sin letras no hay stream")
 	var sa := VoiceBlips.build(A, "Too close.")
 	check(sa != s, "hablantes distintos, streams distintos")
+
+
+func test_accuser_shout_is_high_fast_and_rising() -> void:
+	var C := VoiceBlips.Speaker.ACCUSER
+	var plan := VoiceBlips.plan(C, "Cheater!")
+	check_eq(plan.size(), 7, "un blip por letra")
+	check(VoiceBlips.base_freq(C) > VoiceBlips.base_freq(P), "más agudo que el jugador")
+	check(VoiceBlips.volume_db(C) > VoiceBlips.volume_db(P), "más fuerte que el jugador")
+	check(VoiceBlips.params(C).interval < VoiceBlips.params(P).interval, "más rápido")
+	check(float(plan[-1].freq) > float(plan[0].freq) * 1.5, "el tono sube a lo largo de la palabra")
+	check(VoiceBlips.duration(C, "Cheater!") < 0.5, "grito corto")
+	check_eq(plan, VoiceBlips.plan(C, "Cheater!"), "determinista")
+	# Las otras voces no suben de tono (la subida es solo del acusador).
+	check_eq(VoiceBlips.params(P).get("rise", 0.0), 0.0, "jugador sin subida")
+
+
+func test_accuser_stream_is_built() -> void:
+	var s := VoiceBlips.build(VoiceBlips.Speaker.ACCUSER, "Cheater!")
+	check(s != null and s.data.size() > 1000, "stream sintetizado")
+	check(VoiceBlips.build(VoiceBlips.Speaker.ACCUSER, "!!") == null, "sin letras: nada")
+	var blip := VoiceBlips.synth_blip(VoiceBlips.Speaker.ACCUSER, 800.0)
+	var peak := 0.0
+	for v in blip:
+		peak = maxf(peak, absf(v))
+	check(peak > 0.3 and peak <= 1.0, "amplitud razonable")

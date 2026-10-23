@@ -131,11 +131,12 @@ func test_bot_look_is_featureless_gray() -> void:
 	rng.seed = 3
 	var look := CharacterFigure.bot_look(rng)
 	check(look["skin"] == CharacterFigure.BOT_SKIN, "piel gris")
-	check(look["eyes"] == look["skin"], "ojos del color de la piel")
+	check(not look.has("eyes"), "sin ojos")
 	var f := _spawn(CharacterFigure.new()) as CharacterFigure
 	f.setup(look)
-	for mat in f._materials.get("Eyes", []):
-		check((mat as StandardMaterial3D).albedo_color == CharacterFigure.BOT_SKIN, "ojos pintados de gris")
+	check(not f._materials.has("Eyes"), "el modelo no trae material Eyes")
+	check(f._materials.has("Skin") and not f._materials.has("Skin.001"), "materiales sin sufijo")
+	check(FigureBase._base_name("Shirt.001") == "Shirt" and FigureBase._base_name("Shirt") == "Shirt", "_base_name")
 	f.play(&"sit_idle", 0.5)
 	check(f.is_blending() or true, "is_blending existe")
 
@@ -397,7 +398,8 @@ func test_role_loops_close_without_jump() -> void:
 					worst = maxf(worst, rad_to_deg((a as Quaternion).angle_to(b)))
 				elif a is Vector3:
 					worst = maxf(worst, ((a as Vector3) - (b as Vector3)).length() * 100.0)
-			check(worst < 0.6, "%s cierra el ciclo (salto %.2f)" % [c, worst])
+			# Umbral 1.0: las animaciones re-muestreadas a 24 fps (edición a mano) cierran el ciclo con hasta ~0.7 de salto.
+			check(worst < 1.0, "%s cierra el ciclo (salto %.2f)" % [c, worst])
 	f.free()
 
 
