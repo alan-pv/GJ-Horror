@@ -25,6 +25,8 @@ var _banner_tween: Tween
 var _subtitle_tween: Tween
 var _arbiter_tween: Tween
 var _debug: Label
+## Un reproductor de voz 8 bits por hablante (`VoiceBlips.Speaker`): la voz nueva corta la anterior.
+var _voices: Dictionary = {}
 var _vignette_mat: ShaderMaterial
 ## Panel de diagnóstico (F3) para las pruebas con jugadores; lo rellena `PlayerController`.
 var debug_visible: bool = false
@@ -208,8 +210,9 @@ func _build_result_panel() -> void:
 	box.add_child(_result_restart)
 
 
-## Murmullo del personaje, p. ej. "...no, eso deja la dama colgada".
-func show_subtitle(text: String, seconds: float = 3.5) -> void:
+## Murmullo del personaje, p. ej. "...no, eso deja la dama colgada". Con `voice` suena el
+## balbuceo 8 bits del jugador; los textos que no son habla (resultados, avisos) pasan `false`.
+func show_subtitle(text: String, seconds: float = 3.5, voice: bool = true) -> void:
 	_subtitle.text = text
 	if _subtitle_tween != null and _subtitle_tween.is_valid():
 		_subtitle_tween.kill()
@@ -217,10 +220,12 @@ func show_subtitle(text: String, seconds: float = 3.5) -> void:
 	_subtitle_tween = create_tween()
 	_subtitle_tween.tween_interval(seconds)
 	_subtitle_tween.tween_property(_subtitle, "modulate:a", 0.0, 0.6)
+	if voice:
+		speak(VoiceBlips.Speaker.PLAYER, text)
 
 
-## Mensajes del árbitro ("viene a la mesa...", veredicto).
-func show_arbiter(text: String, seconds: float = 3.0) -> void:
+## Mensajes del árbitro ("viene a la mesa...", veredicto), con su voz grave 8 bits.
+func show_arbiter(text: String, seconds: float = 3.0, voice: bool = true) -> void:
 	_arbiter.text = text
 	if _arbiter_tween != null and _arbiter_tween.is_valid():
 		_arbiter_tween.kill()
@@ -228,6 +233,25 @@ func show_arbiter(text: String, seconds: float = 3.0) -> void:
 	_arbiter_tween = create_tween()
 	_arbiter_tween.tween_interval(seconds)
 	_arbiter_tween.tween_property(_arbiter, "modulate:a", 0.0, 0.6)
+	if voice:
+		speak(VoiceBlips.Speaker.ARBITER, text)
+
+
+## Hace sonar el balbuceo de `text` con la voz de `speaker`, cortando la que ese hablante tuviera.
+func speak(speaker: VoiceBlips.Speaker, text: String) -> void:
+	var player: AudioStreamPlayer = _voices.get(speaker)
+	if player == null:
+		player = AudioStreamPlayer.new()
+		player.bus = &"SFX" if AudioServer.get_bus_index(&"SFX") >= 0 else &"Master"
+		player.volume_db = VoiceBlips.volume_db(speaker)
+		add_child(player)
+		_voices[speaker] = player
+	player.stop()
+	var stream := VoiceBlips.build(speaker, text)
+	if stream == null:
+		return
+	player.stream = stream
+	player.play()
 
 
 func set_warnings(count: int, maximum: int) -> void:

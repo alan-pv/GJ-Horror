@@ -40,11 +40,15 @@ const LINES := {
 	},
 	&"rival_executed": {"prio": HIGH, "texts": ["It was them or me.", "...I'm sorry."]},
 	# --- Apagón -----------------------------------------------------------------------------------
-	&"blackout_first": {"play": true, 
-		"prio": MID, "once": "tournament", "group": "blackout",
-		"texts": ["The lights— now. Nobody can see my hands."],
+	# Se dicen justo ANTES del apagón (`InnerVoice.announce_blackout`): las luces están por apagarse.
+	&"blackout_first": {
+		"play": true, "prio": HIGH, "once": "tournament", "group": "blackout",
+		"texts": ["The lights are failing... Nobody will see my hands."],
 	},
-	&"blackout": {"play": true, "prio": MID, "texts": ["Dark again. Now's my chance.", "Now. While it's dark."]},
+	&"blackout": {
+		"play": true, "prio": HIGH, "group": "blackout",
+		"texts": ["The lights are going out. Now's my chance.", "Here it goes. Now's my chance.", "Wait for the dark... Now's my chance."],
+	},
 	# --- Rival distraído y empujón a hacer trampa ---------------------------------------------------
 	&"distracted_first": {"play": true, 
 		"prio": MID, "once": "tournament", "wait": 40.0, "group": "distracted",

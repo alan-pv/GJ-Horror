@@ -319,7 +319,7 @@ Duración = `base_time + time_per_square × distancia de rey recorrida` (el robo
 
 | Id | Tipo | Origen | Duración | Peso | Espera | Intensidad | Tensión mín. | Sonido | Qué ocurre |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `apagon` | Global | Centro | 4,5 | 1,0 | 60 | 0,9 | 0 | `bulb_pop` | Todas las luces, emisivos, conos y ambiente parpadean, se apagan y vuelven (`blackout`). `EventStage.blackout_level` da el nivel de luz; por debajo de `EventStage.DARK_LEVEL` (0,3) emite `darkness_changed(true)` y `EventModule` llama `server.set_blackout(true)` (false al volver la luz). Con el nivel en 0 no queda luz de relleno ni emisivos: mano y piezas del rival no se distinguen. Con `--cheat-demo=rival` se prueba con una trampa del rival en curso. |
+| `apagon` | Global | Centro | 4,5 | 1,0 | 60 | 0,9 | 0 | `bulb_pop` | Primero el jugador lo anuncia (`InnerVoice.announce_blackout`, ver 4.22) y, tras `EventModule.BLACKOUT_LEAD` (1,5 s), suena la bombilla, se reparte la distracción y todas las luces, emisivos, conos y ambiente parpadean, se apagan y vuelven (`blackout`). `EventStage.blackout_level` da el nivel de luz; por debajo de `EventStage.DARK_LEVEL` (0,3) emite `darkness_changed(true)` y `EventModule` llama `server.set_blackout(true)` (false al volver la luz). Con el nivel en 0 no queda luz de relleno ni emisivos: mano y piezas del rival no se distinguen. Con `--cheat-demo=rival` se prueba con una trampa del rival en curso. |
 | `ruido_detras` | Global | Detrás | 2,0 | 1,4 | 25 | 1,0 | 0 | `slam` | Una banqueta cae y rueda a las espaldas del jugador. |
 | `acusacion_ajena` | Global | Mesa | 3,5 | 1,2 | 35 | 0,7 | 0 | `shout` | Una figura real de otra mesa (prestada) se queda sentada, gira la cabeza hacia el jugador (`look_at_point`) con un respingo (`sit_startle`) y grita; subtítulo "Cheater!". Sin silla ni levantarse; al acabar recupera su vida ambiental. |
 | `arbitro_pasa` | Disuasivo | Detrás | 8,0 | 1,0 | 45 | 0,3 | 0 | `steps` | El árbitro pasa detrás del jugador (ver abajo). |
@@ -576,7 +576,7 @@ La versión corta (torneos siguientes del mismo proceso, variable estática) no 
 | Primer disparo (`Distraction` gunshot) | `first_shot` "...Eliminated. That's what he meant." + "That was real." (A, una vez por torneo) |
 | Disparos siguientes | `shot_next` (B, 50 %, espera 25 s) |
 | `arbiter.executed` con el rival del humano | `rival_executed` (A) |
-| Apagón (flanco de `is_blackout`) | `blackout_first` / `blackout` (M) |
+| Evento `apagon`, 1,5 s antes de que se apague la luz (`announce_blackout`; respaldo: flanco de `is_blackout` si no hubo anuncio en los últimos 8 s) | `blackout_first` "The lights are failing... Nobody will see my hands." / `blackout` "The lights are going out. Now's my chance.", "Here it goes. Now's my chance.", "Wait for the dark... Now's my chance." (A) |
 | Rival distraído (con partida en juego y sin trampa del humano en curso) | `distracted_first` / `distracted` (M, espera 40 s) |
 | 75 s sin trampa y rival distraído / 150 s sin trampa y perdiendo material o reloj | `nudge_hands` (B, una vez por partida) / `nudge_fair` (M, una vez por torneo) |
 | Árbitro cerca (flanco de `is_arbiter_near`) | `arbiter_near` (M, espera 45 s); con trampa en curso `arbiter_cheating` (A) |
@@ -585,6 +585,8 @@ La versión corta (torneos siguientes del mismo proceso, variable estática) no 
 | Cambios del tablero | `queen_lost`, `queen_taken` (M, por recuento de damas en `state_changed`); `check_given` (B, espera 30 s) |
 | Reloj | `clock_30` (M), `clock_10` (A), `clock_rival_20` (B), una vez por partida |
 | `last_execution_done` / `human_condemned` / `champion_crowned` | `last_execution` (M) / `condemned` (A) / `champion` (A) |
+
+**Voz 8 bits (`VoiceBlips`, `src/client/voice/voice_blips.gd`).** Todo lo que se dice en voz alta suena como un balbuceo de videojuego de 8 bits, sintetizado en código (`AudioStreamWAV` mono de 16 bits a 22,05 kHz, cuantizado a 24 niveles, caché de 64 textos; sirve en web). `plan(speaker, text)` da un blip por letra o cifra, pausa en espacios y más larga en puntuación, con tono determinista según la letra, y se corta a `MAX_SECONDS` = 4,5 s. Dos voces (`Speaker`): **jugador** (560 Hz, onda triangular, escala pentatónica, blips de 45 ms cada 55 ms, −10 dB) y **árbitro**, grave y tétrica (92 Hz, cuadrada más diente de sierra desafinada con vibrato, filtro de un polo y eco de 0,11 s, blips de 85 ms cada 85 ms, −4 dB). `Hud.show_subtitle(text, seconds, voice = true)` habla con la voz del jugador (monólogo, murmullos, ayuda para principiantes) y `Hud.show_arbiter(text, seconds, voice = true)` con la del árbitro (discurso, "Begin.", veredictos); `Hud.speak(speaker, text)` usa un `AudioStreamPlayer` por hablante (bus SFX) y la voz nueva corta la anterior del mismo hablante. Los textos que no son habla pasan `voice = false` ("You won: ...", "You lost this game of the final", el "Cheater!" de otra mesa); banners, pantallas y estado no hablan.
 
 Con `--verbose` imprime cada frase del discurso y del monólogo. `tests/test_inner_voice.gd` cubre la cola, los disparadores puros y las condiciones del discurso.
 
@@ -682,6 +684,7 @@ godot --headless --path . --script res://tests/run_tests.gd -- --filter=cheats
 | `test_maia_encoding.gd` | Vocabulario, Elo continuo, codificación idéntica al fixture de PyTorch, índices de jugadas legales, espejado, reconstrucción del historial (captura, al paso, enroque, cambios por trampa, cerebro compartido) y respaldo sin web. |
 | `test_stress.gd` | `StressModel`: piso (reloj, torneo, material), picos con sostenimiento y decaimiento al piso, tope, sostenidos, condena, sacudida y latido. |
 | `test_distractions.gd` | Probabilidades por tipo con semilla, descartados que no voltean, retardo y duraciones en rango, respingo solo en fuertes, radios, datos de `EventDef`, factor de personalidad, el bot que voltea deja de mirar el tablero. |
+| `test_voice_blips.gd` | Voz 8 bits: blips según el texto, duración acotada, plan determinista, variación de tono, árbitro más grave que el jugador, forma del blip y caché. |
 | `test_inner_voice.gd` | `VoiceQueue` (prioridad, tope global, cortes, descarte de bajas tardías, una vez por partida/torneo, esperas, secuencias, silencio, variantes), `VoiceRules` (palabras, inicio de ronda, umbrales, material, `GazeWatch`) y condiciones del discurso. |
 | `test_round_cut.gd` | Corte de ronda: elección de la última mesa y reparto en silencio (`RoundCut.plan`), `ExecutionQueue.peek_next/skip_pending/drop`, `Arbiter.resolve_silently` y punto del discurso en pasillo. |
 | `test_tension_director.gd` | Carga de definiciones, primer evento, separación y no repetición, frecuencia según jugadores, misma semilla, esperas, orígenes, disparo forzado, desactivado. |

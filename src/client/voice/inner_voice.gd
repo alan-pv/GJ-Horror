@@ -13,6 +13,8 @@ const NUDGE_FAIR_AT := 150.0
 const CLOCK_MINE_1 := 30.0
 const CLOCK_MINE_2 := 10.0
 const CLOCK_RIVAL := 20.0
+## Tras anunciar un apagón, el flanco de oscuridad no repite la frase durante este tiempo.
+const BLACKOUT_ANNOUNCE_WINDOW := 8.0
 
 var root: GameRoot
 var queue := VoiceQueue.new()
@@ -22,6 +24,8 @@ var _started: bool = false
 var _match_started_at: float = 0.0
 var _watch := VoiceRules.GazeWatch.new()
 var _blackout: bool = false
+## Instante (`_now`) en que se anunció un apagón desde el evento; evita repetir la frase al oscurecerse.
+var _blackout_announced_at: float = -1000.0
 var _arbiter_near: bool = false
 var _human_cheated: bool = false
 var _prev_clock: Array[float] = [-1.0, -1.0]
@@ -101,9 +105,9 @@ func _poll(delta: float) -> void:
 	var me := root.human_color
 	var rival := root.rival_color
 	var match_time := _now - _match_started_at
-	# Apagón (flanco de subida).
+	# Apagón (flanco de subida): respaldo para oscuridades que no pasaron por `announce_blackout`.
 	var dark := s.is_blackout()
-	if dark and not _blackout:
+	if dark and not _blackout and _now - _blackout_announced_at > BLACKOUT_ANNOUNCE_WINDOW:
 		queue.say_first(&"blackout_first", &"blackout", _now)
 	_blackout = dark
 	# Árbitro cerca (flanco de subida).
@@ -136,6 +140,17 @@ func _poll(delta: float) -> void:
 			queue.say(&"clock_rival_20", _now)
 	_prev_clock[me] = mine
 	_prev_clock[rival] = theirs
+
+
+## El evento de apagón avisa ANTES de apagar las luces: la frase sale de inmediato. Solo si la
+## partida del humano está en juego. Devuelve si se pidió la frase.
+func announce_blackout() -> bool:
+	if not _playing():
+		return false
+	if not queue.say_first(&"blackout_first", &"blackout", _now):
+		return false
+	_blackout_announced_at = _now
+	return true
 
 
 # --- Señales del servidor ------------------------------------------------------------------------

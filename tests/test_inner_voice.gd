@@ -271,3 +271,25 @@ func test_play_only_lines_drop_when_match_ends() -> void:
 	var l := q.next(0.0)
 	check_eq(l.text, "That was the last one.", "queda la que no depende de la partida")
 	check(q.next(10.0).is_empty(), "la de partida se descartó")
+
+
+func test_blackout_lines_are_high_and_cut_a_mid_line() -> void:
+	check_eq(VoiceLines.LINES[&"blackout_first"].prio, VoiceLines.HIGH, "la primera es alta")
+	check_eq(VoiceLines.LINES[&"blackout"].prio, VoiceLines.HIGH, "las siguientes, también")
+	var q := _queue()
+	q.say(&"cheat_seen", 0.0)
+	q.next(0.0)
+	q.say_first(&"blackout_first", &"blackout", 0.5)
+	check_eq(q.next(0.5).id, &"blackout_first", "sale de inmediato aunque otra esté sonando")
+
+
+func test_blackout_lines_speak_before_the_dark() -> void:
+	# Dichas antes del apagón: nada de "dark again", las luces aún no se han ido.
+	for id in [&"blackout_first", &"blackout"]:
+		for t in VoiceLines.LINES[id].texts:
+			check(not t.to_lower().contains("dark again"), "texto compatible con 'antes': " + t)
+	check(VoiceLines.LINES[&"blackout"].get("play", false), "solo con la partida en juego")
+
+
+func test_blackout_lead_is_short() -> void:
+	check(EventModule.BLACKOUT_LEAD >= 1.0 and EventModule.BLACKOUT_LEAD <= 2.5, "adelanto breve")

@@ -18,6 +18,9 @@ extends Node
 ## Referencia de "detrás del jugador" para el árbitro (él elige el pasillo de su espalda).
 const ARBITER_BEHIND := Vector3(0.0, 0.0, 0.45)
 
+## Segundos entre que el jugador dice la frase del apagón y que las luces empiezan a apagarse.
+const BLACKOUT_LEAD := 1.5
+
 const DEMO_IDS := {
 	"apagon": &"apagon", "ruido": &"ruido_detras", "acusacion": &"acusacion_ajena",
 	"arbitro": &"arbitro_pasa",
@@ -114,14 +117,13 @@ func _on_event(id: StringName, origin: Vector3, duration: float) -> void:
 		print("[evento %.1f] %s en %s (%.1f s)" % [_time, id, origin, duration])
 	match id:
 		&"apagon":
-			stage.blackout(duration)
-			stage.play_sound(&"bulb_pop", Vector3(0.0, 2.0, 0.0), 4.0)
-			notice_pos = Vector3(0.0, 1.95, 0.0)
+			_start_blackout(duration)
+			return
 		&"ruido_detras":
 			stage.fall_behind(origin)
 		&"acusacion_ajena":
 			stage.accuser(origin, duration, root.player.global_position)
-			root.hud.show_subtitle("Cheater!", 2.2)
+			root.hud.show_subtitle("Cheater!", 2.2, false)
 			notice_pos = origin + Vector3(0.0, 1.5, 0.0)
 		&"arbitro_pasa":
 			# El aviso lo da `ArbiterModule` cuando el árbitro llega de verdad cerca de la mesa.
@@ -130,6 +132,22 @@ func _on_event(id: StringName, origin: Vector3, duration: float) -> void:
 	# Solo los eventos con `turn_chance` hacen voltear (la banqueta, por ejemplo, no).
 	if def != null and def.turn_chance > 0.0 and def.distraction != &"":
 		on_distraction(def.distraction, notice_pos, _table_of(origin), def.turn_chance)
+
+
+## El apagón: primero el jugador dice su frase (monólogo interior) y, tras `BLACKOUT_LEAD` s,
+## se apagan las luces, suena la bombilla y se reparte la distracción.
+func _start_blackout(duration: float) -> void:
+	var voice := root.get_node_or_null("MonologoInterior") as InnerVoice
+	if voice != null:
+		voice.announce_blackout()
+	await get_tree().create_timer(BLACKOUT_LEAD).timeout
+	if not is_inside_tree() or stage == null or not is_instance_valid(stage):
+		return
+	stage.blackout(duration)
+	stage.play_sound(&"bulb_pop", Vector3(0.0, 2.0, 0.0), 4.0)
+	var def := director.get_def(&"apagon")
+	if def != null and def.turn_chance > 0.0 and def.distraction != &"":
+		on_distraction(def.distraction, Vector3(0.0, 1.95, 0.0), -1, def.turn_chance)
 
 
 ## Mesa del hall más cercana a `pos` (-1 si ninguna a menos de 1,5 m).
