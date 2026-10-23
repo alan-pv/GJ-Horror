@@ -37,18 +37,41 @@ func test_heat_colors_by_level() -> void:
 	check(r.r > 0.8 and r.g < 0.3 and r.b < 0.3, "nivel 2 rojo")
 	check(BoardView.heat_color(3).r < r.r, "nivel 3 rojo más oscuro")
 	check(BoardView.heat_color(4).r < BoardView.heat_color(3).r, "nivel 4 más oscuro todavía")
-	check(absf(g.a - 0.55) < 0.001, "opacidad nivel 0")
-	check(absf(o.a - 0.45) < 0.001, "opacidad nivel 1")
-	check(absf(r.a - 0.30) < 0.001, "opacidad nivel 2")
-	check(absf(BoardView.heat_color(3).a - 0.12) < 0.001, "opacidad nivel 3")
-	check(absf(BoardView.heat_color(4).a - 0.04) < 0.001, "opacidad nivel 4")
+	check(g.g > 0.9 and o.r > 0.9 and r.r > 0.9, "colores saturados")
+	check(o.g > 0.3 and o.g < 0.6 and o.b < 0.1, "el nivel 1 es naranja, no amarillo")
 	var prev := 1.0
 	for lv in 12:
 		var a := BoardView.heat_color(lv).a
-		check(a <= prev, "la opacidad nunca sube con el nivel")
+		check(a <= prev, "la opacidad base nunca sube con el nivel")
 		prev = a
 	check_eq(BoardView.heat_color(9), BoardView.heat_color(4), "los niveles altos usan el último")
 	check_eq(BoardView.heat_color(-3), BoardView.heat_color(0), "negativos como 0")
+
+
+func test_heat_alpha_falls_with_distance() -> void:
+	for lv in 4:
+		check_eq(BoardView.heat_alpha(lv, 0.0), BoardView.heat_color(lv).a, "a distancia 0 es la base")
+		var prev := 2.0
+		for d in 8:
+			var a := BoardView.heat_alpha(lv, float(d))
+			check(a < prev or d == 0 and a <= prev, "la opacidad baja con la distancia (nivel %d, d=%d)" % [lv, d])
+			prev = a
+	check(BoardView.heat_alpha(1, 1.0) > 0.4, "una trampa adyacente se ve bien")
+	check(BoardView.heat_alpha(1, 7.0) < 0.05, "una trampa lejana casi no se ve")
+	check(BoardView.heat_alpha(2, 4.0) < BoardView.heat_alpha(2, 1.0) * 0.25, "cae muy fuerte")
+	check(BoardView.heat_alpha(0, 7.0) > BoardView.heat_alpha(1, 7.0), "las legales caen más suave")
+
+
+func test_square_distance() -> void:
+	check_eq(BoardView.square_distance(0, 0), 0, "misma casilla")
+	check_eq(BoardView.square_distance(0, 63), 7, "esquina a esquina")
+	check_eq(BoardView.square_distance(ChessPiece.square_from_name("e2"), ChessPiece.square_from_name("g3")), 2, "distancia del rey")
+
+
+func test_pile_zone_above_cloth() -> void:
+	# El mantel de las mesas ricas sube 6 mm sobre la mesa: la zona de la pila debe quedar encima.
+	check(BoardView.PILE_ZONE_LIFT > 0.006 + 0.002, "la zona de la pila supera el mantel")
+	check(BoardView.HEAT_LIFT > 0.0, "los discos del tablero quedan sobre las casillas")
 
 
 func test_pile_zone_geometry() -> void:

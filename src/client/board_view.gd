@@ -33,16 +33,32 @@ const PILE_ZONE_Z := 0.25
 ## Margen extra (m) al apuntar con el rayo a la zona de la pila.
 const PILE_ZONE_MARGIN := 0.015
 
-## Colores del mapa de calor por nivel de sospecha (0 = jugada legal, 1 sutil, 2+ rojo cada vez
-## más oscuro) y su opacidad, que baja con el nivel para no ensuciar el tablero.
+## Colores del mapa de calor por nivel de sospecha (0 = jugada legal verde, 1 naranja, 2+ rojo
+## cada vez más hacia el carmesí), saturados y sin sombreado; la opacidad base baja un poco en
+## los niveles altos. La opacidad real además cae con la distancia (`heat_alpha`).
 const HEAT_COLORS := [
-	Color(0.25, 0.85, 0.35), Color(1.0, 0.58, 0.12), Color(0.96, 0.08, 0.08),
-	Color(0.76, 0.04, 0.10), Color(0.52, 0.0, 0.12),
+	Color(0.10, 1.0, 0.30), Color(1.0, 0.45, 0.0), Color(1.0, 0.06, 0.06),
+	Color(0.92, 0.0, 0.22), Color(0.72, 0.0, 0.42),
 ]
-const HEAT_ALPHAS := [0.55, 0.45, 0.30, 0.12, 0.04]
-## Rojo tenue de la zona de la pila.
-const PILE_ZONE_COLOR := Color(0.85, 0.12, 0.1, 0.22)
-const PILE_ZONE_HOVER_COLOR := Color(0.95, 0.2, 0.15, 0.42)
+const HEAT_ALPHAS := [0.95, 0.95, 0.95, 0.9, 0.85]
+## Caída de la opacidad con la distancia (en casillas) a la pieza tomada: a / (1 + k·d²).
+## Las trampas caen rápido (a 4 casillas ~ 6 %); las jugadas legales, más suave para que
+## una torre lejana siga mostrando sus destinos.
+const HEAT_FALLOFF_CHEAT := 1.0
+const HEAT_FALLOFF_LEGAL := 0.12
+## Por debajo de esta opacidad no se dibuja la marca.
+const HEAT_MIN_ALPHA := 0.06
+## Diámetro del disco como fracción de la casilla y comienzo de su borde suave.
+const HEAT_DISC_FRACTION := 0.72
+const HEAT_DISC_EDGE := 0.78
+## Alturas (sobre el tablero / la mesa) de las marcas. La zona de la pila se alza por encima
+## del mantel de las mesas de rondas superiores (que sube 6 mm sobre `TABLE_TOP`).
+const HEAT_LIFT := 0.0014
+const PILE_ZONE_LIFT := 0.0095
+const HEAT_SHADER := preload("res://assets/shaders/heat_disc.gdshader")
+## Color de la zona de la pila (rojo intenso) y con el rayo encima.
+const PILE_ZONE_COLOR := Color(1.0, 0.06, 0.06, 0.55)
+const PILE_ZONE_HOVER_COLOR := Color(1.0, 0.25, 0.2, 0.9)
 
 ## true cuando el humano juega con negras (el tablero se gira para tenerlas cerca).
 var flipped: bool = false
@@ -66,9 +82,9 @@ var _hover_marker: Node3D
 ## Casillas del mapa de calor (una por casilla, se crean al usarlas) y anillos de captura.
 var _heat_tiles: Dictionary = {}
 var _capture_rings: Array[MeshInstance3D] = []
-## Zona de la pila de capturas propia (rectángulo en la mesa) y su material.
+## Zona de la pila de capturas propia (elipse en la mesa) y su material.
 var _pile_zone: MeshInstance3D
-var _pile_zone_mat: StandardMaterial3D
+var _pile_zone_mat: ShaderMaterial
 var _holds: int = 0
 var _pending_sync: BoardState = null
 var _motion_busy: bool = false
@@ -167,6 +183,18 @@ static func heat_color(level: int) -> Color:
 	var c: Color = HEAT_COLORS[i]
 	c.a = HEAT_ALPHAS[i]
 	return c
+
+
+## Opacidad de la marca de un destino de nivel `level` a `dist` casillas (Chebyshev) de la pieza
+## tomada: la base del nivel por 1 / (1 + k·d²). Función pura; decrece con la distancia.
+static func heat_alpha(level: int, dist: float) -> float:
+	var k := HEAT_FALLOFF_LEGAL if level <= 0 else HEAT_FALLOFF_CHEAT
+	return heat_color(level).a / (1.0 + k * dist * dist)
+
+
+## Distancia en casillas (la del rey) entre dos casillas 0-63.
+static func square_distance(a: int, b: int) -> int:
+	return maxi(absi(a % 8 - b % 8), absi(a / 8 - b / 8))
 
 
 ## Posición global del hueco `index` de la pila de capturas hecha por `by_color`.
@@ -347,16 +375,21 @@ func set_heatmap(selected: int, levels: Dictionary, captures: Array = []) -> voi
 		var sq := int(key)
 		if sq < 0 or sq > 63:
 			continue
+		var lv := int(levels[key])
+		var col := heat_color(lv)
+		col.a = heat_alpha(lv, float(square_distance(selected, sq))) if selected >= 0 else col.a
+		if col.a < HEAT_MIN_ALPHA:
+			continue
 		var tile := _heat_tile(sq)
-		(tile.material_override as StandardMaterial3D).albedo_color = heat_color(int(levels[key]))
-		tile.global_position = square_to_world(sq) + Vector3(0, 0.0012, 0)
+		(tile.material_override as ShaderMaterial).set_shader_parameter("color", col)
+		tile.global_position = square_to_world(sq) + Vector3(0, HEAT_LIFT, 0)
 		tile.visible = true
 	for i in captures.size():
 		var ring := _capture_ring(i)
 		ring.global_position = square_to_world(int(captures[i])) + Vector3(0, 0.0018, 0)
 		ring.visible = true
 	if levels.has(CheatRules.TO_PILE):
-		_pile_zone_mat.albedo_color = PILE_ZONE_COLOR
+		_pile_zone_mat.set_shader_parameter("color", PILE_ZONE_COLOR)
 		_pile_zone.visible = true
 
 
@@ -378,21 +411,32 @@ func set_hover(sq: int) -> void:
 ## Resalta la zona de la pila (el rayo del jugador apunta a ella) si está iluminada.
 func set_pile_hover(on: bool) -> void:
 	if _pile_zone.visible:
-		_pile_zone_mat.albedo_color = PILE_ZONE_HOVER_COLOR if on else PILE_ZONE_COLOR
+		_pile_zone_mat.set_shader_parameter("color", PILE_ZONE_HOVER_COLOR if on else PILE_ZONE_COLOR)
 
 
 func _heat_tile(sq: int) -> MeshInstance3D:
 	var t: MeshInstance3D = _heat_tiles.get(sq)
 	if t == null:
 		t = MeshInstance3D.new()
-		var bm := BoxMesh.new()
-		bm.size = Vector3(SQUARE * 0.98, 0.0008, SQUARE * 0.98)
-		t.mesh = bm
-		t.material_override = _flat_material(Color.WHITE)
+		var pm := PlaneMesh.new()
+		pm.size = Vector2.ONE * SQUARE * HEAT_DISC_FRACTION
+		t.mesh = pm
+		t.material_override = _disc_material(Color.WHITE)
+		t.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		t.visible = false
 		_hl_root.add_child(t)
 		_heat_tiles[sq] = t
 	return t
+
+
+## Material del disco del mapa de calor (sin luz, borde suave).
+func _disc_material(c: Color) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = HEAT_SHADER
+	m.set_shader_parameter("color", c)
+	m.set_shader_parameter("edge_start", HEAT_DISC_EDGE)
+	m.render_priority = 1
+	return m
 
 
 func _capture_ring(i: int) -> MeshInstance3D:
@@ -474,14 +518,15 @@ func _build_highlights() -> void:
 	add_child(_hl_root)
 	_sel_marker = _outline(Color(1.0, 0.88, 0.3, 0.95), 0.0035)
 	_hover_marker = _outline(Color(1.0, 1.0, 1.0, 0.8), 0.0022)
-	# Zona de la pila propia: rectángulo plano sobre la mesa (oculto hasta que se roba).
+	# Zona de la pila propia: elipse plana sobre la mesa (oculto hasta que se roba).
 	_pile_zone = MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = Vector3(PILE_ZONE_SIZE.x, 0.0008, PILE_ZONE_SIZE.y)
-	_pile_zone.mesh = bm
-	_pile_zone_mat = _flat_material(PILE_ZONE_COLOR)
+	var pm := PlaneMesh.new()
+	pm.size = PILE_ZONE_SIZE
+	_pile_zone.mesh = pm
+	_pile_zone_mat = _disc_material(PILE_ZONE_COLOR)
 	_pile_zone.material_override = _pile_zone_mat
-	_pile_zone.position = pile_zone_center(near_color) + Vector3(0, 0.0012, 0)
+	_pile_zone.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_pile_zone.position = pile_zone_center(near_color) + Vector3(0, PILE_ZONE_LIFT, 0)
 	_pile_zone.visible = false
 	_hl_root.add_child(_pile_zone)
 
