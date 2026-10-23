@@ -91,7 +91,7 @@ func test_player_look_is_deterministic_per_id() -> void:
 func test_hold_final_pose_is_instant_and_held() -> void:
 	var f := CharacterFigure.new()
 	f.setup(CharacterFigure.random_look(RandomNumberGenerator.new()))
-	check_eq(f.applied_look.size(), 7, "guarda el aspecto aplicado")
+	check_eq(f.applied_look.size(), 5, "guarda el aspecto aplicado")
 	f.hold_final_pose(&"death_slump_table")
 	check_eq(f.current(), &"death_slump_table")
 	check(f.is_finished(), "pose sostenida")

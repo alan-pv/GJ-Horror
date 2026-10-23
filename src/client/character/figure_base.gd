@@ -25,7 +25,7 @@ const MAX_PITCH := deg_to_rad(35.0)
 ## Hueso -> nombre del material que lleva `setup`.
 const LOOK_MATERIALS := {
 	"skin": "Skin", "shirt": "Shirt", "jacket": "Jacket",
-	"pants": "Pants", "shoes": "Shoes", "hair": "Hair", "eyes": "Eyes",
+	"pants": "Pants", "shoes": "Shoes", "eyes": "Eyes",
 }
 ## Posición aproximada entre los ojos / centro de la cabeza respecto al origen del hueso
 ## Head en reposo, en ejes del esqueleto (el modelo mira a +Z).
@@ -72,6 +72,7 @@ func _init() -> void:
 	_player = _find(_model, "AnimationPlayer") as AnimationPlayer
 	# La animación se evalúa antes que los modificadores del esqueleto.
 	_player.process_priority = -10
+	_remove_hair()
 	_discover_roles()
 	_mark_loops()
 	_own_materials(_model)
@@ -84,7 +85,6 @@ func _init() -> void:
 	var inv := _skeleton.get_bone_global_rest(head).basis.inverse()
 	_eye_local = inv * EYE_REST_OFFSET
 	_head_local = inv * HEAD_CENTER_REST_OFFSET
-	_show_only_hair("short")
 
 
 ## Tras animación y modificadores el esqueleto devuelve las poses sin modificar; se
@@ -106,7 +106,7 @@ func _process(delta: float) -> void:
 # --- Aspecto ----------------------------------------------------------------------
 
 ## Aplica un aspecto. Claves opcionales: `skin`, `shirt`, `jacket`, `pants`, `shoes`,
-## `hair`, `eyes` (Color) y `hair_style` ("short", "long", "bald"). Los materiales son propios de
+## `eyes` (Color). Los materiales son propios de
 ## esta instancia: no tiñe a las demás.
 func setup(look: Dictionary) -> void:
 	applied_look = look.duplicate()
@@ -115,17 +115,16 @@ func setup(look: Dictionary) -> void:
 			continue
 		for mat in _materials.get(LOOK_MATERIALS[key], []):
 			(mat as StandardMaterial3D).albedo_color = look[key]
-	if look.has("hair_style"):
-		_show_only_hair(String(look["hair_style"]))
 
 
-## Deja visible solo un peinado: "short", "long" o "bald".
-func _show_only_hair(style: String) -> void:
-	var wanted := "Hair_" + style.capitalize()
+## Nadie lleva pelo: los `.glb` traen las mallas `Hair_Short`, `Hair_Long` y `Hair_Bald`
+## y aquí se liberan al instanciar el modelo.
+func _remove_hair() -> void:
 	for n in ["Hair_Short", "Hair_Long", "Hair_Bald"]:
-		var node := _find_named(_model, n) as Node3D
+		var node := _find_named(_model, n)
 		if node != null:
-			node.visible = (n == wanted)
+			node.get_parent().remove_child(node)
+			node.free()
 
 
 ## Duplica los materiales de cada malla para poder teñirlos sin afectar otras instancias.

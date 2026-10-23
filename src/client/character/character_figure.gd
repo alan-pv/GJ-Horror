@@ -66,11 +66,6 @@ static func random_look(rng: RandomNumberGenerator) -> Dictionary:
 		Color(0.86, 0.84, 0.78), Color(0.80, 0.82, 0.84), Color(0.78, 0.72, 0.62),
 		Color(0.70, 0.76, 0.82), Color(0.90, 0.88, 0.84),
 	]
-	var hairs := [
-		Color(0.05, 0.04, 0.04), Color(0.16, 0.10, 0.07), Color(0.30, 0.20, 0.12),
-		Color(0.48, 0.36, 0.20), Color(0.55, 0.55, 0.55), Color(0.78, 0.76, 0.72),
-	]
-	var styles := ["short", "short", "long", "bald"]
 	var suit: Color = suits[rng.randi() % suits.size()]
 	return {
 		"skin": skins[rng.randi() % skins.size()],
@@ -78,22 +73,17 @@ static func random_look(rng: RandomNumberGenerator) -> Dictionary:
 		"jacket": suit,
 		"pants": suit.darkened(rng.randf_range(0.0, 0.12)),
 		"shoes": Color(0.08, 0.06, 0.05).lerp(Color(0.2, 0.12, 0.07), rng.randf()),
-		"hair": hairs[rng.randi() % hairs.size()],
-		"hair_style": styles[rng.randi() % styles.size()],
 	}
 
 
 ## Aspecto de un bot: maniquí gris sin rasgos. Conserva la ropa de `base` (si viene vacío,
-## la saca de `random_look(rng)`); la piel, el cabello y los ojos son del mismo gris mate y el
-## peinado es "bald". Los ojos son una caja con material `Eyes` dentro de la malla del cuerpo,
+## la saca de `random_look(rng)`); la piel y los ojos son del mismo gris mate. Los ojos son una caja con material `Eyes` dentro de la malla del cuerpo,
 ## así que se pintan del color de la piel; la nariz y las orejas son geometría de `Skin` y
 ## quedan como relieve sutil. El cuerpo del humano y el árbitro NO usan esto.
 static func bot_look(rng: RandomNumberGenerator, base: Dictionary = {}) -> Dictionary:
 	var look: Dictionary = base.duplicate() if not base.is_empty() else random_look(rng)
 	look["skin"] = BOT_SKIN
-	look["hair"] = BOT_SKIN
 	look["eyes"] = BOT_SKIN
-	look["hair_style"] = "bald"
 	return look
 
 

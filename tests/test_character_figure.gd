@@ -34,7 +34,8 @@ func _albedo(f: FigureBase, mat_name: String) -> Color:
 func _visible_hair(f: FigureBase) -> Array:
 	var out := []
 	for n in ["Hair_Short", "Hair_Long", "Hair_Bald"]:
-		if f._find_named(f._model, n).visible:
+		var node := f._find_named(f._model, n) as Node3D
+		if node != null and node.visible:
 			out.append(n)
 	return out
 
@@ -101,14 +102,12 @@ func test_setup_recolors_only_this_instance() -> void:
 	var a := CharacterFigure.new()
 	var b := CharacterFigure.new()
 	var before := _albedo(b, "Shirt")
-	a.setup({"shirt": Color(1, 0, 0), "skin": Color(0, 1, 0), "hair_style": "long"})
+	a.setup({"shirt": Color(1, 0, 0), "skin": Color(0, 1, 0)})
 	check_eq(_albedo(a, "Shirt"), Color(1, 0, 0), "camisa de a")
 	check_eq(_albedo(a, "Skin"), Color(0, 1, 0), "piel de a")
 	check_eq(_albedo(b, "Shirt"), before, "b no cambia")
-	check_eq(_visible_hair(a), ["Hair_Long"], "un solo peinado")
-	check_eq(_visible_hair(b), ["Hair_Short"], "b: peinado por defecto")
-	a.setup({"hair_style": "bald"})
-	check_eq(_visible_hair(a), ["Hair_Bald"], "calvo")
+	check_eq(_visible_hair(a), [], "sin pelo")
+	check_eq(_visible_hair(b), [], "b: sin pelo")
 	# Una tercera instancia nueva tampoco hereda el rojo.
 	var c := CharacterFigure.new()
 	check_eq(_albedo(c, "Shirt"), before, "c limpia")
@@ -120,13 +119,11 @@ func test_setup_recolors_only_this_instance() -> void:
 func test_random_look() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 7
-	var seen := {}
 	for i in 30:
 		var look := CharacterFigure.random_look(rng)
-		for k in ["skin", "shirt", "jacket", "pants", "shoes", "hair", "hair_style"]:
+		for k in ["skin", "shirt", "jacket", "pants", "shoes"]:
 			check(look.has(k), "falta " + k)
-		seen[look["hair_style"]] = true
-	check(seen.size() >= 2, "varía el peinado")
+		check(not look.has("hair") and not look.has("hair_style"), "sin pelo")
 
 
 func test_bot_look_is_featureless_gray() -> void:
@@ -134,8 +131,7 @@ func test_bot_look_is_featureless_gray() -> void:
 	rng.seed = 3
 	var look := CharacterFigure.bot_look(rng)
 	check(look["skin"] == CharacterFigure.BOT_SKIN, "piel gris")
-	check(look["eyes"] == look["skin"] and look["hair"] == look["skin"], "ojos y cabello del color de la piel")
-	check(look["hair_style"] == "bald", "sin cabello")
+	check(look["eyes"] == look["skin"], "ojos del color de la piel")
 	var f := _spawn(CharacterFigure.new()) as CharacterFigure
 	f.setup(look)
 	for mat in f._materials.get("Eyes", []):
@@ -206,7 +202,7 @@ func test_arbiter_api() -> void:
 	check(not a.pistol().visible, "pistola oculta")
 	a.set_gun_visible(true)
 	check(a.pistol().visible, "pistola visible")
-	check_eq(_visible_hair(a), ["Hair_Short"], "pelo corto")
+	check_eq(_visible_hair(a), [], "sin pelo")
 	a.play(&"walk", 0.0)
 	a.set_walk_speed(ArbiterFigure.WALK_SPEED * 2.0)
 	check(absf(a.animation_player().speed_scale - 2.0) < 0.001, "walk al doble")
