@@ -21,8 +21,8 @@ const PANIC_CLOSE := "[/shake][/center]"
 const DIALOGUE_WIDTH := 0.8
 const DIALOGUE_MARGIN := 24.0
 ## Permanencia mínima tras escribir y por letra (la voz ya se oyó: hay que dar tiempo de leer).
-const HOLD_BASE := 1.2
-const HOLD_PER_CHAR := 0.03
+const HOLD_BASE := 0.9
+const HOLD_PER_CHAR := 0.022
 
 var _subtitle: DialogueBox
 var _arbiter: DialogueBox
@@ -30,6 +30,8 @@ var _warnings: Label
 var _hint: Label
 var _capture_prompt: Label
 var _crosshair: Control
+var _mouse_captured: bool = false
+var _input_locked: bool = false
 var _result_panel: ColorRect
 var _result_title: Label
 var _result_reason: Label
@@ -312,9 +314,24 @@ func set_hint(text: String) -> void:
 var show_capture_prompt: bool = true
 
 
+## Estado real del puntero (lo reevalúa `PlayerController` cada fotograma, así que no depende de que
+## llegue una señal en el momento justo). El punto de mira se ve con el ratón capturado y la entrada
+## libre; el aviso de "Click..." cuando se puede actuar pero el ratón no está capturado.
 func set_mouse_captured(captured: bool) -> void:
-	_crosshair.visible = captured
-	_capture_prompt.visible = show_capture_prompt and not captured and not _result_panel.visible
+	_mouse_captured = captured
+	_refresh_pointer()
+
+
+## La entrada del jugador está bloqueada (discurso, paseo, ejecución): ni mira ni aviso de clic.
+func set_input_locked(locked: bool) -> void:
+	_input_locked = locked
+	_refresh_pointer()
+
+
+func _refresh_pointer() -> void:
+	_crosshair.visible = _mouse_captured and not _input_locked
+	_capture_prompt.visible = show_capture_prompt and not _mouse_captured and not _input_locked \
+			and not _result_panel.visible
 
 
 func show_result(won: bool, reason: String) -> void:
@@ -329,11 +346,12 @@ func show_screen(title: String, body: String, footer: String = "", color: Color 
 	_result_reason.text = body
 	_result_restart.text = footer
 	_result_panel.visible = true
-	_capture_prompt.visible = false
+	_refresh_pointer()
 
 
 func hide_screen() -> void:
 	_result_panel.visible = false
+	_refresh_pointer()
 
 
 func is_screen_visible() -> bool:
@@ -352,7 +370,7 @@ func set_walk_mode(on: bool) -> void:
 		l.visible = not on
 	if on:
 		show_capture_prompt = false
-		_capture_prompt.visible = false
+		_refresh_pointer()
 
 
 ## Rótulo superpuesto del paseo entre rondas (aparece con un fundido y no tapa el salón).

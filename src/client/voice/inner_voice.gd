@@ -15,6 +15,10 @@ const CLOCK_MINE_2 := 10.0
 const CLOCK_RIVAL := 20.0
 ## Tras anunciar un apagón, el flanco de oscuridad no repite la frase durante este tiempo.
 const BLACKOUT_ANNOUNCE_WINDOW := 8.0
+## Mini tutorial de trampas: demora (s) de cada paso respecto al suceso que lo dispara.
+const TUT_PICK_DELAY := 0.5
+const TUT_EYES_DELAY := 4.0
+const TUT_COVER_DELAY := 5.0
 
 var root: GameRoot
 var queue := VoiceQueue.new()
@@ -55,6 +59,8 @@ func install(p_root: GameRoot) -> void:
 	s.move_made.connect(_on_move_made)
 	if root.arbiter != null:
 		root.arbiter.executed.connect(_on_executed)
+	if root.player != null and root.player.interaction != null:
+		root.player.interaction.piece_picked.connect(_on_piece_picked)
 	var intro := root.get_node_or_null("Discurso")
 	if intro != null and intro.has_signal("finished"):
 		intro.finished.connect(_on_intro_finished)
@@ -109,6 +115,7 @@ func _poll(delta: float) -> void:
 	var dark := s.is_blackout()
 	if dark and not _blackout and _now - _blackout_announced_at > BLACKOUT_ANNOUNCE_WINDOW:
 		queue.say_first(&"blackout_first", &"blackout", _now)
+		_tutorial(&"tut_cover", TUT_COVER_DELAY)
 	_blackout = dark
 	# Árbitro cerca (flanco de subida).
 	var near := s.is_arbiter_near()
@@ -122,6 +129,7 @@ func _poll(delta: float) -> void:
 	var active := not s.is_hand_busy(me)
 	if _watch.update(delta, active, s.is_looking(rival)):
 		queue.say_first(&"distracted_first", &"distracted", _now)
+		_tutorial(&"tut_eyes", TUT_EYES_DELAY)
 	# Empujón a hacer trampa.
 	if not _human_cheated:
 		if match_time >= NUDGE_HANDS_AT and _watch.is_distracted():
@@ -150,17 +158,43 @@ func announce_blackout() -> bool:
 	if not queue.say_first(&"blackout_first", &"blackout", _now):
 		return false
 	_blackout_announced_at = _now
+	_tutorial(&"tut_cover", TUT_COVER_DELAY)
 	return true
+
+
+## ¿Sigue vigente el mini tutorial? Solo hasta que el jugador hace su primera trampa del torneo.
+func _tutorial_on() -> bool:
+	return not _human_cheated and not VoiceQueue.tournament_done.has(&"cheat_first")
+
+
+## Pide un paso del tutorial si sigue vigente (cada uno se dice una vez por torneo).
+func _tutorial(id: StringName, delay: float) -> void:
+	if _tutorial_on() and _playing():
+		queue.say(id, _now, delay)
+
+
+## El jugador agarró una pieza: la primera vez se explica el mapa de calor; la primera de las rivales,
+## que también se pueden mover o llevar a su pila.
+func _on_piece_picked(rival_piece: bool) -> void:
+	if not _tutorial_on() or not _playing():
+		return
+	if rival_piece:
+		queue.say_first(&"tut_select", &"tut_rival_piece", _now, TUT_PICK_DELAY)
+	else:
+		queue.say(&"tut_select", _now, TUT_PICK_DELAY)
 
 
 # --- Señales del servidor ------------------------------------------------------------------------
 
 func _on_cheat_started(color: int, _id: StringName, _from: int, _to: int, _d: float) -> void:
 	if color == root.rival_color:
-		# Primera trampa del rival que el humano puede ver: le enseña que puede acusar (tecla A).
-		var s := root.server
-		if _playing() and VoiceRules.can_see_rival_cheat(s.is_looking(root.human_color), s.is_blackout()):
-			queue.say(&"rival_cheating", _now, 0.8)
+		# Primera trampa del rival del torneo: le recuerda que puede acusar (tecla A), la vea o no
+		# (variante 1: no miraba el tablero o había apagón). Si no llega a decirse porque la partida
+		# termina, `drop_play_only` la descarta sin marcarla y se reintenta en la siguiente trampa.
+		if _playing():
+			var s := root.server
+			var saw := VoiceRules.can_see_rival_cheat(s.is_looking(root.human_color), s.is_blackout())
+			queue.say(&"rival_cheating", _now, 0.8, [], 0 if saw else 1)
 		return
 	if color != root.human_color:
 		return

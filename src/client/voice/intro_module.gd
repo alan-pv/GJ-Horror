@@ -38,14 +38,14 @@ const BLOCKING_ARGS: Array[String] = [
 ]
 const SFX := "res://assets/audio/sfx/"
 ## Tiempos (s) de la coreografía.
-const PAN_SECONDS := 7.5          # paneo por el salón (completo)
+const PAN_SECONDS := 6.0          # paneo por el salón (completo)
 const PAN_SETTLE := 0.8           # pausa con la cámara ya en el árbitro a oscuras
 const TURN_SECONDS := 1.3         # giro al árbitro en la versión corta
 const SHORT_SETTLE := 0.6         # pausa tras el giro (corta)
-const LIGHT_ON_BEAT := 0.9        # tras encender el foco, antes de hablar
-const PHRASE_GAP := 0.35
+const LIGHT_ON_BEAT := 0.7        # tras encender el foco, antes de hablar
+const PHRASE_GAP := 0.2
 const LIGHT_OFF_BEAT := 0.8       # tras apagar el foco, antes de "Begin."
-const BEGIN_SECONDS := 1.5        # "Begin." en la oscuridad, antes de las pulsaciones
+const BEGIN_SECONDS := 1.2        # "Begin." en la oscuridad, antes de las pulsaciones
 const RETURN_SECONDS := 0.8       # la cámara vuelve al tablero durante la pulsación
 const PRESS_TIMEOUT := 3.5        # tope de espera al contacto con el reloj
 ## Sonidos del foco (dB).
@@ -84,7 +84,7 @@ static func should_play(args: Dictionary, round_no: int, is_final: bool, has_gam
 ## Permanencia (s) de una frase en pantalla DESPUÉS de escribirse (la escritura sigue a la voz y
 ## se suma aparte: `Hud.show_arbiter` devuelve la duración total). Debe dar tiempo de leerla.
 static func phrase_seconds(text: String) -> float:
-	return 1.4 + 0.035 * DialogueText.plain(text).length()
+	return 1.0 + 0.024 * DialogueText.plain(text).length()
 
 
 ## Para las pruebas: olvida que ya se dio el completo.

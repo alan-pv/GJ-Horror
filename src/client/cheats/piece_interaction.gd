@@ -9,6 +9,10 @@ extends RefCounted
 ## `PlayerController` le pasa los clics ya convertidos en destino (casilla 0-63, `TO_PILE`
 ## o -1 si no se apuntó a nada) y es el único que consume el clic.
 
+## El jugador agarró una pieza con un clic (no al refrescar el mapa). `rival_piece`: es del rival.
+## Lo escucha el monólogo interior para el mini tutorial de trampas.
+signal piece_picked(rival_piece: bool)
+
 const TO_PILE := CheatRules.TO_PILE
 
 var server: MatchServer
@@ -84,7 +88,10 @@ func click(target: int) -> String:
 			return "none"
 		# Casilla vacía que el servidor no admite: se pregunta para dar el motivo.
 		return _start_cheat(selected, target)
-	return "select" if select(target) else "none"
+	if not select(target):
+		return "none"
+	piece_picked.emit(ChessPiece.color_of(piece) != color)
+	return "select"
 
 
 ## Elige la pieza de `sq` y pide su mapa de calor. false si no se puede agarrar (vacía).

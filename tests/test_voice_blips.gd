@@ -20,6 +20,26 @@ func test_blip_count_follows_letters() -> void:
 	check(VoiceBlips.plan(P, "Dark again now").size() > VoiceBlips.plan(P, "Dark").size(), "más texto, más blips")
 
 
+func test_voice_lasts_the_whole_text() -> void:
+	# Un texto largo (dos filas de subtítulo) suena entero: ya no se corta a los pocos segundos.
+	var text := "If you see your opponent cheat, call me. If you are wrong, you will be warned."
+	for sp in [P, A]:
+		var n := 0
+		for ch in text:
+			if DialogueText.is_alnum(ch):
+				n += 1
+		check_eq(VoiceBlips.plan(sp, text).size(), n, "un blip por letra, sin cortar")
+		check(VoiceBlips.duration(sp, text) > 4.5, "pasa de los 4,5 s de antes")
+		check(absf(DialogueText.typing_seconds(sp, text) - VoiceBlips.duration(sp, text)) < 0.2, "voz = escritura")
+		check(VoiceBlips.build(sp, text).data.size() / 2 >= int(VoiceBlips.duration(sp, text) * VoiceBlips.RATE), "stream completo")
+
+
+func test_voices_are_brisk() -> void:
+	check(VoiceBlips.params(A).interval <= 0.06, "árbitro ágil")
+	check(VoiceBlips.params(P).interval <= 0.04, "jugador ágil")
+	check(VoiceBlips.params(A).length <= VoiceBlips.params(A).interval * 1.3, "blips que no se pisan")
+
+
 func test_duration_is_bounded() -> void:
 	var long_text := "Anyone caught cheating is eliminated. ".repeat(20)
 	check(VoiceBlips.duration(A, long_text) <= VoiceBlips.MAX_SECONDS + 0.01, "acotada")

@@ -99,7 +99,7 @@ func test_reveal_count() -> void:
 
 
 func test_reveal_tail_after_blip_cap() -> void:
-	var text := "word ".repeat(80)
+	var text := "word ".repeat(400)
 	var plan := VoiceBlips.plan(A, text)
 	check(plan.size() < text.replace(" ", "").length(), "el balbuceo se corta")
 	var t := DialogueText.reveal_times(plan, text)

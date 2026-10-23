@@ -11,10 +11,10 @@ extends RefCounted
 ##  - Las variantes se eligen al azar sin repetir la última.
 ##  - `mute()` calla todo un rato (p. ej. tras un aviso de la ayuda para principiantes).
 
-const GLOBAL_GAP := 6.0
+const GLOBAL_GAP := 5.0
 const LATE_LOW := 2.0
 ## Separación mínima entre las frases de una secuencia (si una tarda más en escribirse, espera a que termine).
-const SEQ_GAP := 3.0
+const SEQ_GAP := 2.0
 
 ## Ids ya dichos en el torneo en curso (sobrevive a la recarga de la escena).
 static var tournament_done: Dictionary = {}
@@ -37,7 +37,8 @@ static func reset_tournament() -> void:
 
 
 ## Pide la frase `id` para dentro de `delay` s. `fmt` rellena los `%s`. Devuelve si se aceptó.
-func say(id: StringName, now: float, delay: float = 0.0, fmt: Array = []) -> bool:
+## `variant` >= 0 fuerza esa variante de `texts` (en vez de una al azar; no vale con `seq`).
+func say(id: StringName, now: float, delay: float = 0.0, fmt: Array = [], variant: int = -1) -> bool:
 	var def: Dictionary = VoiceLines.LINES.get(id, {})
 	if def.is_empty() or is_done(id) or is_pending(id):
 		return false
@@ -55,6 +56,8 @@ func say(id: StringName, now: float, delay: float = 0.0, fmt: Array = []) -> boo
 	if def.get("seq", false):
 		entry.text = texts[0]
 		entry.rest = texts.slice(1)
+	elif variant >= 0:
+		entry.text = texts[mini(variant, texts.size() - 1)]
 	else:
 		entry.text = _pick(id, texts)
 	_pending.append(entry)

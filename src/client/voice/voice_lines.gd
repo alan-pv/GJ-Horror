@@ -65,14 +65,35 @@ const LINES := {
 	&"nudge_fair": {"play": true, "prio": MID, "once": "tournament", "texts": ["Playing fair won't get me out of here."]},
 	# --- Árbitro cerca -----------------------------------------------------------------------------
 	&"arbiter_near": {"play": true, 
-		"prio": MID, "wait": 45.0,
+		"prio": MID, "once": "tournament",
 		"texts": ["Footsteps. Keep your hands where he can see them."],
 	},
-	&"arbiter_cheating": {"play": true, "prio": HIGH, "wait": 10.0, "texts": ["Not now. Not now."]},
+	&"arbiter_cheating": {"play": true, "prio": HIGH, "wait": 40.0, "texts": ["Not now. Not now."]},
 	# --- Trampa del rival: enseña que se puede acusar (una vez por torneo, solo con la partida en juego) -----
+	# Variante 0: lo vio; variante 1: no miraba el tablero o había apagón (`InnerVoice` elige).
 	&"rival_cheating": {
 		"play": true, "prio": HIGH, "once": "tournament",
-		"texts": ["He's cheating... I can accuse him. [color=#ffd070][lb]A[rb][/color]"],
+		"texts": [
+			"He's cheating... I can accuse him. [color=#ffd070][lb]A[rb][/color]",
+			"Something moved on the board... If he's cheating, I can accuse him. [color=#ffd070][lb]A[rb][/color]",
+		],
+	},
+	# --- Mini tutorial de trampas (una vez por torneo, hasta que el jugador haga su primera trampa) ----------
+	&"tut_select": {
+		"play": true, "prio": MID, "once": "tournament", "seq": true,
+		"texts": ["Green squares are legal moves.", "Orange and red ones are cheats. The redder, the riskier."],
+	},
+	&"tut_rival_piece": {
+		"play": true, "prio": MID, "once": "tournament", "seq": true,
+		"texts": ["I can move his pieces too.", "Or take one and keep it in my pile."],
+	},
+	&"tut_eyes": {
+		"play": true, "prio": MID, "once": "tournament", "seq": true,
+		"texts": ["A cheat only works if nobody sees it.", "Not him. Not the arbiter."],
+	},
+	&"tut_cover": {
+		"play": true, "prio": MID, "once": "tournament",
+		"texts": ["Darkness and noise pull every eye away. That's when I move."],
 	},
 	# --- Trampas del humano --------------------------------------------------------------------------
 	&"cheat_first": {"play": true, "prio": MID, "once": "tournament", "texts": ["My hand is shaking."]},

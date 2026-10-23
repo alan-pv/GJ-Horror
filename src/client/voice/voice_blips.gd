@@ -13,8 +13,9 @@ extends RefCounted
 enum Speaker { PLAYER, ARBITER, ACCUSER }
 
 const RATE := 22050
-## Tope del balbuceo: un texto largo no hace sonar más que esto.
-const MAX_SECONDS := 4.5
+## Tope de seguridad del balbuceo. La voz dura lo que la escritura de cada trozo (un trozo cabe en
+## dos filas, unos 10 s como mucho), así que en la práctica no se alcanza.
+const MAX_SECONDS := 30.0
 ## Cuántos balbuceos distintos se guardan (por texto y hablante); al llenarse se vacía.
 const CACHE_LIMIT := 64
 ## Niveles de cuantización (el "bit crush" que da el sabor 8 bits).
@@ -33,11 +34,11 @@ static func params(speaker: Speaker) -> Dictionary:
 		}
 	if speaker == Speaker.ARBITER:
 		return {
-			"base": 92.0, "interval": 0.085, "length": 0.085, "volume_db": -4.0,
+			"base": 92.0, "interval": 0.055, "length": 0.07, "volume_db": -4.0,
 			"scale": [0, -2, 3, -5, 1, -7, 5], "echo_delay": 0.11, "echo_gain": 0.3,
 		}
 	return {
-		"base": 560.0, "interval": 0.055, "length": 0.045, "volume_db": -10.0,
+		"base": 560.0, "interval": 0.04, "length": 0.036, "volume_db": -10.0,
 		"scale": [0, 2, 4, 7, 9, 12], "echo_delay": 0.0, "echo_gain": 0.0,
 	}
 
@@ -52,7 +53,7 @@ static func volume_db(speaker: Speaker) -> float:
 
 
 ## Instantes y tonos de los blips para `text`: `[{t, freq}]`. Una letra o cifra = un blip; el
-## espacio añade una pausa corta y la puntuación una más larga. Se corta en `MAX_SECONDS`.
+## espacio añade una pausa corta y la puntuación una más larga. Solo se corta en `MAX_SECONDS`.
 static func plan(speaker: Speaker, text: String) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var p := params(speaker)

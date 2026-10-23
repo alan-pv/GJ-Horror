@@ -365,9 +365,25 @@ func _process(delta: float) -> void:
 		elif _captured and _lock_seen:
 			_captured = false
 			mouse_capture_changed.emit(false)
+		_sync_pointer_hud()
 	# Si ya no se puede actuar (mano ocupada, acusación, fin), se suelta la pieza.
 	if interaction.selected >= 0 and not interaction.can_act():
 		interaction.deselect()
+
+
+## Pasa al HUD el estado REAL del puntero cada fotograma (`Input.mouse_mode` y el bloqueo de entrada).
+## Antes el punto de mira dependía de que `mouse_capture_changed` llegara en el momento justo, y se
+## perdía cuando la escena arrancaba con el ratón ya capturado (recarga al empezar una ronda) o al
+## terminar el discurso. Si el ratón ya estaba capturado sin que este nodo lo pidiera, se adopta.
+func _sync_pointer_hud() -> void:
+	var real := is_mouse_captured()
+	if real and not _captured:
+		_captured = true
+		_lock_seen = true
+		mouse_capture_changed.emit(true)
+	if hud != null:
+		hud.set_mouse_captured(real)
+		hud.set_input_locked(input_locked)
 
 
 ## Casilla bajo el centro de la pantalla (o -1).
