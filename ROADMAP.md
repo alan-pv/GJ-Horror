@@ -36,6 +36,7 @@ Pedidos del 2026-10-21.
 
 - [ ] **Repo público el día que se publique el juego** en itch.io (AGPL de Maia-3).
 - [ ] Exportación web real (plantillas de Godot) y prueba de Maia-3 en navegador.
+- [ ] Ratón en web: probar el nuevo bloqueo de puntero con ratón real en Chrome (con `unadjustedMovement`), Firefox (¿hace falta `?look_scale=`?) y Safari, y el reintento tras `Esc` (Chrome espera ~1 s).
 - [ ] Rendimiento: IK lejano con menos frecuencia, medir 16 mesas visibles en una máquina modesta.
 - [ ] Audio ambiente (relojes, piezas, murmullos que disminuyen al vaciarse el salón).
 - [ ] Tutorial corto (mover, mirar, hacer trampa, acusar).

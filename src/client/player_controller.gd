@@ -24,44 +24,108 @@ const MOUSE_SENSITIVITY := 0.0022
 ## Un evento de ratón que salta más que esto (píxeles de pantalla) se descarta: en web,
 ## el bloqueo de puntero a veces entrega un salto falso al capturar o al cambiar de ventana.
 const MOUSE_SPIKE_PX := 400.0
+## Filtro de picos (web, por evento): un evento mayor que `SPIKE_SOFT_PX` que además supera
+## `SPIKE_RATIO` veces el tamaño reciente (media móvil, con suelo `SPIKE_FLOOR`) es un salto aislado
+## (los de los foros de Godot en Firefox/Chrome) y se descarta; un giro rápido real crece por pasos.
+const SPIKE_SOFT_PX := 150.0
+const SPIKE_RATIO := 30.0
+const SPIKE_FLOOR := 2.0
+const SPIKE_AVG := 0.25
 ## Constante de tiempo (s) del suavizado del giro: reparte los saltos de píxel entero del
 ## ratón entre fotogramas para que la cámara no avance a escalones con sensibilidad alta.
 const LOOK_SMOOTH := 0.025
-## En web es mayor: Chrome en Linux no da movimiento crudo y entrega pasos de píxel entero, que
-## con sensibilidad alta se ven como saltos de la cámara si no se reparten en más fotogramas.
-const LOOK_SMOOTH_WEB := 0.06
-## Web: acumula `movementX/Y` crudos del navegador mientras hay bloqueo de puntero. Godot los
-## escala por lienzo/recuadro CSS, y con el modo "fullscreen" de itch.io (lienzo redimensionado
-## dentro de la página) esa proporción se dispara y la cámara se clava en un tope.
+## En web no se suaviza (0 = se aplica directo): el retraso de 60 ms que tenía hacía flotar la cámara,
+## y los pasos de píxel entero de Chrome en Linux (0,0022 rad, ~1,5 px de pantalla) no se notan.
+const LOOK_SMOOTH_WEB := 0.0
+## Web: ratón en el navegador. Este módulo (una sola vez por página) hace tres cosas:
+## 1. Pide el bloqueo de puntero SINCRÓNICAMENTE en el `mousedown`/`mouseup` del lienzo cuando el juego
+##    lo quiere (`__look.want`), que es cuando el navegador concede el bloqueo fuera de pantalla
+##    completa (exige un gesto de usuario). Las peticiones de Godot (`canvas.requestPointerLock()` desde
+##    su bucle principal, sin gesto) se desvían a la misma función. Pide `unadjustedMovement` (crudo, sin
+##    aceleración del sistema) solo si el navegador lo admite; el resultado se recuerda.
+## 2. Si el navegador deniega el bloqueo (`pointerlockerror`: iframe sin permiso, ~1 s tras Esc en Chrome,
+##    sin gesto), pasa a modo "libre": la cámara sigue usando `movementX/Y` mientras el ratón está sobre
+##    el lienzo (el cursor sigue oculto) y se reintenta el bloqueo en cada clic.
+## 3. Acumula los `movementX/Y` crudos (píxeles CSS, independientes del tamaño del lienzo y del
+##    estiramiento de Godot, que con el "fullscreen" de itch.io disparaba la proporción) en una lista de
+##    eventos que `_process` recoge una vez por fotograma. Descarta lo que supere el tope por evento y los
+##    60 ms posteriores a un cambio de bloqueo (salto falso al capturar).
+## Escala de Firefox: si en una prueba real el giro sale distinto que en Chrome, `?look_scale=<k>` en la
+## URL multiplica el movimiento (p. ej. 0.5 si Firefox da píxeles físicos con dpr 2); sin detección
+## automática porque no se pudo probar en Firefox.
 const WEB_MOUSE_JS := """
-if (!window.__lookAcc) {
-	window.__lookAcc = [0, 0];
-	window.__lookRaw = 'pending';
-	document.addEventListener('mousemove', function (e) {
-		if (!document.pointerLockElement) return;
-		if (Math.abs(e.movementX) + Math.abs(e.movementY) > %d) return;
-		window.__lookAcc[0] += e.movementX;
-		window.__lookAcc[1] += e.movementY;
-	}, {capture: true, passive: true});
-	// Movimiento crudo (sin aceleración ni escala del sistema): sin él Chrome entrega pasos de
-	// píxel entero ya reducidos y la cámara va lenta y a escalones. Si no se soporta, el normal.
-	var plain = Element.prototype.requestPointerLock;
-	Element.prototype.requestPointerLock = function (opts) {
-		var el = this;
+if (!window.__look) {
+	var L = window.__look = {buf: [], want: false, locked: false, denied: false, unadj: null, mode: 'none',
+		err: '', errors: 0, events: 0, dropped: 0, pending: false, yaw: 0, pitch: 0, gmode: 0, scale: 1,
+		grace: 0, requests: 0, lastRequest: ''};
+	try { var u = localStorage.getItem('look_unadj'); if (u === '0') L.unadj = false; if (u === '1') L.unadj = true; } catch (e) {}
+	try { var q = parseFloat(new URLSearchParams(location.search).get('look_scale')); if (q > 0) L.scale = q; } catch (e) {}
+	var nativeLock = Element.prototype.requestPointerLock;
+	var save = function () { try { localStorage.setItem('look_unadj', L.unadj ? '1' : '0'); } catch (e) {} };
+	var cv = function () { return document.querySelector('canvas'); };
+	var fail = function (e) { L.err = (e && e.name) ? e.name : String(e); };
+	L.request = function (el) {
+		el = el || cv();
+		if (!el || document.pointerLockElement === el || L.pending) return undefined;
+		L.requests++;
+		var raw = L.unadj !== false;
+		L.lastRequest = raw ? 'raw' : 'plain';
 		var p;
-		try { p = plain.call(el, {unadjustedMovement: true}); } catch (err) { p = null; }
-		if (p && p.then) {
-			return p.then(function () { window.__lookRaw = 'raw'; }, function () {
-				window.__lookRaw = 'plain';
-				return plain.call(el, opts);
-			});
-		}
-		window.__lookRaw = 'plain';
-		return p === null ? plain.call(el, opts) : p;
+		try { p = raw ? nativeLock.call(el, {unadjustedMovement: true}) : nativeLock.call(el); } catch (e) { fail(e); return undefined; }
+		if (!p || !p.then) { if (raw) { L.unadj = false; } return p; }  // Firefox: sin promesa ni opciones
+		L.pending = true;
+		return p.then(function () {
+			L.pending = false;
+			if (raw && L.unadj !== true) { L.unadj = true; save(); }
+		}, function (e) {
+			L.pending = false;
+			fail(e);
+			if (!raw) return;
+			// El crudo falló (no soportado, o Chrome en Linux): se repite el normal sin perder el gesto
+			// (la activación del usuario dura ~5 s) y se recuerda cuál funcionó.
+			var again;
+			try { again = nativeLock.call(el); } catch (e2) { fail(e2); return; }
+			if (again && again.then) {
+				L.pending = true;
+				again.then(function () { L.pending = false; L.unadj = false; save(); },
+					function (e3) { L.pending = false; fail(e3); });
+			}
+		});
 	};
+	// Las peticiones de Godot pasan por aquí (una sola decisión sobre las opciones).
+	Element.prototype.requestPointerLock = function () { return L.request(this); };
+	var onGesture = function (e) {
+		if (L.want && !document.pointerLockElement && e.target && e.target.tagName === 'CANVAS') L.request(e.target);
+	};
+	document.addEventListener('mousedown', onGesture, true);
+	document.addEventListener('mouseup', onGesture, true);
+	document.addEventListener('pointerlockchange', function () {
+		L.locked = !!document.pointerLockElement;
+		L.grace = performance.now() + 60;
+		if (L.locked) { L.denied = false; L.err = ''; }
+	}, true);
+	document.addEventListener('pointerlockerror', function () {
+		L.errors++;
+		if (!L.err) L.err = 'pointerlockerror';
+		if (L.want) L.denied = true;
+	}, true);
+	window.addEventListener('focus', function () { L.grace = performance.now() + 60; }, true);
+	document.addEventListener('mousemove', function (e) {
+		var free = L.want && !L.locked && L.denied && e.target && e.target.tagName === 'CANVAS';
+		if (!L.locked && !free) return;
+		if (performance.now() < L.grace) { L.dropped++; return; }
+		var dx = e.movementX * L.scale, dy = e.movementY * L.scale;
+		if (Math.abs(dx) + Math.abs(dy) > __SPIKE__) { L.dropped++; return; }
+		L.events++;
+		L.buf.push(dx, dy);
+		if (L.buf.length > 4000) L.buf.splice(0, 2000);
+	}, {capture: true, passive: true});
 }
 """
-const WEB_MOUSE_TAKE := "(function(){var a=window.__lookAcc;var r=a[0]+','+a[1];a[0]=0;a[1]=0;return r;})()"
+## Recoge lo acumulado: "bloqueo,libre,dx,dy,dx,dy,...". Recibe yaw/pitch/modo de Godot para el diagnóstico.
+const WEB_MOUSE_TAKE := ("(function(){var L=window.__look;L.yaw=%f;L.pitch=%f;L.gmode=%d;var b=L.buf;L.buf=[];"
+		+ "var f=L.want&&!L.locked&&L.denied;L.mode=L.locked?(L.unadj===true?'raw':'plain'):(f?'free':'none');"
+		+ "return (L.locked?1:0)+','+(f?1:0)+(b.length?','+b.join(','):'');})()")
 const YAW_LIMIT := deg_to_rad(120.0)
 const PITCH_MIN := deg_to_rad(-80.0)
 const PITCH_MAX := deg_to_rad(55.0)
@@ -113,6 +177,12 @@ var _debug_timer: float = 0.0
 ## Giro del ratón (rad) aún por aplicar; `_process` lo consume con el suavizado.
 var _pending_look: Vector2 = Vector2.ZERO
 var _web_mouse: bool = false
+## Web: el navegador denegó el bloqueo y la cámara sigue con el ratón sin bloquear (modo "libre").
+var _web_free: bool = false
+## Web: ¿bloqueo de puntero concedido ahora mismo? (lo informa el módulo JS en cada fotograma).
+var _web_locked: bool = false
+## Tamaño reciente de los eventos de ratón (media móvil) para el filtro de picos.
+var _recent_len: float = 0.0
 
 
 func setup(p_server: MatchServer, p_board: BoardView, p_color: int, look: Dictionary = {}) -> void:
@@ -124,7 +194,7 @@ func setup(p_server: MatchServer, p_board: BoardView, p_color: int, look: Dictio
 	_headless = DisplayServer.get_name() == "headless"
 	if not _headless and OS.has_feature("web"):
 		_web_mouse = true
-		JavaScriptBridge.eval(WEB_MOUSE_JS % int(MOUSE_SPIKE_PX), true)
+		JavaScriptBridge.eval(WEB_MOUSE_JS.replace("__SPIKE__", str(int(MOUSE_SPIKE_PX))), true)
 	_head = Node3D.new()
 	_head.name = "Cabeza"
 	add_child(_head)
@@ -206,8 +276,13 @@ func _apply_debug_camera() -> void:
 	debug_camera = true
 
 
+## ¿El juego tiene el ratón? En web también cuenta el modo libre (bloqueo denegado, cámara con el
+## ratón sobre el lienzo): así el aviso de captura desaparece y los clics juegan, y se reintenta el
+## bloqueo en cada clic (lo hace el módulo JS dentro del gesto).
 func is_mouse_captured() -> bool:
-	return not _headless and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	if _headless:
+		return false
+	return Input.mouse_mode == Input.MOUSE_MODE_CAPTURED or (_web_free and _captured)
 
 
 func set_look(p_yaw: float, p_pitch: float) -> void:
@@ -292,8 +367,36 @@ static func look_delta(screen_relative: Vector2, sensitivity: float) -> Vector2:
 
 
 ## Parte del giro pendiente que se aplica en un fotograma de `delta` segundos.
+## Con `tau <= 0` no hay suavizado: se aplica todo.
 static func smooth_take(pending: Vector2, delta: float, tau: float = LOOK_SMOOTH) -> Vector2:
+	if tau <= 0.0:
+		return pending
 	return pending * (1.0 - exp(-delta / tau))
+
+
+## Filtra los eventos de ratón de un fotograma (lista plana dx,dy,dx,dy,... en píxeles CSS) y
+## devuelve `{sum: Vector2 (suma de los aceptados), recent: float (media móvil nueva), dropped: int}`.
+## Descarta el evento que supera `MOUSE_SPIKE_PX` o que, siendo mayor que `SPIKE_SOFT_PX`, es
+## `SPIKE_RATIO` veces mayor que lo reciente (salto aislado). Los descartados no actualizan la media.
+static func filter_events(flat: PackedFloat32Array, recent: float) -> Dictionary:
+	var sum := Vector2.ZERO
+	var dropped := 0
+	var i := 0
+	while i + 1 < flat.size():
+		var v := Vector2(flat[i], flat[i + 1])
+		i += 2
+		var n := v.length()
+		if n > MOUSE_SPIKE_PX or (n > SPIKE_SOFT_PX and n > SPIKE_RATIO * maxf(recent, SPIKE_FLOOR)):
+			dropped += 1
+			continue
+		sum += v
+		recent = lerpf(recent, n, SPIKE_AVG)
+	return {"sum": sum, "recent": recent, "dropped": dropped}
+
+
+## Giro (rad) de una suma de píxeles CSS ya filtrada: independiente del tamaño del lienzo y del dpr.
+static func scale_look(pixels: Vector2, sensitivity: float) -> Vector2:
+	return pixels * MOUSE_SENSITIVITY * sensitivity
 
 
 ## Texto del panel de diagnóstico (F3): FPS, estado del ratón y, en web, el lienzo.
@@ -302,18 +405,29 @@ func debug_text() -> String:
 			Engine.get_frames_per_second(), Input.mouse_mode, _captured, _lock_seen, yaw, pitch,
 			_sensitivity_scale()]
 	if _web_mouse:
-		t += "\n" + str(JavaScriptBridge.eval("(function(){var c=document.querySelector('canvas');"
-				+ "var r=c.getBoundingClientRect();return 'lock '+!!document.pointerLockElement+'  canvas '"
-				+ "+c.width+'x'+c.height+'  css '+Math.round(r.width)+'x'+Math.round(r.height)+'  dpr '"
-				+ "+devicePixelRatio+'  fullscreen '+!!document.fullscreenElement+'  input '+window.__lookRaw;})()", true))
+		t += "\n" + str(JavaScriptBridge.eval("(function(){var L=window.__look;var c=document.querySelector('canvas');"
+				+ "var r=c.getBoundingClientRect();return 'lock '+L.locked+' want '+L.want+' mode '+L.mode+'  free '+(L.want&&!L.locked&&L.denied)"
+				+ "+'\\nrequests '+L.requests+' ('+L.lastRequest+')  errors '+L.errors+'  err '+L.err+'  unadj '+L.unadj"
+				+ "+'\\nevents '+L.events+'  dropped '+L.dropped+'  scale '+L.scale"
+				+ "+'\\ncanvas '+c.width+'x'+c.height+'  css '+Math.round(r.width)+'x'+Math.round(r.height)+'  dpr '"
+				+ "+devicePixelRatio+'  fullscreen '+!!document.fullscreenElement;})()", true))
 	return t
 
 
 func _consume_look(delta: float) -> void:
 	if _web_mouse:
-		var raw: PackedStringArray = str(JavaScriptBridge.eval(WEB_MOUSE_TAKE, true)).split(",")
-		if raw.size() == 2 and is_mouse_captured():
-			_pending_look += look_delta(Vector2(raw[0].to_float(), raw[1].to_float()), _sensitivity_scale())
+		var q := WEB_MOUSE_TAKE % [yaw, pitch, int(Input.mouse_mode)]
+		var raw := str(JavaScriptBridge.eval(q, true)).split(",")
+		if raw.size() >= 2:
+			_web_locked = raw[0] == "1"
+			_web_free = raw[1] == "1"
+		if raw.size() > 2 and is_mouse_captured():
+			var flat := PackedFloat32Array()
+			for i in range(2, raw.size()):
+				flat.append(raw[i].to_float())
+			var f := filter_events(flat, _recent_len)
+			_recent_len = f["recent"]
+			_pending_look += scale_look(f["sum"], _sensitivity_scale())
 	if _pending_look == Vector2.ZERO:
 		return
 	if not is_mouse_captured() or (input_locked and not walking):
@@ -335,6 +449,13 @@ func _sensitivity_scale() -> float:
 func capture_mouse(on: bool) -> void:
 	if _headless:
 		return
+	if _web_mouse:
+		# Antes de tocar `Input.mouse_mode`: el módulo JS necesita saber qué quiere el juego, y la
+		# petición se hace ya (dentro de la activación del último clic) además de en cada gesto.
+		JavaScriptBridge.eval("window.__look.want=%s;%s" % ["true" if on else "false",
+				"window.__look.denied=false;window.__look.request();" if on else ""], true)
+		if not on:
+			_web_free = false
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if on else Input.MOUSE_MODE_VISIBLE
 	_captured = on
 	_lock_seen = false
@@ -360,7 +481,7 @@ func _process(delta: float) -> void:
 	if not _headless:
 		_update_hover()
 		# El navegador puede soltar el puntero sin avisar (Esc, perder el foco del iframe).
-		if _captured and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		if _captured and is_mouse_captured():
 			_lock_seen = true
 		elif _captured and _lock_seen:
 			_captured = false
