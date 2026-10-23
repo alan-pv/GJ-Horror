@@ -54,11 +54,13 @@ func test_delay_and_duration_in_range() -> void:
 		for i in 100:
 			var plan := Distraction.plan(k, 1.0, 1.0, r)
 			check(plan.delay >= 0.15 and plan.delay <= 0.45, "retardo 0,15-0,45: " + String(k))
-			check(plan.seconds >= spec.look.x and plan.seconds <= spec.look.y, "duración en rango: " + String(k))
+			check(plan.seconds >= spec.look.x * Distraction.LOOK_SCALE - 0.001 and plan.seconds <= spec.look.y * Distraction.LOOK_SCALE + 0.001, "duración en rango: " + String(k))
 	var shot := Distraction.look_seconds(&"gunshot", r)
-	check(shot >= 2.7 and shot <= 5.4, "disparo 2,7-5,4 s")
+	var k := Distraction.LOOK_SCALE
+	check_eq(k, 1.25, "las distracciones duran un 25 % más")
+	check(shot >= 2.7 * k - 0.001 and shot <= 5.4 * k + 0.001, "disparo 2,7-5,4 s por el factor")
 	var glance := Distraction.look_seconds(&"arbiter_pass", r)
-	check(glance >= 0.4 and glance <= 0.9, "de reojo 0,4-0,9 s")
+	check(glance >= 0.4 * k - 0.001 and glance <= 0.9 * k + 0.001, "de reojo 0,4-0,9 s por el factor")
 	check(Distraction.reaction_delay(&"gunshot", r) < Distraction.reaction_delay(&"flag", _rng(1)) + 0.07, "más fuerte, más rápido")
 
 

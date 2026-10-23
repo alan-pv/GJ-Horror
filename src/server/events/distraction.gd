@@ -18,7 +18,7 @@ const GROUP := &"distraction_listeners"
 ## tipo -> {
 ##   chance:   probabilidad base de voltear (antes del factor de personalidad),
 ##   strength: 0..1, lo fuerte que llama la atención (acorta el retardo de reacción),
-##   look:     segundos que mantiene la mirada en el origen (min, max),
+##   look:     segundos que mantiene la mirada en el origen (min, max; se multiplica por `LOOK_SCALE`),
 ##   glance:   true = de reojo (giro rápido y vuelta pronto),
 ##   startle:  probabilidad de que además se sobresalte (`sit_startle`),
 ##   radius:   metros desde el oyente a los que se percibe (0 = todo el salón),
@@ -34,6 +34,10 @@ const SPECS := {
 }
 
 const IGNORED: Array[StringName] = [&"dim_lamp", &"stool", &"door", &"player_noise"]
+
+## Factor sobre el tiempo que miran a otro lado (distracciones y vistazos espontáneos de los bots):
+## da más margen al jugador para hacer trampa. 1,0 = tiempos de la tabla `SPECS`.
+const LOOK_SCALE := 1.25
 
 ## Retardo de reacción (s): entre 0,15 (muy fuerte) y 0,45 (débil).
 const REACTION_MIN := 0.15
@@ -86,10 +90,10 @@ static func reaction_delay(kind: StringName, rng: RandomNumberGenerator) -> floa
 	return clampf(base + rng.randf_range(-0.07, 0.07), REACTION_MIN, REACTION_MAX)
 
 
-## Segundos que mantiene la mirada en el origen.
+## Segundos que mantiene la mirada en el origen (rango de la tabla por `LOOK_SCALE`).
 static func look_seconds(kind: StringName, rng: RandomNumberGenerator) -> float:
 	var r: Vector2 = spec(kind).get("look", Vector2(1.0, 3.0))
-	return rng.randf_range(r.x, r.y)
+	return rng.randf_range(r.x, r.y) * LOOK_SCALE
 
 
 ## Sorteo de la reacción de un oyente. `base_chance` < 0 usa la de la tabla. Devuelve

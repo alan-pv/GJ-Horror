@@ -76,7 +76,6 @@ var _lowpass: AudioEffectLowPassFilter
 var _bus: int = -1
 var _deaf_left: float = 0.0
 var _condemned: bool = false
-var _was_dark: bool = false
 var _watched_cheat: Variant = null
 var _last_material_check: float = 0.0
 var _material: float = 0.0
@@ -101,6 +100,7 @@ func install(p_root: GameRoot) -> void:
 	var server := root.server
 	if server != null:
 		server.move_made.connect(_on_move_made)
+		server.cheat_started.connect(_on_cheat_started)
 		server.accusation_started.connect(_on_accusation_started)
 		server.accusation_resolved.connect(_on_accusation_resolved)
 	root.match_started.connect(func(_s: MatchServer) -> void: _active = true)
@@ -139,6 +139,12 @@ func _on_move_made(color: int, _uci: String, info: Dictionary) -> void:
 			model.add_spike(StressModel.SPIKE_MAJOR_LOST)
 	if ChessRules.in_check(root.server.board, me):
 		model.add_spike(StressModel.SPIKE_CHECK)
+
+
+## Hacer trampa a oscuras es lo que estresa; que se vaya la luz, no.
+func _on_cheat_started(color: int, _cheat_id: StringName, _from: int, _to: int, _duration: float) -> void:
+	if color == root.human_color and root.server.is_blackout():
+		model.add_spike(StressModel.SPIKE_CHEAT_IN_BLACKOUT)
 
 
 func _on_accusation_started(accuser: int) -> void:
@@ -189,10 +195,6 @@ func _poll_state() -> void:
 		_watched_cheat = cheat
 		model.add_spike(StressModel.SPIKE_RIVAL_WATCHES)
 	model.set_sustained(&"arbiter", StressModel.SUSTAIN_ARBITER if server.is_arbiter_near() else 0.0)
-	var dark := server.is_blackout()
-	if dark and not _was_dark:
-		model.add_spike(StressModel.SPIKE_BLACKOUT)
-	_was_dark = dark
 	# Piso: reloj propio, torneo y material (el material, dos veces por segundo basta).
 	_last_material_check -= get_process_delta_time()
 	if _last_material_check <= 0.0:

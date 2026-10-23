@@ -42,8 +42,8 @@ const POSES_TURN := {&"sit_think": 6.0, &"sit_wait": 2.0}
 const POSES_WAIT := {&"sit_wait": 6.0, &"sit_think": 1.5, &"sit_write": 0.6}
 const POSE_DWELL := Vector2(5.0, 12.0)
 
-## Sonido ambiental de los relojes de fondo (bus SFX, atenuación cuadrática: casi inaudible a
-## 3 m y nada pasados ~9 m). Posición del reloj horneado por `Hall._build_table`.
+## Sonido ambiental de los relojes de fondo (bus SFX, atenuación cuadrática): un murmullo de
+## relojes de las mesas cercanas (~-8 dB a 3 m, ~-20 dB a 6 m; antes -24 y -36) por debajo del reloj propio. Posición del reloj horneado por `Hall._build_table`.
 const CLOCK_LOCAL := Vector3(0.47, BoardView.TABLE_TOP + 0.04, 0.0)
 const TICK_PATH := "res://assets/audio/sfx/clock_tick.wav"
 const TOCK_PATH := "res://assets/audio/sfx/clock_tock.wav"
@@ -52,9 +52,9 @@ const PLACE_PATHS: Array[String] = [
 	"res://assets/audio/sfx/piece_place_1.wav", "res://assets/audio/sfx/piece_place_2.wav",
 	"res://assets/audio/sfx/piece_place_3.wav",
 ]
-const TICK_VOLUME_DB := -12.0
-const TICK_UNIT_SIZE := 1.5
-const TICK_MAX_DISTANCE := 9.0
+const TICK_VOLUME_DB := -5.0
+const TICK_UNIT_SIZE := 2.5
+const TICK_MAX_DISTANCE := 12.0
 const TICK_PITCH_JITTER := 0.05
 const PRESS_VOLUME_DB := -10.0
 const PLACE_VOLUME_DB := -16.0
@@ -85,6 +85,8 @@ var _game_over: bool = false
 ## Tic-tac: fase aleatoria por mesa, último segundo sonado y reproductores (se crean al primer uso).
 var _tick_phase: float = 0.0
 var _tick_last: int = -1
+## `--verbose`: imprime cuándo suena el tic-tac de la mesa y a qué distancia.
+var _verbose_audio: bool = OS.get_cmdline_user_args().has("--verbose") or OS.get_cmdline_user_args().has("--autoplay")
 var _tick_players: Array[AudioStreamPlayer3D] = [null, null, null]  # tic-tac, pulsación, pieza
 var _start_pressed: bool = false
 static var _sounds: Dictionary = {}
@@ -205,6 +207,16 @@ func _update_ticking() -> void:
 	p.stream = _stream(TOCK_PATH if idx % 2 != 0 else TICK_PATH)
 	p.pitch_scale = 1.0 + _rng.randf_range(-TICK_PITCH_JITTER, TICK_PITCH_JITTER)
 	p.play()
+	if _verbose_audio and idx % 5 == 0:
+		var d := _cam_pos.distance_to(pos)
+		print("[reloj mesa %d] %s a %.1f m, volumen efectivo ~%.1f dB" % [table_index, "toc" if idx % 2 != 0 else "tic", d, tick_effective_db(d)])
+
+
+## Volumen aproximado (dB, respecto al clip) del tic-tac a `dist` m: volumen base más la
+## atenuación cuadrática de Godot (`(dist / unit_size)^2`, sin ganar por encima de 0 dB).
+static func tick_effective_db(dist: float) -> float:
+	var ratio := maxf(dist / TICK_UNIT_SIZE, 1.0)
+	return TICK_VOLUME_DB - 40.0 * log(ratio) / log(10.0)
 
 
 ## True mientras el reloj de esta mesa corre: partida empezada y sin terminar, con alguien vivo sentado.

@@ -75,6 +75,16 @@ func test_beginner_warning_then_allowed() -> void:
 	check(r.ok, "segundo intento permitido")
 
 
+func test_beginner_warning_once_per_turn() -> void:
+	var m := _make("rnbqkbnr/ppp2ppp/4p3/3p4/3P4/8/PPPQPPPP/RNB1KBNR w KQkq - 0 3", true)
+	m.board.squares[ChessPiece.square_from_name("d2")] = ChessPiece.NONE
+	m.board.squares[ChessPiece.square_from_name("d3")] = ChessPiece.make(ChessPiece.WHITE, ChessPiece.QUEEN)
+	check(not m.submit_move(ChessPiece.WHITE, "d3h7").ok, "primer intento avisa")
+	# Otra jugada distinta en el mismo turno: ya no hay aviso, aunque también fuera mala.
+	var r := m.submit_move(ChessPiece.WHITE, "d3c4")
+	check(r.ok and r.warning == "", "segunda jugada del turno sin aviso: " + str(r))
+
+
 func test_beginner_help_off_with_low_clock() -> void:
 	var fen := "rnbqkbnr/ppp2ppp/4p3/3p4/3P4/8/PPPQPPPP/RNB1KBNR w KQkq - 0 3"
 	var m := _make(fen, true)

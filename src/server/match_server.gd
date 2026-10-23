@@ -69,7 +69,8 @@ var _last_false_accusation: PackedFloat64Array = [0.0, 0.0]
 var _active_cheat: Array = [null, null]
 var _pending_accusation: Dictionary = {}
 var _position_counts: Dictionary = {}
-var _warned: Dictionary = {}
+## Jugada (`ply`) en la que ya se avisó a un principiante: un aviso como máximo por turno.
+var _warned_ply: int = -1
 var _cheats_by_id: Dictionary = {}
 var _cheats_by_kind: Dictionary = {}
 var _rng := RandomNumberGenerator.new()
@@ -199,12 +200,11 @@ func submit_move(color: int, uci: String) -> Dictionary:
 		return {"ok": false, "reason": "illegal move", "warning": ""}
 
 	if beginner_help_active(color):
-		var key := board.position_key() + "|" + move.uci()
-		if not _warned.has(key):
+		# Una sola oportunidad por turno: tras el primer aviso, cualquier jugada se permite.
+		if _warned_ply != ply:
 			var text := BeginnerHelper.check_move(board, move, config.blunder_threshold_cp)
 			if text != "":
-				# Primer intento: se bloquea. Si insiste con la misma jugada, se permite.
-				_warned[key] = true
+				_warned_ply = ply
 				beginner_warning.emit(color, move.uci(), text)
 				return {"ok": false, "reason": "warning", "warning": text}
 

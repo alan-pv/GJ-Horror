@@ -122,3 +122,12 @@ func test_heart() -> void:
 	check(StressModel.heart_pulse(0.32) > 0.5, "segundo golpe")
 	check(StressModel.heart_pulse(0.7) < 0.01, "silencio entre latidos")
 	check(absf(StressModel.heart_pulse(1.04) - StressModel.heart_pulse(0.04)) < 0.0001, "periódico")
+
+
+func test_blackout_alone_gives_no_spike_but_cheating_in_it_does() -> void:
+	check(StressModel.SPIKE_CHEAT_IN_BLACKOUT > 0.0 and StressModel.SPIKE_CHEAT_IN_BLACKOUT < StressModel.SPIKE_SHOT_TABLE, "pico moderado")
+	var m := _model()
+	m.step(1.0)
+	check_eq(m.value, 0.0, "sin trampa, el apagón no sube el estrés")
+	m.add_spike(StressModel.SPIKE_CHEAT_IN_BLACKOUT)
+	check(absf(m.value - StressModel.SPIKE_CHEAT_IN_BLACKOUT) < 0.001, "la trampa a oscuras sí")

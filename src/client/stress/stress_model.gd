@@ -27,7 +27,8 @@ const SPIKE_SHOT_NEAR := 0.35
 const SPIKE_SHOT_FAR := 0.15
 const SPIKE_FALSE_ACCUSE := 0.3
 const SPIKE_RIVAL_WATCHES := 0.25
-const SPIKE_BLACKOUT := 0.2
+## El humano empieza una trampa durante el apagón (el apagón por sí solo no estresa).
+const SPIKE_CHEAT_IN_BLACKOUT := 0.25
 const SPIKE_OTHER_DRAMA := 0.1
 const SPIKE_MAJOR_LOST := 0.1
 const SPIKE_CHECK := 0.08

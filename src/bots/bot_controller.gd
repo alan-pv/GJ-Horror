@@ -148,7 +148,7 @@ func _update_attention() -> void:
 	if _rng.randf() < rate * get_process_delta_time():
 		var side := -1.0 if _rng.randf() < 0.5 else 1.0
 		var point := eye_position + Vector3(side * _rng.randf_range(2.0, 6.0), _rng.randf_range(-0.3, 0.8), _rng.randf_range(-4.0, 3.0))
-		_look_at_point(point, _rng.randf_range(personality.look_away_seconds.x, personality.look_away_seconds.y))
+		_look_at_point(point, _rng.randf_range(personality.look_away_seconds.x, personality.look_away_seconds.y) * Distraction.LOOK_SCALE)
 
 
 func _set_angles_from_dir(dir: Vector3) -> void:
