@@ -474,6 +474,7 @@ Otros valores por defecto de `BotPersonality`: `look_away_seconds` = (2, 4,5) s 
 ### 4.16 Menús, HUD e idioma
 
 - Lo que ve u oye el jugador está en inglés (servidor, cliente y `data/*.tres`); comentarios y docs en español.
+- Todo el texto usa IM Fell Double Pica SC (`assets/fonts/IMFellDoublePicaSC.ttf`): los `Control` por el ajuste global `gui/theme/custom_font` de `project.godot` y los `Label3D` (cartel de mesa en `hall.gd`, planillas en `scoresheet_view.gd`) con `UiTheme.font()`, porque no heredan ese ajuste.
 - Autoloads (`autoloads/`, adaptados de tic-tac-toe; los scripts que también corren en pruebas `--script` los piden por ruta, `/root/...`):
   - `GameSettings`: `GAME_TITLE` ("Checkmate", provisional), `MENU_SCENE` / `GAME_SCENE`, sensibilidad del ratón (0,25 a 5,0; en Settings 25 %–500 %) y pantalla completa (no en web, `fullscreen_supported()`), en `user://settings.cfg`; señal `changed`.
   - `SceneSwitcher`: `go_to(escena)` con transición de iris centrada en el cursor (0,5 s al cerrar y 0,5 s al abrir; carga la escena en segundo plano), `set_next_origin`, `quit_game()` y las señales `transition_started` / `transition_finished`. Despausa el árbol al cambiar.

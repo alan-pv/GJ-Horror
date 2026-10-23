@@ -680,6 +680,7 @@ func _add_number_card(root: Node3D, index: int, tier: int) -> void:
 	var num := Label3D.new()
 	num.name = "Numero"
 	num.text = str(HallLayout.number_of(index))
+	num.font = UiTheme.font()
 	num.font_size = 128
 	num.pixel_size = 0.00055
 	num.modulate = ink
@@ -690,6 +691,7 @@ func _add_number_card(root: Node3D, index: int, tier: int) -> void:
 	var cap := Label3D.new()
 	cap.name = "Rotulo"
 	cap.text = "TABLE"
+	cap.font = UiTheme.font()
 	cap.font_size = 40
 	cap.pixel_size = 0.00055
 	cap.modulate = ink

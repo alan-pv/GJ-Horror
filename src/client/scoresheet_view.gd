@@ -57,6 +57,7 @@ func _build_sheet(color: int) -> Dictionary:
 	for i in ROWS * COLUMNS:
 		var l := Label3D.new()
 		l.name = "Linea_%d" % i
+		l.font = UiTheme.font()
 		l.font_size = 40
 		l.pixel_size = 0.00040
 		l.shaded = false
