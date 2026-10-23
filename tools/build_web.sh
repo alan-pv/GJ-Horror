@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Exporta el juego a Web (HTML5) en build/web/ y copia el puente de Maia-3, el modelo y onnxruntime-web (todo local, sin CDN).
 # Uso: GODOT=/ruta/a/godot tools/build_web.sh
-# Requiere las plantillas de exportacion de Godot 4.6 (preset "Web", sin hilos).
+# Requiere las plantillas de exportacion de Godot 4.7.2 (preset "Web", sin hilos).
 set -euo pipefail
 
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GODOT="${GODOT:-godot}"
 SALIDA="$RAIZ/build/web"
-VERSION="4.6.stable"
+VERSION="4.7.2.stable"
 
 if ! command -v "$GODOT" >/dev/null 2>&1 && [ ! -x "$GODOT" ]; then
 	echo "No encuentro Godot. Define GODOT=/ruta/al/ejecutable" >&2
@@ -20,8 +20,8 @@ if [ ! -f "$PLANTILLAS/web_nothreads_release.zip" ] && [ ! -f "$PLANTILLAS/web_n
 	cat >&2 <<MSG
 Faltan las plantillas de exportacion de Godot $VERSION (~1 GB).
 Instalalas asi:
-  1. Descarga Godot_v${VERSION%%.*}.6-stable_export_templates.tpz desde
-     https://godotengine.org/download/archive/4.6-stable/
+  1. Descarga Godot_v4.7.2-stable_export_templates.tpz desde
+     https://github.com/godotengine/godot/releases/tag/4.7.2-stable
   2. En el editor: Proyecto > Exportar > Gestionar plantillas > Instalar desde archivo
      (o descomprime el .tpz y copia su carpeta 'templates' a:
       $PLANTILLAS)
