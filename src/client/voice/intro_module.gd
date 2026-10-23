@@ -19,15 +19,16 @@ extends Node
 ## Terminó el discurso (`full` = el completo). Lo escucha `InnerVoice`.
 signal finished(full: bool)
 
+## Las frases pueden llevar bbcode (efectos de `RichTextLabel`); la voz usa el texto plano.
 const FULL_LINES: Array[String] = [
-	"Good evening. Everyone in this room owes a debt they will never repay.",
+	"Good evening. Everyone in this room owes a debt they [tornado radius=2.0 freq=2.0]will never repay[/tornado].",
 	"The House has bought every one of those debts. Tonight, it offers you a way out.",
 	"You will play chess. Three minutes on your clock, two more seconds for every move.",
 	"Win, and you move on to the next round. Lose, and you are eliminated.",
 	"There are no draws here. A drawn game goes to Black.",
-	"Anyone caught cheating is eliminated.",
+	"Anyone caught cheating is [shake rate=20.0 level=6]eliminated[/shake].",
 	"If you see your opponent cheat, call me. If you are wrong, you will be warned. The third warning is an elimination.",
-	"The last player in this room walks out free of debt. And very rich.",
+	"The last player in this room walks out free of debt. And very [rainbow freq=0.4 sat=0.6 val=1.0]rich[/rainbow].",
 ]
 const SHORT_LINES: Array[String] = ["Another night. The same rules."]
 const SKIP_LINE := "Begin."
@@ -80,9 +81,10 @@ static func should_play(args: Dictionary, round_no: int, is_final: bool, has_gam
 	return round_no == 1 and not is_final
 
 
-## Duración (s) que se deja una frase en pantalla.
+## Permanencia (s) de una frase en pantalla DESPUÉS de escribirse (la escritura sigue a la voz y
+## se suma aparte: `Hud.show_arbiter` devuelve la duración total). Debe dar tiempo de leerla.
 static func phrase_seconds(text: String) -> float:
-	return 1.6 + 0.055 * text.length()
+	return 1.4 + 0.035 * DialogueText.plain(text).length()
 
 
 ## Para las pruebas: olvida que ya se dio el completo.
@@ -161,8 +163,8 @@ func _run() -> void:
 		if _skip or not _alive():
 			break
 		_log(line)
-		root.hud.show_arbiter(line, phrase_seconds(line))
-		await _wait(phrase_seconds(line) + PHRASE_GAP)
+		var shown: float = root.hud.show_arbiter(line, phrase_seconds(line))
+		await _wait(shown + PHRASE_GAP)
 	if not _alive():
 		return
 	# Atajo (o fin normal): a partir de aquí no se interrumpe.
@@ -179,7 +181,7 @@ func _run() -> void:
 		return
 	# f. "Begin." en la oscuridad.
 	_log("fase f: Begin.")
-	root.hud.show_arbiter(SKIP_LINE, BEGIN_SECONDS + 0.6)
+	root.hud.show_arbiter(SKIP_LINE, BEGIN_SECONDS)
 	await _wait(BEGIN_SECONDS)
 	if not _alive():
 		return

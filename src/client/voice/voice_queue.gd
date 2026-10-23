@@ -13,7 +13,7 @@ extends RefCounted
 
 const GLOBAL_GAP := 6.0
 const LATE_LOW := 2.0
-## Separación entre las frases de una secuencia.
+## Separación mínima entre las frases de una secuencia (si una tarda más en escribirse, espera a que termine).
 const SEQ_GAP := 3.0
 
 ## Ids ya dichos en el torneo en curso (sobrevive a la recarga de la escena).
@@ -135,22 +135,23 @@ func next(now: float) -> Dictionary:
 	if not e.fmt.is_empty():
 		text = text % e.fmt
 	var seconds := duration_of(text)
+	var typing := DialogueText.typing_seconds(VoiceBlips.Speaker.PLAYER, DialogueText.plain(text))
 	_last_at = now
-	_speaking_until = now + seconds
+	_speaking_until = now + typing + seconds
 	_speaking_prio = e.prio
 	_group_last[e.group] = now
 	_mark_done(e.id)
 	if not e.rest.is_empty():
 		_pending.append({
-			"id": e.id, "group": e.group, "prio": e.prio, "ready_at": now + SEQ_GAP,
+			"id": e.id, "group": e.group, "prio": e.prio, "ready_at": now + maxf(SEQ_GAP, typing + seconds),
 			"bypass": true, "fmt": e.fmt, "text": e.rest[0], "rest": e.rest.slice(1),
 		})
 	return {"id": e.id, "text": text, "prio": e.prio, "seconds": seconds}
 
 
-## Segundos que se deja un subtítulo en pantalla.
+## Segundos que permanece un subtítulo en pantalla DESPUÉS de escribirse (el texto puede llevar bbcode).
 static func duration_of(text: String) -> float:
-	return 1.5 + 0.05 * text.length()
+	return Hud.hold_for(DialogueText.plain(text).length())
 
 
 func _allowed(e: Dictionary, now: float) -> bool:

@@ -1,13 +1,31 @@
 class_name Hud
 extends CanvasLayer
 ## Interfaz mínima: subtítulo (murmullos del personaje), veredicto del árbitro,
-## contador de advertencias, pista de controles, pantalla de resultado y una
-## viñeta oscura sobre toda la imagen.
+## contador de advertencias, pantalla de resultado y una viñeta oscura sobre toda la imagen.
+## Los controles se muestran en los menús (`ControlsHelp`), no aquí.
+##
+## Los diálogos (`show_subtitle`, `show_arbiter`) son `DialogueBox`: bbcode con efectos de Godot,
+## máquina de escribir al ritmo de la voz 8 bits y dos filas como máximo (si no cabe, trozos).
+## Estilo: el árbitro con una ola lenta y sutil; el jugador con una ola suave y, en las frases de
+## pánico (prioridad alta del monólogo), con temblor. Los textos pueden llevar bbcode propio.
 
 const TEXT_COLOR := Color(0.93, 0.89, 0.80)
+## Efectos por defecto de cada tipo de diálogo (envuelven cada trozo; `[center]` centra).
+const ARBITER_OPEN := "[center][wave amp=7.0 freq=1.4]"
+const ARBITER_CLOSE := "[/wave][/center]"
+const CALM_OPEN := "[center][wave amp=4.0 freq=1.0]"
+const CALM_CLOSE := "[/wave][/center]"
+const PANIC_OPEN := "[center][shake rate=22.0 level=4]"
+const PANIC_CLOSE := "[/shake][/center]"
+## Fracción del ancho de la ventana que ocupan los diálogos (anclas 0,1 a 0,9) y margen de seguridad.
+const DIALOGUE_WIDTH := 0.8
+const DIALOGUE_MARGIN := 24.0
+## Permanencia mínima tras escribir y por letra (la voz ya se oyó: hay que dar tiempo de leer).
+const HOLD_BASE := 1.2
+const HOLD_PER_CHAR := 0.03
 
-var _subtitle: Label
-var _arbiter: Label
+var _subtitle: DialogueBox
+var _arbiter: DialogueBox
 var _warnings: Label
 var _hint: Label
 var _capture_prompt: Label
@@ -22,8 +40,6 @@ var _banner: Label
 var _banner_sub: Label
 var _banner_hint: Label
 var _banner_tween: Tween
-var _subtitle_tween: Tween
-var _arbiter_tween: Tween
 var _debug: Label
 ## Un reproductor de voz 8 bits por hablante (`VoiceBlips.Speaker`): la voz nueva corta la anterior.
 var _voices: Dictionary = {}
@@ -35,22 +51,16 @@ var debug_visible: bool = false
 func _ready() -> void:
 	layer = 10
 	_build_vignette()
-	_subtitle = _label(26, TEXT_COLOR)
-	_subtitle.anchor_left = 0.1
-	_subtitle.anchor_right = 0.9
+	# Subtítulo: pegado abajo (crece hacia arriba); árbitro: desde el 14 % de la altura (crece hacia abajo).
+	_subtitle = _dialogue(26, TEXT_COLOR, VoiceBlips.Speaker.PLAYER)
 	_subtitle.anchor_top = 1.0
 	_subtitle.anchor_bottom = 1.0
-	_subtitle.offset_top = -110
+	_subtitle.offset_top = -60
 	_subtitle.offset_bottom = -60
-	_subtitle.modulate.a = 0.0
-	_arbiter = _label(30, Color(1.0, 0.82, 0.45))
-	_arbiter.anchor_left = 0.1
-	_arbiter.anchor_right = 0.9
+	_subtitle.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_arbiter = _dialogue(30, Color(1.0, 0.82, 0.45), VoiceBlips.Speaker.ARBITER)
 	_arbiter.anchor_top = 0.14
 	_arbiter.anchor_bottom = 0.14
-	_arbiter.offset_top = 0
-	_arbiter.offset_bottom = 50
-	_arbiter.modulate.a = 0.0
 	_warnings = _label(18, TEXT_COLOR)
 	_warnings.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_warnings.position = Vector2(20, 14)
@@ -59,7 +69,7 @@ func _ready() -> void:
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_hint.position = Vector2(20, 40)
 	_hint.size = Vector2(700, 24)
-	_hint.text = "Click: pick up any piece · A: accuse · X: abort · Esc: pause"
+	_hint.text = ""
 	# Punto de mira: círculo claro con borde oscuro, visible sobre cualquier fondo.
 	_crosshair = Control.new()
 	_crosshair.anchor_left = 0.5
@@ -119,6 +129,37 @@ func _label(size: int, color: Color) -> Label:
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(l)
 	return l
+
+
+## Diálogo con su voz: `chunk_started` hace sonar el balbuceo de cada trozo.
+func _dialogue(size: int, color: Color, who: VoiceBlips.Speaker) -> DialogueBox:
+	var d := DialogueBox.new()
+	d.speaker = who
+	d.add_theme_font_size_override("normal_font_size", size)
+	d.add_theme_font_size_override("bold_font_size", size)
+	d.add_theme_color_override("default_color", color)
+	d.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	d.add_theme_constant_override("outline_size", 6)
+	d.anchor_left = (1.0 - DIALOGUE_WIDTH) / 2.0
+	d.anchor_right = 1.0 - (1.0 - DIALOGUE_WIDTH) / 2.0
+	d.offset_left = 0
+	d.offset_right = 0
+	d.modulate.a = 0.0
+	d.chunk_started.connect(func(plain: String) -> void: speak(who, plain))
+	add_child(d)
+	return d
+
+
+## Ancho (px) del que dispone el texto de un diálogo en la ventana actual.
+func _dialogue_width() -> float:
+	var vp := get_viewport()
+	var w := vp.get_visible_rect().size.x if vp != null else 1280.0
+	return maxf(200.0, w * DIALOGUE_WIDTH - DIALOGUE_MARGIN)
+
+
+## Permanencia (s) tras escribir un texto de `plain_length` letras.
+static func hold_for(plain_length: int) -> float:
+	return HOLD_BASE + HOLD_PER_CHAR * plain_length
 
 
 func _build_vignette() -> void:
@@ -210,34 +251,29 @@ func _build_result_panel() -> void:
 	box.add_child(_result_restart)
 
 
-## Murmullo del personaje, p. ej. "...no, eso deja la dama colgada". Con `voice` suena el
-## balbuceo 8 bits del jugador; los textos que no son habla (resultados, avisos) pasan `false`.
-func show_subtitle(text: String, seconds: float = 3.5, voice: bool = true) -> void:
-	_subtitle.text = text
-	if _subtitle_tween != null and _subtitle_tween.is_valid():
-		_subtitle_tween.kill()
-	_subtitle.modulate.a = 1.0
-	_subtitle_tween = create_tween()
-	_subtitle_tween.tween_interval(seconds)
-	_subtitle_tween.tween_property(_subtitle, "modulate:a", 0.0, 0.6)
-	if voice:
-		speak(VoiceBlips.Speaker.PLAYER, text)
+## Murmullo del personaje, p. ej. "...no, eso deja la dama colgada". `text` puede llevar bbcode.
+## Se escribe letra a letra con el balbuceo 8 bits del jugador (`voice`; los textos que no son
+## habla, como resultados o avisos, pasan `false` y se escriben en silencio) y permanece `seconds`
+## después de escribirse. `panic` lo hace temblar en vez de ondular. Devuelve la duración total (s).
+func show_subtitle(text: String, seconds: float = 3.5, voice: bool = true, panic: bool = false) -> float:
+	_subtitle.voice = voice
+	_subtitle.available_width = _dialogue_width()
+	if panic:
+		return _subtitle.say(text, seconds, PANIC_OPEN, PANIC_CLOSE)
+	return _subtitle.say(text, seconds, CALM_OPEN, CALM_CLOSE)
 
 
-## Mensajes del árbitro ("viene a la mesa...", veredicto), con su voz grave 8 bits.
-func show_arbiter(text: String, seconds: float = 3.0, voice: bool = true) -> void:
-	_arbiter.text = text
-	if _arbiter_tween != null and _arbiter_tween.is_valid():
-		_arbiter_tween.kill()
-	_arbiter.modulate.a = 1.0
-	_arbiter_tween = create_tween()
-	_arbiter_tween.tween_interval(seconds)
-	_arbiter_tween.tween_property(_arbiter, "modulate:a", 0.0, 0.6)
-	if voice:
-		speak(VoiceBlips.Speaker.ARBITER, text)
+## Mensajes del árbitro ("viene a la mesa...", veredicto, discurso), con su voz grave 8 bits y una
+## ola lenta. Igual que `show_subtitle`: `seconds` cuenta desde que termina de escribirse. Devuelve
+## la duración total (s), incluidos los trozos si el texto no cabe en dos filas.
+func show_arbiter(text: String, seconds: float = 3.0, voice: bool = true) -> float:
+	_arbiter.voice = voice
+	_arbiter.available_width = _dialogue_width()
+	return _arbiter.say(text, seconds, ARBITER_OPEN, ARBITER_CLOSE)
 
 
 ## Hace sonar el balbuceo de `text` con la voz de `speaker`, cortando la que ese hablante tuviera.
+## `text` es el texto plano (sin bbcode).
 func speak(speaker: VoiceBlips.Speaker, text: String) -> void:
 	var player: AudioStreamPlayer = _voices.get(speaker)
 	if player == null:

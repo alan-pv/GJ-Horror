@@ -89,8 +89,8 @@ func _process(delta: float) -> void:
 	var line := queue.next(_now)
 	if not line.is_empty() and root.hud != null:
 		if root.get_args().has("verbose"):
-			print("[voz %.1f] %s" % [_now, line.text])
-		root.hud.show_subtitle(line.text, line.seconds)
+			print("[voz %.1f] %s" % [_now, DialogueText.plain(line.text)])
+		root.hud.show_subtitle(line.text, line.seconds, true, line.prio == VoiceLines.HIGH)
 
 
 ## ¿La partida del humano sigue en juego?
@@ -156,6 +156,12 @@ func announce_blackout() -> bool:
 # --- Señales del servidor ------------------------------------------------------------------------
 
 func _on_cheat_started(color: int, _id: StringName, _from: int, _to: int, _d: float) -> void:
+	if color == root.rival_color:
+		# Primera trampa del rival que el humano puede ver: le enseña que puede acusar (tecla A).
+		var s := root.server
+		if _playing() and VoiceRules.can_see_rival_cheat(s.is_looking(root.human_color), s.is_blackout()):
+			queue.say(&"rival_cheating", _now, 0.8)
+		return
 	if color != root.human_color:
 		return
 	_human_cheated = true

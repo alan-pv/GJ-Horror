@@ -28,6 +28,11 @@ static func crossed(prev: float, cur: float, threshold: float) -> bool:
 	return prev > threshold and cur <= threshold
 
 
+## ¿Puede el humano ver una trampa del rival? Hace falta que mire el tablero y que haya luz.
+static func can_see_rival_cheat(human_looking: bool, blackout: bool) -> bool:
+	return human_looking and not blackout
+
+
 static func count_queens(b: BoardState, color: int) -> int:
 	var q := ChessPiece.make(color, ChessPiece.QUEEN)
 	var n := 0

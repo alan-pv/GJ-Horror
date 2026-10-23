@@ -31,6 +31,7 @@ func _ready() -> void:
 	col.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	col.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.add_theme_constant_override("separation", 14)
+	col.offset_bottom = -150   # la franja de abajo es de los controles
 	_root.add_child(col)
 	_buttons = col
 
@@ -44,6 +45,10 @@ func _ready() -> void:
 	_resume = _button("Resume", resume)
 	_button("Settings", func() -> void: _settings.open())
 	_button("Main menu", _to_main_menu)
+
+	var help := ControlsHelp.new()
+	ControlsHelp.dock_bottom(help)
+	_root.add_child(help)
 
 	_settings = SettingsPanel.new()
 	_settings.close_on_escape = false

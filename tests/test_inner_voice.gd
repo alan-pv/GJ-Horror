@@ -137,13 +137,13 @@ func test_pending_not_duplicated() -> void:
 	check_eq(q.pending_count(), 1, "una sola")
 
 
-func test_sequence_plays_in_order_three_seconds_apart() -> void:
+func test_sequence_plays_in_order_apart() -> void:
 	var q := _queue()
 	q.say(&"cheat_hint", 0.0)
-	check_eq(q.next(0.0).text, "...Caught. He said caught.", "primera")
+	check_eq(DialogueText.plain(q.next(0.0).text), "...Caught. He said caught.", "primera")
 	check(q.next(2.9).is_empty(), "aún no")
-	check_eq(q.next(3.0).text, "I'm not good enough to win this clean.", "segunda")
-	check_eq(q.next(6.0).text, "So I just can't get caught.", "tercera")
+	check_eq(q.next(8.0).text, "I'm not good enough to win this clean.", "segunda")
+	check_eq(q.next(16.0).text, "So I just can't get caught.", "tercera")
 	check(q.next(20.0).is_empty(), "fin")
 
 
@@ -255,9 +255,9 @@ func test_intro_conditions() -> void:
 
 func test_intro_text() -> void:
 	check_eq(IntroModule.FULL_LINES.size(), 8, "8 frases")
-	check_eq(IntroModule.FULL_LINES[5], "Anyone caught cheating is eliminated.", "frase 6")
+	check_eq(DialogueText.plain(IntroModule.FULL_LINES[5]), "Anyone caught cheating is eliminated.", "frase 6")
 	check_eq(IntroModule.SHORT_LINES[0], "Another night. The same rules.", "corto")
-	check_eq(IntroModule.FULL_LINES[7], "The last player in this room walks out free of debt. And very rich.", "última frase")
+	check_eq(DialogueText.plain(IntroModule.FULL_LINES[7]), "The last player in this room walks out free of debt. And very rich.", "última frase")
 	for l in IntroModule.FULL_LINES + IntroModule.SHORT_LINES:
 		check(not l.contains("Begin") and not l.contains("sat where"), "el discurso no incluye 'Begin.' ni el giro: " + l)
 	check_eq(IntroModule.SKIP_LINE, "Begin.", "Begin. aparte")
@@ -293,3 +293,31 @@ func test_blackout_lines_speak_before_the_dark() -> void:
 
 func test_blackout_lead_is_short() -> void:
 	check(EventModule.BLACKOUT_LEAD >= 1.0 and EventModule.BLACKOUT_LEAD <= 2.5, "adelanto breve")
+
+
+func test_rival_cheating_hint_once_per_tournament() -> void:
+	var q := _queue()
+	check(q.say(&"rival_cheating", 0.0), "se acepta")
+	var l := q.next(0.0)
+	check_eq(l.id, &"rival_cheating", "sale")
+	check_eq(DialogueText.plain(l.text), "He's cheating... I can accuse him. [A]", "texto plano con la tecla")
+	check_eq(l.prio, VoiceLines.HIGH, "prioridad alta")
+	check(not q.say(&"rival_cheating", 100.0), "una vez por torneo")
+	# Sobrevive a otra partida del mismo torneo (estado estático) y se borra con un torneo nuevo.
+	var q2 := VoiceQueue.new()
+	check(not q2.say(&"rival_cheating", 0.0), "tampoco en la siguiente partida")
+	VoiceQueue.reset_tournament()
+	check(q2.say(&"rival_cheating", 0.0), "torneo nuevo: otra vez")
+
+
+func test_rival_cheating_hint_is_play_only() -> void:
+	var q := _queue()
+	q.say(&"rival_cheating", 5.0)
+	q.drop_play_only()
+	check(q.next(6.0).is_empty(), "si la partida terminó antes de decirse, se descarta")
+
+
+func test_can_see_rival_cheat() -> void:
+	check(VoiceRules.can_see_rival_cheat(true, false), "mira y hay luz")
+	check(not VoiceRules.can_see_rival_cheat(false, false), "no mira")
+	check(not VoiceRules.can_see_rival_cheat(true, true), "a oscuras")

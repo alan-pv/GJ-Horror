@@ -1,6 +1,6 @@
 class_name MainMenu
 extends Control
-## Menú principal: título (`GameSettings.GAME_TITLE`), Play, Settings y Quit.
+## Menú principal: título (`GameSettings.GAME_TITLE`), Play, Settings, Quit y los controles (`ControlsHelp`).
 ## Play carga la partida con un torneo nuevo.
 ##
 ## Si el juego arranca con argumentos de usuario (`-- --autoplay`, `--screenshot=...`)
@@ -53,6 +53,8 @@ func _build() -> void:
 	col.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	col.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.add_theme_constant_override("separation", 14)
+	# El bloque de controles ocupa la franja de abajo: título y botones se centran sobre ella.
+	col.offset_bottom = -150
 	add_child(col)
 
 	var title := Label.new()
@@ -73,6 +75,10 @@ func _build() -> void:
 	_button(col, "Settings", func() -> void: _settings.open())
 	if not OS.has_feature("web"):
 		_button(col, "Quit", func() -> void: SceneSwitcher.quit_game())
+
+	var help := ControlsHelp.new()
+	ControlsHelp.dock_bottom(help)
+	add_child(help)
 
 	_settings = SettingsPanel.new()
 	add_child(_settings)
